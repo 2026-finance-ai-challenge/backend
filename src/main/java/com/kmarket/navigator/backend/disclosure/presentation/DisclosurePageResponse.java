@@ -1,0 +1,54 @@
+package com.kmarket.navigator.backend.disclosure.presentation;
+
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.List;
+
+import com.kmarket.navigator.backend.disclosure.domain.DisclosurePage;
+import com.kmarket.navigator.backend.disclosure.domain.DisclosureSummary;
+import com.kmarket.navigator.backend.disclosure.domain.DisclosureType;
+import com.kmarket.navigator.backend.disclosure.domain.DocumentStatus;
+import com.kmarket.navigator.backend.disclosure.domain.Market;
+
+record DisclosurePageResponse(List<Item> items, String nextCursor) {
+
+	static DisclosurePageResponse from(DisclosurePage page) {
+		return new DisclosurePageResponse(page.items().stream().map(Item::from).toList(), page.nextCursor());
+	}
+
+	record Item(
+		String receiptNumber,
+		String corpCode,
+		String issuerNameKo,
+		String issuerNameEn,
+		String stockCode,
+		Market market,
+		DisclosureType type,
+		String titleKo,
+		String titleEn,
+		LocalDate filedDate,
+		Instant detectedAt,
+		boolean correction,
+		DocumentStatus documentStatus,
+		String officialUrl
+	) {
+		private static Item from(DisclosureSummary summary) {
+			return new Item(
+				summary.receiptNumber(),
+				summary.corpCode(),
+				summary.issuerNameKo(),
+				summary.issuerNameEn(),
+				summary.stockCode(),
+				summary.market(),
+				summary.type(),
+				summary.titleKo(),
+				summary.titleEn(),
+				summary.filedDate(),
+				summary.detectedAt(),
+				summary.correction(),
+				summary.documentStatus(),
+				summary.officialUrl()
+			);
+		}
+	}
+}

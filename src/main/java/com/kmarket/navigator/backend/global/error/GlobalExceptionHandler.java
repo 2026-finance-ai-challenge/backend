@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.ConstraintViolationException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,6 +31,14 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 		HttpServletRequest request
 	) {
 		return problem(exception.errorCode(), request, null);
+	}
+
+	@ExceptionHandler(ConstraintViolationException.class)
+	ResponseEntity<ProblemDetail> handleConstraintViolationException(
+		ConstraintViolationException exception,
+		HttpServletRequest request
+	) {
+		return problem(ErrorCode.INVALID_REQUEST, request, null);
 	}
 
 	@ExceptionHandler(Exception.class)
