@@ -27,6 +27,10 @@ public class SecurityConfig {
 					HttpMethod.GET,
 					"/api/v1/disclosures/{receiptNumber:[0-9]{14}}"
 				).permitAll()
+				.requestMatchers(
+					HttpMethod.POST,
+					"/api/v1/disclosures/{receiptNumber:[0-9]{14}}/questions"
+				).permitAll()
 				.anyRequest().denyAll());
 
 		return http.build();

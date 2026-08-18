@@ -1,6 +1,9 @@
 package com.kmarket.navigator.backend;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -16,7 +19,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.junit.jupiter.Container;
@@ -26,11 +31,13 @@ import org.testcontainers.utility.DockerImageName;
 
 import com.kmarket.navigator.backend.disclosure.application.DisclosureQueryHandler;
 import com.kmarket.navigator.backend.disclosure.application.port.DisclosureRepository;
+import com.kmarket.navigator.backend.disclosure.application.port.DisclosureRagGateway;
 import com.kmarket.navigator.backend.disclosure.application.port.OpenDartDocument;
 import com.kmarket.navigator.backend.disclosure.application.port.OpenDartFiling;
 import com.kmarket.navigator.backend.disclosure.application.port.OpenDartSection;
 import com.kmarket.navigator.backend.disclosure.domain.CorporationClass;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureCursor;
+import com.kmarket.navigator.backend.disclosure.domain.DisclosureAnswer;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureListQuery;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureType;
 import com.kmarket.navigator.backend.disclosure.domain.SectionKind;
@@ -61,6 +68,9 @@ class BackendApplicationTests {
 
 	@Autowired
 	JdbcClient jdbcClient;
+
+	@MockitoBean
+	DisclosureRagGateway disclosureRagGateway;
 
 	@Test
 	void contextLoads() {
@@ -122,6 +132,13 @@ class BackendApplicationTests {
 		});
 		assertThat(jdbcClient.sql("SELECT COUNT(*) FROM disclosure_document")
 			.query(Integer.class).single()).isEqualTo(2);
+		assertThat(jdbcClient.sql("""
+			SELECT status FROM ingestion_job
+			WHERE job_type = 'DISCLOSURE_EMBEDDING' AND business_key = :receiptNumber
+			""")
+			.param("receiptNumber", filing.receiptNumber())
+			.query(String.class)
+			.single()).isEqualTo("PENDING");
 
 		mockMvc.perform(get("/api/v1/disclosures/{receiptNumber}", filing.receiptNumber()))
 			.andExpect(status().isOk())
@@ -152,6 +169,39 @@ class BackendApplicationTests {
 			.extracting(item -> item.receiptNumber())
 			.containsExactly("20260818800670");
 		assertThat(second.nextCursor()).isNull();
+	}
+
+	@Test
+	void asksQuestionOnlyAfterDisclosureIndexIsReady() throws Exception {
+		OpenDartFiling filing = filing("20260818800670");
+		disclosureRepository.saveFiling(filing);
+		disclosureRepository.completeDocumentJob(filing.receiptNumber(), List.of(document("a", "first")));
+
+		mockMvc.perform(post("/api/v1/disclosures/{receiptNumber}/questions", filing.receiptNumber())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"question\":\"What changed?\"}"))
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.code").value("DISCLOSURE_INDEX_NOT_READY"));
+
+		jdbcClient.sql("UPDATE disclosure SET index_status = 'READY' WHERE receipt_number = :receiptNumber")
+			.param("receiptNumber", filing.receiptNumber())
+			.update();
+		when(disclosureRagGateway.ask(eq(filing.receiptNumber()), any()))
+			.thenReturn(new DisclosureAnswer(
+				"Revenue increased. [C1]",
+				false,
+				null,
+				List.of(),
+				"test-model",
+				"test-prompt"
+			));
+
+		mockMvc.perform(post("/api/v1/disclosures/{receiptNumber}/questions", filing.receiptNumber())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"question\":\"What changed?\"}"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.answer").value("Revenue increased. [C1]"))
+			.andExpect(jsonPath("$.model").value("test-model"));
 	}
 
 	private static OpenDartFiling filing(String receiptNumber) {

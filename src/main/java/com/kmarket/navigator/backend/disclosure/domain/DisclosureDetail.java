@@ -20,6 +20,7 @@ public record DisclosureDetail(
 	String remark,
 	boolean correction,
 	DocumentStatus documentStatus,
+	IndexStatus indexStatus,
 	String officialUrl,
 	List<DisclosureDocument> documents
 ) {

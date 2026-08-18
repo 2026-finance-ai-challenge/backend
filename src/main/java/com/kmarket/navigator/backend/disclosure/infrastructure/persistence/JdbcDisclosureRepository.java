@@ -29,6 +29,7 @@ import com.kmarket.navigator.backend.disclosure.domain.DisclosureSection;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureSummary;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureType;
 import com.kmarket.navigator.backend.disclosure.domain.DocumentStatus;
+import com.kmarket.navigator.backend.disclosure.domain.IndexStatus;
 import com.kmarket.navigator.backend.disclosure.domain.Market;
 import com.kmarket.navigator.backend.disclosure.domain.SectionKind;
 
@@ -36,6 +37,7 @@ import com.kmarket.navigator.backend.disclosure.domain.SectionKind;
 class JdbcDisclosureRepository implements DisclosureRepository {
 
 	private static final String DOCUMENT_JOB = "DISCLOSURE_DOCUMENT";
+	private static final String EMBEDDING_JOB = "DISCLOSURE_EMBEDDING";
 
 	private final JdbcClient jdbcClient;
 
@@ -245,7 +247,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 
 		jdbcClient.sql("""
 			UPDATE disclosure
-			SET document_status = 'READY', updated_at = CURRENT_TIMESTAMP
+			SET document_status = 'READY', index_status = 'PENDING', updated_at = CURRENT_TIMESTAMP
 			WHERE id = :disclosureId
 			""")
 			.param("disclosureId", disclosureId)
@@ -257,6 +259,24 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			WHERE job_type = :jobType AND business_key = :businessKey
 			""")
 			.param("jobType", DOCUMENT_JOB)
+			.param("businessKey", receiptNumber)
+			.update();
+		jdbcClient.sql("""
+			INSERT INTO ingestion_job (
+			    id, job_type, business_key, status, attempts,
+			    available_at, created_at, updated_at
+			)
+			VALUES (
+			    :id, :jobType, :businessKey, 'PENDING', 0,
+			    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+			)
+			ON CONFLICT (job_type, business_key) DO UPDATE
+			SET status = 'PENDING', attempts = 0, available_at = CURRENT_TIMESTAMP,
+			    locked_at = NULL, locked_by = NULL, last_error_code = NULL,
+			    updated_at = CURRENT_TIMESTAMP
+			""")
+			.param("id", UUID.randomUUID())
+			.param("jobType", EMBEDDING_JOB)
 			.param("businessKey", receiptNumber)
 			.update();
 	}
@@ -296,7 +316,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			.update();
 		jdbcClient.sql("""
 			UPDATE disclosure
-			SET document_status = 'FAILED', updated_at = CURRENT_TIMESTAMP
+			SET document_status = 'FAILED', index_status = 'FAILED', updated_at = CURRENT_TIMESTAMP
 			WHERE receipt_number = :receiptNumber
 			""")
 			.param("receiptNumber", receiptNumber)
@@ -309,7 +329,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			SELECT d.receipt_number, i.dart_corp_code, i.name_ko, i.name_en,
 			       s.stock_code, COALESCE(s.market, 'UNKNOWN') AS market,
 			       d.disclosure_type, d.title_ko, NULL AS title_en, d.filed_date,
-			       d.detected_at, d.correction, d.document_status, d.official_url
+			       d.detected_at, d.correction, d.document_status, d.index_status, d.official_url
 			FROM disclosure d
 			JOIN issuer i ON i.id = d.issuer_id
 			LEFT JOIN security s ON s.id = d.security_id
@@ -334,7 +354,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			       s.stock_code, COALESCE(s.market, 'UNKNOWN') AS market,
 			       d.disclosure_type, d.title_ko, NULL AS title_en, d.submitter,
 			       d.filed_date, d.detected_at, d.remark, d.correction,
-			       d.document_status, d.official_url
+			       d.document_status, d.index_status, d.official_url
 			FROM disclosure d
 			JOIN issuer i ON i.id = d.issuer_id
 			LEFT JOIN security s ON s.id = d.security_id
@@ -344,6 +364,19 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			.query(this::mapDetailRow)
 			.optional();
 		return detail.map(this::withDocuments);
+	}
+
+	@Override
+	public Optional<IndexStatus> findIndexStatus(String receiptNumber) {
+		return jdbcClient.sql("""
+			SELECT index_status
+			FROM disclosure
+			WHERE receipt_number = :receiptNumber
+			""")
+			.param("receiptNumber", receiptNumber)
+			.query(String.class)
+			.optional()
+			.map(IndexStatus::valueOf);
 	}
 
 	private DisclosureDetail withDocuments(DisclosureDetailRow row) {
@@ -499,6 +532,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			resultSet.getObject("detected_at", OffsetDateTime.class).toInstant(),
 			resultSet.getBoolean("correction"),
 			DocumentStatus.valueOf(resultSet.getString("document_status")),
+			IndexStatus.valueOf(resultSet.getString("index_status")),
 			resultSet.getString("official_url")
 		);
 	}
@@ -521,6 +555,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			resultSet.getString("remark"),
 			resultSet.getBoolean("correction"),
 			DocumentStatus.valueOf(resultSet.getString("document_status")),
+			IndexStatus.valueOf(resultSet.getString("index_status")),
 			resultSet.getString("official_url")
 		);
 	}
@@ -554,6 +589,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 		String remark,
 		boolean correction,
 		DocumentStatus documentStatus,
+		IndexStatus indexStatus,
 		String officialUrl
 	) {
 		private DisclosureDetail toDetail(List<DisclosureDocument> documents) {
@@ -573,6 +609,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 				remark,
 				correction,
 				documentStatus,
+				indexStatus,
 				officialUrl,
 				documents
 			);
