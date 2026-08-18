@@ -10,6 +10,7 @@ import com.kmarket.navigator.backend.disclosure.domain.DisclosureDocument;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureSection;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureType;
 import com.kmarket.navigator.backend.disclosure.domain.DocumentStatus;
+import com.kmarket.navigator.backend.disclosure.domain.IndexStatus;
 import com.kmarket.navigator.backend.disclosure.domain.Market;
 import com.kmarket.navigator.backend.disclosure.domain.SectionKind;
 
@@ -32,6 +33,7 @@ record DisclosureDetailResponse(
 	String remark,
 	boolean correction,
 	DocumentStatus documentStatus,
+	IndexStatus indexStatus,
 	String officialUrl,
 	List<Document> documents
 ) {
@@ -52,6 +54,7 @@ record DisclosureDetailResponse(
 			detail.remark(),
 			detail.correction(),
 			detail.documentStatus(),
+			detail.indexStatus(),
 			detail.officialUrl(),
 			detail.documents().stream().map(document -> Document.from(document, objectMapper)).toList()
 		);

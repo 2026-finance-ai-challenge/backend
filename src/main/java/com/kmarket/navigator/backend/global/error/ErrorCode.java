@@ -7,6 +7,16 @@ public enum ErrorCode {
 	INVALID_CURSOR(HttpStatus.BAD_REQUEST, "INVALID_CURSOR", "The pagination cursor is invalid."),
 	INVALID_DATE_RANGE(HttpStatus.BAD_REQUEST, "INVALID_DATE_RANGE", "The date range is invalid."),
 	DISCLOSURE_NOT_FOUND(HttpStatus.NOT_FOUND, "DISCLOSURE_NOT_FOUND", "The disclosure was not found."),
+	DISCLOSURE_INDEX_NOT_READY(
+		HttpStatus.CONFLICT,
+		"DISCLOSURE_INDEX_NOT_READY",
+		"The disclosure is not ready for questions."
+	),
+	AI_SERVICE_UNAVAILABLE(
+		HttpStatus.SERVICE_UNAVAILABLE,
+		"AI_SERVICE_UNAVAILABLE",
+		"The AI service is temporarily unavailable."
+	),
 	INTERNAL_SERVER_ERROR(
 		HttpStatus.INTERNAL_SERVER_ERROR,
 		"INTERNAL_SERVER_ERROR",

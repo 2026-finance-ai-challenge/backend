@@ -7,6 +7,7 @@ import java.util.Optional;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureDetail;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureListQuery;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureSummary;
+import com.kmarket.navigator.backend.disclosure.domain.IndexStatus;
 
 public interface DisclosureRepository {
 
@@ -25,4 +26,6 @@ public interface DisclosureRepository {
 	List<DisclosureSummary> findAll(DisclosureListQuery query, int fetchSize);
 
 	Optional<DisclosureDetail> findByReceiptNumber(String receiptNumber);
+
+	Optional<IndexStatus> findIndexStatus(String receiptNumber);
 }

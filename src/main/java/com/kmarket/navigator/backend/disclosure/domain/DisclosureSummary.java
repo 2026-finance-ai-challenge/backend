@@ -17,6 +17,7 @@ public record DisclosureSummary(
 	Instant detectedAt,
 	boolean correction,
 	DocumentStatus documentStatus,
+	IndexStatus indexStatus,
 	String officialUrl
 ) {
 }

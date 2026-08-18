@@ -8,6 +8,7 @@ import com.kmarket.navigator.backend.disclosure.domain.DisclosurePage;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureSummary;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureType;
 import com.kmarket.navigator.backend.disclosure.domain.DocumentStatus;
+import com.kmarket.navigator.backend.disclosure.domain.IndexStatus;
 import com.kmarket.navigator.backend.disclosure.domain.Market;
 
 record DisclosurePageResponse(List<Item> items, String nextCursor) {
@@ -30,6 +31,7 @@ record DisclosurePageResponse(List<Item> items, String nextCursor) {
 		Instant detectedAt,
 		boolean correction,
 		DocumentStatus documentStatus,
+		IndexStatus indexStatus,
 		String officialUrl
 	) {
 		private static Item from(DisclosureSummary summary) {
@@ -47,6 +49,7 @@ record DisclosurePageResponse(List<Item> items, String nextCursor) {
 				summary.detectedAt(),
 				summary.correction(),
 				summary.documentStatus(),
+				summary.indexStatus(),
 				summary.officialUrl()
 			);
 		}
