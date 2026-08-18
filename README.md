@@ -20,11 +20,14 @@
 ## 실행
 
 ```shell
-export DB_URL=jdbc:postgresql://localhost:5432/kmarket
-export DB_USERNAME=kmarket
-export DB_PASSWORD='<local-password>'
+cp .env.example .env
+set -a
+source .env
+set +a
 ./gradlew bootRun
 ```
+
+`.env`는 로컬에서만 사용하며 Git에 포함하지 않는다. 배포 환경의 설정은 실행 시점에 외부에서 주입한다.
 
 상태 확인은 `GET /actuator/health`를 사용한다. 그 외 경로는 인증 방식이 확정될 때까지 기본 차단한다.
 
