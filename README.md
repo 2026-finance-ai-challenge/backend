@@ -2,7 +2,7 @@
 
 외국인 투자자가 한국 상장기업 공시를 탐색할 수 있도록 OpenDART 공시를 수집·저장·조회하는 Spring Boot 서비스다.
 
-현재 구현 범위는 실시간 공시 수집, 공시 목록, 공시 상세다. 공시 번역과 RAG 연동은 다음 단계에서 추가한다.
+현재 구현 범위는 실시간·과거 공시 수집, 공시 목록·상세, 공시 RAG 질의응답이다.
 
 ## 프로젝트 문서
 
@@ -31,6 +31,15 @@ docker compose up -d
 `.env`는 로컬에서만 사용하며 Git에 포함하지 않는다. 배포 환경의 설정은 실행 시점에 외부에서 주입한다.
 
 상태 확인은 `GET /actuator/health`를 사용한다. 공시 조회는 `GET /api/v1/disclosures`와 `GET /api/v1/disclosures/{receiptNumber}`를 사용한다. 그 외 경로는 기본 차단한다.
+
+과거 공시는 API 서버와 분리된 일회성 배치로 적재한다. KOSPI·KOSDAQ 상장기업 공시를 날짜별로 저장하며, 중단된 작업은 같은 기간으로 다시 실행하면 DB 체크포인트부터 재개한다.
+
+```shell
+set -a
+source .env
+set +a
+./gradlew bootRun --args='--spring.profiles.active=backfill --spring.main.web-application-type=none --from=2026-08-01 --to=2026-08-18'
+```
 
 ## 검증
 

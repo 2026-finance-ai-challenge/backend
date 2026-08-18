@@ -14,6 +14,9 @@ import com.kmarket.navigator.backend.disclosure.domain.DisclosureQuestion;
 import com.kmarket.navigator.backend.global.error.BusinessException;
 import com.kmarket.navigator.backend.global.error.ErrorCode;
 
+import tools.jackson.databind.PropertyNamingStrategies;
+import tools.jackson.databind.annotation.JsonNaming;
+
 @Component
 class AiDisclosureClient implements DisclosureRagGateway {
 
@@ -47,6 +50,7 @@ class AiDisclosureClient implements DisclosureRagGateway {
 		}
 	}
 
+	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 	private record Request(String question, SelectedContext selectedContext) {
 		private static Request from(DisclosureQuestion question) {
 			return new Request(
@@ -61,9 +65,11 @@ class AiDisclosureClient implements DisclosureRagGateway {
 		}
 	}
 
+	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 	private record SelectedContext(UUID sectionId, String text) {
 	}
 
+	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 	private record Response(
 		String answer,
 		boolean refused,
@@ -84,6 +90,7 @@ class AiDisclosureClient implements DisclosureRagGateway {
 		}
 	}
 
+	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 	private record Citation(
 		String id,
 		UUID chunkId,

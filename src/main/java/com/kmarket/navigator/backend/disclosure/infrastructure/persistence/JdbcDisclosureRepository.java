@@ -324,6 +324,29 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 	}
 
 	@Override
+	@Transactional
+	public void markDocumentUnavailable(String receiptNumber, String errorCode) {
+		jdbcClient.sql("""
+			UPDATE ingestion_job
+			SET status = 'COMPLETED', locked_at = NULL, locked_by = NULL,
+			    last_error_code = :errorCode, updated_at = CURRENT_TIMESTAMP
+			WHERE job_type = :jobType AND business_key = :businessKey
+			""")
+			.param("errorCode", abbreviate(errorCode, 100))
+			.param("jobType", DOCUMENT_JOB)
+			.param("businessKey", receiptNumber)
+			.update();
+		jdbcClient.sql("""
+			UPDATE disclosure
+			SET document_status = 'UNAVAILABLE', index_status = 'UNAVAILABLE',
+			    updated_at = CURRENT_TIMESTAMP
+			WHERE receipt_number = :receiptNumber
+			""")
+			.param("receiptNumber", receiptNumber)
+			.update();
+	}
+
+	@Override
 	public List<DisclosureSummary> findAll(DisclosureListQuery query, int fetchSize) {
 		StringBuilder sql = new StringBuilder("""
 			SELECT d.receipt_number, i.dart_corp_code, i.name_ko, i.name_en,

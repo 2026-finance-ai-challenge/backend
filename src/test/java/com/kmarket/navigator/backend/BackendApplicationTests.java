@@ -12,6 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,6 +32,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import com.kmarket.navigator.backend.disclosure.application.DisclosureQueryHandler;
 import com.kmarket.navigator.backend.disclosure.application.port.DisclosureRepository;
+import com.kmarket.navigator.backend.disclosure.application.port.DisclosureBackfillRepository;
 import com.kmarket.navigator.backend.disclosure.application.port.DisclosureRagGateway;
 import com.kmarket.navigator.backend.disclosure.application.port.OpenDartDocument;
 import com.kmarket.navigator.backend.disclosure.application.port.OpenDartFiling;
@@ -62,6 +64,9 @@ class BackendApplicationTests {
 
 	@Autowired
 	DisclosureRepository disclosureRepository;
+
+	@Autowired
+	DisclosureBackfillRepository disclosureBackfillRepository;
 
 	@Autowired
 	DisclosureQueryHandler disclosureQueryHandler;
@@ -112,6 +117,44 @@ class BackendApplicationTests {
 		mockMvc.perform(get("/api/v1/disclosures").param("cursor", "invalid"))
 			.andExpect(status().isBadRequest())
 			.andExpect(jsonPath("$.code").value("INVALID_CURSOR"));
+	}
+
+	@Test
+	void acceptsKrXAlphanumericStockCode() throws Exception {
+		OpenDartFiling filing = new OpenDartFiling(
+			"20260818000213",
+			"01885222",
+			"대신밸류리츠",
+			"0030R0",
+			CorporationClass.KOSPI,
+			DisclosureType.OWNERSHIP,
+			"임원ㆍ주요주주특정증권등소유상황보고서",
+			"대신증권",
+			LocalDate.of(2026, 8, 18),
+			""
+		);
+		assertThat(disclosureRepository.saveFiling(filing)).isTrue();
+
+		mockMvc.perform(get("/api/v1/disclosures").param("stockCode", "0030R0"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.items[0].stockCode").value("0030R0"));
+	}
+
+	@Test
+	void resumesBackfillFromPersistedCheckpoint() {
+		LocalDate from = LocalDate.of(2026, 8, 16);
+		LocalDate to = LocalDate.of(2026, 8, 18);
+		var firstRun = UUID.randomUUID();
+		var claimed = disclosureBackfillRepository.startOrResume(from, to, firstRun);
+		disclosureBackfillRepository.advance(claimed.id(), firstRun, from, 3);
+		disclosureBackfillRepository.fail(claimed.id(), firstRun, "NETWORK_ERROR");
+
+		var secondRun = UUID.randomUUID();
+		var resumed = disclosureBackfillRepository.startOrResume(from, to, secondRun);
+
+		assertThat(resumed.nextDate()).isEqualTo(from.plusDays(1));
+		assertThat(resumed.collectedCount()).isEqualTo(3);
+		assertThat(resumed.runId()).isEqualTo(secondRun);
 	}
 
 	@Test

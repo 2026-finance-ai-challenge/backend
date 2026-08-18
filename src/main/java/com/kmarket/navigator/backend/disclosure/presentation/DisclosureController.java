@@ -51,7 +51,7 @@ class DisclosureController {
 	@GetMapping
 	DisclosurePageResponse findAll(
 		@RequestParam(required = false)
-		@Pattern(regexp = "^[0-9]{6}$")
+		@Pattern(regexp = "^[0-9A-Z]{6}$")
 		String stockCode,
 		@RequestParam(required = false)
 		@DateTimeFormat(iso = DateTimeFormat.ISO.DATE)

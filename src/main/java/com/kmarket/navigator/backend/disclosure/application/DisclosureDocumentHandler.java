@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import com.kmarket.navigator.backend.disclosure.application.port.DisclosureRepository;
 import com.kmarket.navigator.backend.disclosure.application.port.DocumentJob;
 import com.kmarket.navigator.backend.disclosure.application.port.OpenDartGateway;
+import com.kmarket.navigator.backend.disclosure.application.port.OpenDartGatewayException;
 
 @Service
 public class DisclosureDocumentHandler {
@@ -49,9 +50,16 @@ public class DisclosureDocumentHandler {
 	}
 
 	private void handleFailure(DocumentJob job, RuntimeException exception) {
-		String errorCode = exception.getClass().getSimpleName();
+		String errorCode = exception instanceof OpenDartGatewayException openDartException
+			? openDartException.errorCode()
+			: exception.getClass().getSimpleName();
 		if (job.attempts() >= MAX_ATTEMPTS) {
-			disclosureRepository.failDocumentJob(job.receiptNumber(), errorCode);
+			if (errorCode.equals("STATUS_014")) {
+				disclosureRepository.markDocumentUnavailable(job.receiptNumber(), errorCode);
+			}
+			else {
+				disclosureRepository.failDocumentJob(job.receiptNumber(), errorCode);
+			}
 		}
 		else {
 			disclosureRepository.retryDocumentJob(job.receiptNumber(), errorCode, Duration.ofMinutes(5));

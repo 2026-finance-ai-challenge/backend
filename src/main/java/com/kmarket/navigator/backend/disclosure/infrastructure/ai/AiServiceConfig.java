@@ -17,6 +17,7 @@ class AiServiceConfig {
 	RestClient aiServiceRestClient(RestClient.Builder builder, AiServiceProperties properties) {
 		HttpClient httpClient = HttpClient.newBuilder()
 			.connectTimeout(Duration.ofSeconds(3))
+			.version(HttpClient.Version.HTTP_1_1)
 			.followRedirects(HttpClient.Redirect.NEVER)
 			.build();
 		JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);

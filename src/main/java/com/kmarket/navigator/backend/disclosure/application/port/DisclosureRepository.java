@@ -23,6 +23,8 @@ public interface DisclosureRepository {
 
 	void failDocumentJob(String receiptNumber, String errorCode);
 
+	void markDocumentUnavailable(String receiptNumber, String errorCode);
+
 	List<DisclosureSummary> findAll(DisclosureListQuery query, int fetchSize);
 
 	Optional<DisclosureDetail> findByReceiptNumber(String receiptNumber);
