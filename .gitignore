@@ -8,3 +8,7 @@
 !.env.example
 
 .codex-log/
+
+.gradle/
+build/
+out/

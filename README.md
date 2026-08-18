@@ -11,4 +11,25 @@
 - [Codex 저장소 지침](AGENTS.md)
 - [Codex 작업 스킬](.agents/skills/k-market-delivery/SKILL.md)
 
-애플리케이션 초기화와 실행 방법은 아키텍처 구축 단계에서 추가한다.
+## 개발 환경
+
+- Java 25 LTS
+- Spring Boot 4.1.0
+- PostgreSQL 18
+
+## 실행
+
+```shell
+export DB_URL=jdbc:postgresql://localhost:5432/kmarket
+export DB_USERNAME=kmarket
+export DB_PASSWORD='<local-password>'
+./gradlew bootRun
+```
+
+상태 확인은 `GET /actuator/health`를 사용한다. 그 외 경로는 인증 방식이 확정될 때까지 기본 차단한다.
+
+## 검증
+
+```shell
+./gradlew test
+```
