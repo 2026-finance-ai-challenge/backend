@@ -55,6 +55,7 @@ class OpenDartClientTests {
 
 		var page = client.fetchFilings(
 			LocalDate.of(2026, 8, 18),
+			LocalDate.of(2026, 8, 18),
 			CorporationClass.KOSPI,
 			DisclosureType.MATERIAL_EVENT,
 			1

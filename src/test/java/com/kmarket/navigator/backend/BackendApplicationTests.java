@@ -42,6 +42,8 @@ import com.kmarket.navigator.backend.disclosure.domain.DisclosureCursor;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureAnswer;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureListQuery;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureType;
+import com.kmarket.navigator.backend.disclosure.domain.ListedCommonStock;
+import com.kmarket.navigator.backend.disclosure.domain.Market;
 import com.kmarket.navigator.backend.disclosure.domain.SectionKind;
 
 @Testcontainers
@@ -120,24 +122,50 @@ class BackendApplicationTests {
 	}
 
 	@Test
-	void acceptsKrXAlphanumericStockCode() throws Exception {
+	void acceptsKrxAlphanumericCommonStockCode() throws Exception {
 		OpenDartFiling filing = new OpenDartFiling(
 			"20260818000213",
-			"01885222",
-			"대신밸류리츠",
-			"0030R0",
-			CorporationClass.KOSPI,
+			"01999999",
+			"덕양에너젠",
+			"0001A0",
+			CorporationClass.KOSDAQ,
 			DisclosureType.OWNERSHIP,
 			"임원ㆍ주요주주특정증권등소유상황보고서",
-			"대신증권",
+			"덕양에너젠",
 			LocalDate.of(2026, 8, 18),
 			""
 		);
 		assertThat(disclosureRepository.saveFiling(filing)).isTrue();
+		activateCommonStocks("0001A0");
 
-		mockMvc.perform(get("/api/v1/disclosures").param("stockCode", "0030R0"))
+		mockMvc.perform(get("/api/v1/disclosures").param("stockCode", "0001A0"))
 			.andExpect(status().isOk())
-			.andExpect(jsonPath("$.items[0].stockCode").value("0030R0"));
+			.andExpect(jsonPath("$.items[0].stockCode").value("0001A0"));
+	}
+
+	@Test
+	void keepsAuthoritativeMarketForCommonStockWhenDartClassDiffers() {
+		OpenDartFiling listedFiling = filing("20260818800672");
+		disclosureRepository.saveFiling(listedFiling);
+		activateCommonStocks("005930");
+		OpenDartFiling otherClassFiling = new OpenDartFiling(
+			"20260818800673",
+			"00126380",
+			"삼성전자",
+			"005930",
+			CorporationClass.OTHER,
+			DisclosureType.MATERIAL_EVENT,
+			"기업설명회(IR) 개최",
+			"삼성전자",
+			LocalDate.of(2026, 8, 18),
+			""
+		);
+
+		disclosureRepository.saveFiling(otherClassFiling);
+
+		assertThat(jdbcClient.sql("SELECT market FROM security WHERE stock_code = '005930'")
+			.query(String.class)
+			.single()).isEqualTo("KOSPI");
 	}
 
 	@Test
@@ -146,7 +174,7 @@ class BackendApplicationTests {
 		LocalDate to = LocalDate.of(2026, 8, 18);
 		var firstRun = UUID.randomUUID();
 		var claimed = disclosureBackfillRepository.startOrResume(from, to, firstRun);
-		disclosureBackfillRepository.advance(claimed.id(), firstRun, from, 3);
+		disclosureBackfillRepository.advance(claimed.id(), firstRun, from, from, 3);
 		disclosureBackfillRepository.fail(claimed.id(), firstRun, "NETWORK_ERROR");
 
 		var secondRun = UUID.randomUUID();
@@ -163,6 +191,7 @@ class BackendApplicationTests {
 
 		assertThat(disclosureRepository.saveFiling(filing)).isTrue();
 		assertThat(disclosureRepository.saveFiling(filing)).isFalse();
+		activateCommonStocks("005930");
 		disclosureRepository.completeDocumentJob(filing.receiptNumber(), List.of(document("a", "first")));
 		disclosureRepository.completeDocumentJob(filing.receiptNumber(), List.of(document("b", "second")));
 
@@ -194,6 +223,7 @@ class BackendApplicationTests {
 	void filtersAndPaginatesDisclosureList() {
 		disclosureRepository.saveFiling(filing("20260818800670"));
 		disclosureRepository.saveFiling(filing("20260818800671"));
+		activateCommonStocks("005930");
 
 		var first = disclosureQueryHandler.findAll(
 			new DisclosureListQuery("005930", LocalDate.of(2026, 8, 18), LocalDate.of(2026, 8, 18),
@@ -218,6 +248,7 @@ class BackendApplicationTests {
 	void asksQuestionOnlyAfterDisclosureIndexIsReady() throws Exception {
 		OpenDartFiling filing = filing("20260818800670");
 		disclosureRepository.saveFiling(filing);
+		activateCommonStocks("005930");
 		disclosureRepository.completeDocumentJob(filing.receiptNumber(), List.of(document("a", "first")));
 
 		mockMvc.perform(post("/api/v1/disclosures/{receiptNumber}/questions", filing.receiptNumber())
@@ -268,6 +299,14 @@ class BackendApplicationTests {
 			hashCharacter.repeat(64),
 			text,
 			List.of(new OpenDartSection(0, SectionKind.TEXT, null, text, null))
+		);
+	}
+
+	private void activateCommonStocks(String... stockCodes) {
+		disclosureRepository.replaceCommonStockUniverse(
+			java.util.Arrays.stream(stockCodes)
+				.map(stockCode -> new ListedCommonStock(stockCode, stockCode, Market.KOSPI))
+				.toList()
 		);
 	}
 }

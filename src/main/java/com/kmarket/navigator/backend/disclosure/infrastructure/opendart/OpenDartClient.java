@@ -60,7 +60,8 @@ class OpenDartClient implements OpenDartGateway {
 
 	@Override
 	public OpenDartPage fetchFilings(
-		LocalDate date,
+		LocalDate from,
+		LocalDate to,
 		CorporationClass corporationClass,
 		DisclosureType disclosureType,
 		int page
@@ -69,8 +70,8 @@ class OpenDartClient implements OpenDartGateway {
 			.uri(builder -> builder
 				.path("/api/list.json")
 				.queryParam("crtfc_key", properties.apiKey())
-				.queryParam("bgn_de", DART_DATE.format(date))
-				.queryParam("end_de", DART_DATE.format(date))
+				.queryParam("bgn_de", DART_DATE.format(from))
+				.queryParam("end_de", DART_DATE.format(to))
 				.queryParam("corp_cls", corporationClass.code())
 				.queryParam("pblntf_ty", disclosureType.code())
 				.queryParam("page_no", page)

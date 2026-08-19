@@ -7,10 +7,12 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -30,6 +32,7 @@ import com.kmarket.navigator.backend.disclosure.domain.DisclosureSummary;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureType;
 import com.kmarket.navigator.backend.disclosure.domain.DocumentStatus;
 import com.kmarket.navigator.backend.disclosure.domain.IndexStatus;
+import com.kmarket.navigator.backend.disclosure.domain.ListedCommonStock;
 import com.kmarket.navigator.backend.disclosure.domain.Market;
 import com.kmarket.navigator.backend.disclosure.domain.SectionKind;
 
@@ -38,6 +41,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 
 	private static final String DOCUMENT_JOB = "DISCLOSURE_DOCUMENT";
 	private static final String EMBEDDING_JOB = "DISCLOSURE_EMBEDDING";
+	private static final String OPEN_DART_DOCUMENT_PROVIDER = "OPEN_DART_DOCUMENT";
 
 	private final JdbcClient jdbcClient;
 
@@ -61,8 +65,67 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 
 	@Override
 	@Transactional
+	public void replaceCommonStockUniverse(List<ListedCommonStock> stocks) {
+		if (stocks.isEmpty()) {
+			throw new IllegalArgumentException("Common stock universe must not be empty");
+		}
+		OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+		jdbcClient.sql("""
+			UPDATE security
+			SET common_stock = FALSE, active = FALSE, master_updated_at = :now
+			""")
+			.param("now", now)
+			.update();
+
+		for (ListedCommonStock stock : stocks) {
+			int updated = jdbcClient.sql("""
+				UPDATE security
+				SET market = :market, common_stock = TRUE, active = TRUE,
+				    master_updated_at = :now, updated_at = :now
+				WHERE stock_code = :stockCode
+				""")
+				.param("market", stock.market().name())
+				.param("now", now)
+				.param("stockCode", stock.stockCode())
+				.update();
+			if (updated != 1) {
+				throw new IllegalStateException("Stock master code is missing from OpenDART corporations");
+			}
+		}
+	}
+
+	@Override
+	public Set<String> findActiveCommonStockCodes() {
+		return new HashSet<>(jdbcClient.sql("""
+			SELECT stock_code
+			FROM security
+			WHERE active AND common_stock AND market IN ('KOSPI', 'KOSDAQ')
+			""")
+			.query(String.class)
+			.list());
+	}
+
+	@Override
+	@Transactional
 	public boolean saveFiling(OpenDartFiling filing) {
 		OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+		return saveFiling(filing, now);
+	}
+
+	@Override
+	@Transactional
+	public int saveFilings(List<OpenDartFiling> filings) {
+		OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+		int saved = 0;
+		for (OpenDartFiling filing : filings) {
+			if (saveFiling(filing, now)) {
+				saved++;
+			}
+		}
+		return saved;
+	}
+
+	private boolean saveFiling(OpenDartFiling filing, OffsetDateTime now) {
 		UUID issuerId = upsertIssuer(
 			filing.corpCode(),
 			filing.corporationName(),
@@ -151,16 +214,29 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 	public Optional<DocumentJob> claimDocumentJob(String workerId) {
 		return jdbcClient.sql("""
 			WITH candidate AS (
-			    SELECT id
-			    FROM ingestion_job
-			    WHERE job_type = :jobType
-			      AND available_at <= CURRENT_TIMESTAMP
-			      AND (
-			          status = 'PENDING'
-			          OR (status = 'PROCESSING' AND locked_at < CURRENT_TIMESTAMP - INTERVAL '15 minutes')
+			    SELECT job.id
+			    FROM ingestion_job job
+			    JOIN disclosure disclosure ON disclosure.receipt_number = job.business_key
+			    JOIN security security ON security.id = disclosure.security_id
+			    WHERE job.job_type = :jobType
+			      AND security.active
+			      AND security.common_stock
+			      AND NOT EXISTS (
+			          SELECT 1
+			          FROM ingestion_provider_throttle throttle
+			          WHERE throttle.provider = :provider
+			            AND throttle.blocked_until > CURRENT_TIMESTAMP
 			      )
-			    ORDER BY available_at, created_at
-			    FOR UPDATE SKIP LOCKED
+			      AND job.available_at <= CURRENT_TIMESTAMP
+			      AND (
+			          job.status = 'PENDING'
+			          OR (
+			              job.status = 'PROCESSING'
+			              AND job.locked_at < CURRENT_TIMESTAMP - INTERVAL '15 minutes'
+			          )
+			      )
+			    ORDER BY (job.attempts > 0) DESC, job.available_at, job.created_at
+			    FOR UPDATE OF job SKIP LOCKED
 			    LIMIT 1
 			)
 			UPDATE ingestion_job job
@@ -174,12 +250,39 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			RETURNING job.business_key, job.attempts
 			""")
 			.param("jobType", DOCUMENT_JOB)
+			.param("provider", OPEN_DART_DOCUMENT_PROVIDER)
 			.param("workerId", workerId)
 			.query((resultSet, rowNumber) -> new DocumentJob(
 				resultSet.getString("business_key"),
 				resultSet.getInt("attempts")
 			))
 			.optional();
+	}
+
+	@Override
+	public void blockOpenDartDocumentCollection(Duration delay, String reason) {
+		jdbcClient.sql("""
+			INSERT INTO ingestion_provider_throttle (
+			    provider, blocked_until, reason, updated_at
+			)
+			VALUES (
+			    :provider,
+			    CURRENT_TIMESTAMP + (:delaySeconds * INTERVAL '1 second'),
+			    :reason,
+			    CURRENT_TIMESTAMP
+			)
+			ON CONFLICT (provider) DO UPDATE
+			SET blocked_until = GREATEST(
+			        ingestion_provider_throttle.blocked_until,
+			        EXCLUDED.blocked_until
+			    ),
+			    reason = EXCLUDED.reason,
+			    updated_at = CURRENT_TIMESTAMP
+			""")
+			.param("provider", OPEN_DART_DOCUMENT_PROVIDER)
+			.param("delaySeconds", delay.toSeconds())
+			.param("reason", reason.substring(0, Math.min(reason.length(), 100)))
+			.update();
 	}
 
 	@Override
@@ -355,8 +458,8 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			       d.detected_at, d.correction, d.document_status, d.index_status, d.official_url
 			FROM disclosure d
 			JOIN issuer i ON i.id = d.issuer_id
-			LEFT JOIN security s ON s.id = d.security_id
-			WHERE 1 = 1
+			JOIN security s ON s.id = d.security_id
+			WHERE s.active AND s.common_stock
 			""");
 		Map<String, Object> parameters = new LinkedHashMap<>();
 		appendFilters(sql, parameters, query);
@@ -380,8 +483,9 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			       d.document_status, d.index_status, d.official_url
 			FROM disclosure d
 			JOIN issuer i ON i.id = d.issuer_id
-			LEFT JOIN security s ON s.id = d.security_id
+			JOIN security s ON s.id = d.security_id
 			WHERE d.receipt_number = :receiptNumber
+			  AND s.active AND s.common_stock
 			""")
 			.param("receiptNumber", receiptNumber)
 			.query(this::mapDetailRow)
@@ -392,9 +496,11 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 	@Override
 	public Optional<IndexStatus> findIndexStatus(String receiptNumber) {
 		return jdbcClient.sql("""
-			SELECT index_status
-			FROM disclosure
-			WHERE receipt_number = :receiptNumber
+			SELECT disclosure.index_status
+			FROM disclosure disclosure
+			JOIN security security ON security.id = disclosure.security_id
+			WHERE disclosure.receipt_number = :receiptNumber
+			  AND security.active AND security.common_stock
 			""")
 			.param("receiptNumber", receiptNumber)
 			.query(String.class)
@@ -478,6 +584,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			ON CONFLICT (stock_code) DO UPDATE
 			SET issuer_id = EXCLUDED.issuer_id,
 			    market = CASE
+			        WHEN security.active AND security.common_stock THEN security.market
 			        WHEN EXCLUDED.market = 'UNKNOWN' THEN security.market
 			        ELSE EXCLUDED.market
 			    END,

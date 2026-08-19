@@ -70,7 +70,8 @@ class JdbcDisclosureBackfillRepository implements DisclosureBackfillRepository {
 	public void advance(
 		UUID jobId,
 		UUID runId,
-		LocalDate processedDate,
+		LocalDate expectedNextDate,
+		LocalDate processedThroughDate,
 		int collectedCount
 	) {
 		int updated = jdbcClient.sql("""
@@ -79,13 +80,13 @@ class JdbcDisclosureBackfillRepository implements DisclosureBackfillRepository {
 			    collected_count = collected_count + :collectedCount,
 			    updated_at = CURRENT_TIMESTAMP
 			WHERE id = :jobId AND run_id = :runId AND status = 'RUNNING'
-			  AND next_date = :processedDate
+			  AND next_date = :expectedNextDate
 			""")
-			.param("nextDate", processedDate.plusDays(1))
+			.param("nextDate", processedThroughDate.plusDays(1))
 			.param("collectedCount", collectedCount)
 			.param("jobId", jobId)
 			.param("runId", runId)
-			.param("processedDate", processedDate)
+			.param("expectedNextDate", expectedNextDate)
 			.update();
 		assertUpdated(updated);
 	}

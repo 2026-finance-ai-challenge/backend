@@ -35,7 +35,7 @@ class OpenDartArchiveParser {
 
 	private static final int MAX_ENTRIES = 100;
 	private static final int MAX_FILENAME_LENGTH = 500;
-	private static final int MAX_ENTRY_BYTES = 15 * 1024 * 1024;
+	private static final int MAX_ENTRY_BYTES = 50 * 1024 * 1024;
 	private static final int MAX_CORPORATION_ENTRY_BYTES = 40 * 1024 * 1024;
 	private static final int MAX_TOTAL_BYTES = 50 * 1024 * 1024;
 

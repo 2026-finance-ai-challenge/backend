@@ -12,6 +12,7 @@ import com.kmarket.navigator.backend.disclosure.domain.DisclosureBackfillResult;
 
 @Service
 public class DisclosureBackfillHandler {
+	private static final int COLLECTION_WINDOW_MONTHS = 3;
 
 	private final DisclosureCollectionHandler collectionHandler;
 	private final DisclosureBackfillRepository backfillRepository;
@@ -40,10 +41,14 @@ public class DisclosureBackfillHandler {
 			LocalDate date = job.nextDate();
 			long collectedCount = job.collectedCount();
 			while (!date.isAfter(to)) {
-				int saved = collectionHandler.collect(date);
-				backfillRepository.advance(job.id(), runId, date, saved);
+				LocalDate periodEnd = date.plusMonths(COLLECTION_WINDOW_MONTHS).minusDays(1);
+				if (periodEnd.isAfter(to)) {
+					periodEnd = to;
+				}
+				int saved = collectionHandler.collect(date, periodEnd);
+				backfillRepository.advance(job.id(), runId, date, periodEnd, saved);
 				collectedCount += saved;
-				date = date.plusDays(1);
+				date = periodEnd.plusDays(1);
 			}
 			backfillRepository.complete(job.id(), runId);
 			return new DisclosureBackfillResult(from, to, collectedCount, false);

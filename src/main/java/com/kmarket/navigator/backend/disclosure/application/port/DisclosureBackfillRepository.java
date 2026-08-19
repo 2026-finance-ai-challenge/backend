@@ -9,7 +9,13 @@ public interface DisclosureBackfillRepository {
 
 	DisclosureBackfillJob startOrResume(LocalDate from, LocalDate to, UUID runId);
 
-	void advance(UUID jobId, UUID runId, LocalDate processedDate, int collectedCount);
+	void advance(
+		UUID jobId,
+		UUID runId,
+		LocalDate expectedNextDate,
+		LocalDate processedThroughDate,
+		int collectedCount
+	);
 
 	void complete(UUID jobId, UUID runId);
 

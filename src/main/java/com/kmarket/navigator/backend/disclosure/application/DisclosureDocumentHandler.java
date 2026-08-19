@@ -17,6 +17,8 @@ public class DisclosureDocumentHandler {
 
 	private static final Logger log = LoggerFactory.getLogger(DisclosureDocumentHandler.class);
 	private static final int MAX_ATTEMPTS = 5;
+	private static final Duration DAILY_LIMIT_RETRY_DELAY = Duration.ofHours(24);
+	private static final Duration NETWORK_ERROR_RETRY_DELAY = Duration.ofMinutes(15);
 
 	private final OpenDartGateway openDartGateway;
 	private final DisclosureRepository disclosureRepository;
@@ -53,7 +55,29 @@ public class DisclosureDocumentHandler {
 		String errorCode = exception instanceof OpenDartGatewayException openDartException
 			? openDartException.errorCode()
 			: exception.getClass().getSimpleName();
-		if (job.attempts() >= MAX_ATTEMPTS) {
+		if (errorCode.equals("STATUS_020")) {
+			disclosureRepository.blockOpenDartDocumentCollection(
+				DAILY_LIMIT_RETRY_DELAY,
+				errorCode
+			);
+			disclosureRepository.retryDocumentJob(
+				job.receiptNumber(),
+				errorCode,
+				DAILY_LIMIT_RETRY_DELAY
+			);
+		}
+		else if (errorCode.equals("NETWORK_ERROR")) {
+			disclosureRepository.blockOpenDartDocumentCollection(
+				NETWORK_ERROR_RETRY_DELAY,
+				errorCode
+			);
+			disclosureRepository.retryDocumentJob(
+				job.receiptNumber(),
+				errorCode,
+				NETWORK_ERROR_RETRY_DELAY
+			);
+		}
+		else if (job.attempts() >= MAX_ATTEMPTS) {
 			if (errorCode.equals("STATUS_014")) {
 				disclosureRepository.markDocumentUnavailable(job.receiptNumber(), errorCode);
 			}

@@ -20,11 +20,11 @@ import com.kmarket.navigator.backend.disclosure.domain.DisclosureBackfillStatus;
 
 class DisclosureBackfillHandlerTests {
 
-	private static final LocalDate FROM = LocalDate.of(2026, 8, 16);
+	private static final LocalDate FROM = LocalDate.of(2026, 1, 1);
 	private static final LocalDate TO = LocalDate.of(2026, 8, 18);
 
 	@Test
-	void resumesFromCheckpointAndAdvancesAfterEachDate() {
+	void resumesFromCheckpointAndAdvancesAfterEachQuarter() {
 		DisclosureCollectionHandler collectionHandler = mock(DisclosureCollectionHandler.class);
 		DisclosureBackfillRepository repository = mock(DisclosureBackfillRepository.class);
 		UUID jobId = UUID.randomUUID();
@@ -37,13 +37,15 @@ class DisclosureBackfillHandlerTests {
 				jobId,
 				FROM,
 				TO,
-				FROM.plusDays(1),
+				FROM.plusMonths(3),
 				DisclosureBackfillStatus.RUNNING,
 				invocation.getArgument(2),
 				4
 			));
-		when(collectionHandler.collect(FROM.plusDays(1))).thenReturn(2);
-		when(collectionHandler.collect(TO)).thenReturn(3);
+		LocalDate resumedFrom = FROM.plusMonths(3);
+		LocalDate firstPeriodEnd = resumedFrom.plusMonths(3).minusDays(1);
+		when(collectionHandler.collect(resumedFrom, firstPeriodEnd)).thenReturn(2);
+		when(collectionHandler.collect(firstPeriodEnd.plusDays(1), TO)).thenReturn(3);
 
 		var result = new DisclosureBackfillHandler(collectionHandler, repository).run(FROM, TO);
 
@@ -51,17 +53,19 @@ class DisclosureBackfillHandlerTests {
 		assertThat(result.alreadyCompleted()).isFalse();
 		InOrder order = inOrder(collectionHandler, repository);
 		order.verify(collectionHandler).synchronizeCorporations();
-		order.verify(collectionHandler).collect(FROM.plusDays(1));
+		order.verify(collectionHandler).collect(resumedFrom, firstPeriodEnd);
 		order.verify(repository).advance(
 			org.mockito.ArgumentMatchers.eq(jobId),
 			org.mockito.ArgumentMatchers.any(),
-			org.mockito.ArgumentMatchers.eq(FROM.plusDays(1)),
+			org.mockito.ArgumentMatchers.eq(resumedFrom),
+			org.mockito.ArgumentMatchers.eq(firstPeriodEnd),
 			org.mockito.ArgumentMatchers.eq(2)
 		);
-		order.verify(collectionHandler).collect(TO);
+		order.verify(collectionHandler).collect(firstPeriodEnd.plusDays(1), TO);
 		order.verify(repository).advance(
 			org.mockito.ArgumentMatchers.eq(jobId),
 			org.mockito.ArgumentMatchers.any(),
+			org.mockito.ArgumentMatchers.eq(firstPeriodEnd.plusDays(1)),
 			org.mockito.ArgumentMatchers.eq(TO),
 			org.mockito.ArgumentMatchers.eq(3)
 		);
@@ -116,7 +120,8 @@ class DisclosureBackfillHandlerTests {
 				invocation.getArgument(2),
 				0
 			));
-		when(collectionHandler.collect(FROM)).thenThrow(new IllegalStateException("failed"));
+		when(collectionHandler.collect(FROM, FROM.plusMonths(3).minusDays(1)))
+			.thenThrow(new IllegalStateException("failed"));
 
 		assertThatThrownBy(() -> new DisclosureBackfillHandler(collectionHandler, repository).run(FROM, TO))
 			.isInstanceOf(IllegalStateException.class);

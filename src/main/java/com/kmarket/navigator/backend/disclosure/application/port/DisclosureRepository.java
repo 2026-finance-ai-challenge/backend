@@ -3,19 +3,29 @@ package com.kmarket.navigator.backend.disclosure.application.port;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureDetail;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureListQuery;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureSummary;
 import com.kmarket.navigator.backend.disclosure.domain.IndexStatus;
+import com.kmarket.navigator.backend.disclosure.domain.ListedCommonStock;
 
 public interface DisclosureRepository {
 
 	void upsertCorporations(List<OpenDartCorporation> corporations);
 
+	void replaceCommonStockUniverse(List<ListedCommonStock> stocks);
+
+	Set<String> findActiveCommonStockCodes();
+
 	boolean saveFiling(OpenDartFiling filing);
 
+	int saveFilings(List<OpenDartFiling> filings);
+
 	Optional<DocumentJob> claimDocumentJob(String workerId);
+
+	void blockOpenDartDocumentCollection(Duration delay, String reason);
 
 	void completeDocumentJob(String receiptNumber, List<OpenDartDocument> documents);
 
