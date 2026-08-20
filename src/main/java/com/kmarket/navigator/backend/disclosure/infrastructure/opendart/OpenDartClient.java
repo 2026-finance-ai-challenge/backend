@@ -2,11 +2,16 @@ package com.kmarket.navigator.backend.disclosure.infrastructure.opendart;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import javax.xml.stream.XMLInputFactory;
@@ -16,15 +21,21 @@ import javax.xml.stream.XMLStreamReader;
 
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.client.ClientHttpResponse;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import com.kmarket.navigator.backend.disclosure.application.port.OpenDartCorporation;
 import com.kmarket.navigator.backend.disclosure.application.port.OpenDartDocument;
+import com.kmarket.navigator.backend.disclosure.application.port.OpenDartDocumentFetch;
 import com.kmarket.navigator.backend.disclosure.application.port.OpenDartFiling;
 import com.kmarket.navigator.backend.disclosure.application.port.OpenDartGateway;
 import com.kmarket.navigator.backend.disclosure.application.port.OpenDartPage;
+import com.kmarket.navigator.backend.disclosure.application.port.OpenDartSource;
+import com.kmarket.navigator.backend.disclosure.application.port.OpenDartSourceException;
+import com.kmarket.navigator.backend.disclosure.application.port.DocumentArchiveKind;
+import com.kmarket.navigator.backend.disclosure.application.port.DocumentArchiveStatus;
 import com.kmarket.navigator.backend.disclosure.domain.CorporationClass;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureType;
 
@@ -37,22 +48,32 @@ class OpenDartClient implements OpenDartGateway {
 	private static final DateTimeFormatter DART_DATE = DateTimeFormatter.BASIC_ISO_DATE;
 	private static final int PAGE_SIZE = 100;
 	private static final int MAX_JSON_RESPONSE_BYTES = 2 * 1024 * 1024;
+	private static final int MAX_VIEWER_INDEX_BYTES = 2 * 1024 * 1024;
 	private static final int MAX_RESPONSE_BYTES = 25 * 1024 * 1024;
 	private static final int MAX_ERROR_RESPONSE_BYTES = 64 * 1024;
 	private static final int MAX_ATTEMPTS = 3;
+	private static final Pattern VIEWER_REFERENCE = Pattern.compile(
+		"viewDoc\\(\\\"([0-9]{14})\\\",\\s*\\\"([0-9]{1,20})\\\",\\s*"
+			+ "\\\"([0-9]{1,20})\\\",\\s*\\\"([0-9]{1,20})\\\",\\s*"
+			+ "\\\"([0-9]{1,20})\\\",\\s*\\\"([A-Za-z0-9._-]{1,50})\\\","
+	);
 
 	private final RestClient restClient;
+	private final RestClient viewerRestClient;
 	private final OpenDartProperties properties;
 	private final OpenDartArchiveParser archiveParser;
 	private final ObjectMapper objectMapper;
+	private final AtomicInteger activeApiKeyIndex = new AtomicInteger();
 
 	OpenDartClient(
-		RestClient openDartRestClient,
+		@Qualifier("openDartRestClient") RestClient openDartRestClient,
+		@Qualifier("dartViewerRestClient") RestClient dartViewerRestClient,
 		OpenDartProperties properties,
 		OpenDartArchiveParser archiveParser,
 		ObjectMapper objectMapper
 	) {
 		this.restClient = openDartRestClient;
+		this.viewerRestClient = dartViewerRestClient;
 		this.properties = properties;
 		this.archiveParser = archiveParser;
 		this.objectMapper = objectMapper;
@@ -66,19 +87,165 @@ class OpenDartClient implements OpenDartGateway {
 		DisclosureType disclosureType,
 		int page
 	) {
-		byte[] body = executeWithRetry(() -> restClient.get()
-			.uri(builder -> builder
-				.path("/api/list.json")
-				.queryParam("crtfc_key", properties.apiKey())
-				.queryParam("bgn_de", DART_DATE.format(from))
-				.queryParam("end_de", DART_DATE.format(to))
-				.queryParam("corp_cls", corporationClass.code())
-				.queryParam("pblntf_ty", disclosureType.code())
-				.queryParam("page_no", page)
-				.queryParam("page_count", PAGE_SIZE)
-				.build())
-			.exchange((request, response) -> readResponse(response, MAX_JSON_RESPONSE_BYTES)));
+		return executeWithApiKey(apiKey -> parseFilings(
+			executeWithRetry(() -> restClient.get()
+				.uri(builder -> builder
+					.path("/api/list.json")
+					.queryParam("crtfc_key", apiKey)
+					.queryParam("bgn_de", DART_DATE.format(from))
+					.queryParam("end_de", DART_DATE.format(to))
+					.queryParam("corp_cls", corporationClass.code())
+					.queryParam("pblntf_ty", disclosureType.code())
+					.queryParam("page_no", page)
+					.queryParam("page_count", PAGE_SIZE)
+					.build())
+				.exchange((request, response) -> readResponse(response, MAX_JSON_RESPONSE_BYTES))),
+			disclosureType,
+			page
+		));
+	}
 
+	@Override
+	public List<OpenDartCorporation> fetchListedCorporations() {
+		byte[] archive = fetchArchive("/api/corpCode.xml", null);
+		return archiveParser.parseCorporations(archive);
+	}
+
+	@Override
+	public OpenDartDocumentFetch fetchDocuments(String receiptNumber) {
+		if (!receiptNumber.matches("[0-9]{14}")) {
+			throw new IllegalArgumentException("Invalid receipt number");
+		}
+		byte[] archive = null;
+		try {
+			archive = fetchArchive("/api/document.xml", receiptNumber);
+			return new OpenDartDocumentFetch(
+				archiveParser.parseDocuments(archive),
+				List.of(new OpenDartSource(
+					DocumentArchiveKind.OPENDART_ZIP,
+					DocumentArchiveStatus.VERIFIED,
+					archive,
+					null
+				))
+			);
+		}
+		catch (OpenDartException exception) {
+			if (exception.errorCode().equals("STATUS_014")) {
+				ViewerSource viewer = fetchViewerDocument(receiptNumber);
+				return new OpenDartDocumentFetch(
+					List.of(viewer.document()),
+					List.of(new OpenDartSource(
+						DocumentArchiveKind.DART_VIEWER_HTML,
+						DocumentArchiveStatus.VERIFIED,
+						viewer.content(),
+						null
+					))
+				);
+			}
+			if (archive == null) {
+				throw exception;
+			}
+			OpenDartSource rejectedSource = new OpenDartSource(
+					DocumentArchiveKind.OPENDART_ZIP,
+					DocumentArchiveStatus.REJECTED,
+					archive,
+					exception.errorCode()
+				);
+			if (!exception.errorCode().equals("SOURCE_TEXT_CORRUPTED")) {
+				throw new OpenDartSourceException(exception.errorCode(), rejectedSource);
+			}
+			try {
+				ViewerSource viewer = fetchViewerDocument(receiptNumber);
+				return new OpenDartDocumentFetch(
+					List.of(viewer.document()),
+					List.of(
+						rejectedSource,
+						new OpenDartSource(
+							DocumentArchiveKind.DART_VIEWER_HTML,
+							DocumentArchiveStatus.VERIFIED,
+							viewer.content(),
+							null
+						)
+					)
+				);
+			}
+			catch (OpenDartException viewerException) {
+				if (viewerException.errorCode().equals("DART_VIEWER_NETWORK_ERROR")) {
+					throw new OpenDartSourceException(viewerException.errorCode(), rejectedSource);
+				}
+				throw viewerException;
+			}
+		}
+	}
+
+	private ViewerSource fetchViewerDocument(String receiptNumber) {
+		try {
+			byte[] index = executeWithRetry(() -> viewerRestClient.get()
+				.uri(builder -> builder
+					.path("/dsaf001/main.do")
+					.queryParam("rcpNo", receiptNumber)
+					.build())
+				.exchange((request, response) -> readResponse(response, MAX_VIEWER_INDEX_BYTES)));
+			DartViewerReference reference = viewerReference(receiptNumber, index);
+			byte[] document = executeWithRetry(() -> viewerRestClient.get()
+				.uri(builder -> builder
+					.path("/report/viewer.do")
+					.queryParam("rcpNo", receiptNumber)
+					.queryParam("dcmNo", reference.documentNumber())
+					.queryParam("eleId", reference.elementId())
+					.queryParam("offset", reference.offset())
+					.queryParam("length", reference.length())
+					.queryParam("dtd", reference.dtd())
+					.build())
+				.exchange((request, response) -> readResponse(response, MAX_RESPONSE_BYTES)));
+			return new ViewerSource(archiveParser.parseViewerDocument(receiptNumber, document), document);
+		}
+		catch (OpenDartException exception) {
+			if (exception.errorCode().equals("NETWORK_ERROR")) {
+				throw new OpenDartException("DART_VIEWER_NETWORK_ERROR");
+			}
+			throw exception;
+		}
+	}
+
+	private record ViewerSource(OpenDartDocument document, byte[] content) {
+	}
+
+	private static DartViewerReference viewerReference(String receiptNumber, byte[] index) {
+		Matcher matcher = VIEWER_REFERENCE.matcher(new String(index, StandardCharsets.UTF_8));
+		while (matcher.find()) {
+			if (matcher.group(1).equals(receiptNumber)) {
+				return new DartViewerReference(
+					matcher.group(2),
+					matcher.group(3),
+					matcher.group(4),
+					matcher.group(5),
+					matcher.group(6)
+				);
+			}
+		}
+		throw new OpenDartException("DART_VIEWER_REFERENCE_NOT_FOUND");
+	}
+
+	private byte[] fetchArchive(String path, String receiptNumber) {
+		return executeWithApiKey(apiKey -> {
+			byte[] archive = executeWithRetry(() -> restClient.get()
+				.uri(builder -> {
+					var uri = builder
+						.path(path)
+						.queryParam("crtfc_key", apiKey);
+					if (receiptNumber != null) {
+						uri.queryParam("rcept_no", receiptNumber);
+					}
+					return uri.build();
+				})
+				.exchange((request, response) -> readResponse(response, MAX_RESPONSE_BYTES)));
+			validateArchiveResponse(archive);
+			return archive;
+		});
+	}
+
+	private OpenDartPage parseFilings(byte[] body, DisclosureType disclosureType, int page) {
 		JsonNode root = parseJson(body);
 		String status = text(root, "status");
 		if (status.equals("013")) {
@@ -106,35 +273,25 @@ class OpenDartClient implements OpenDartGateway {
 		return new OpenDartPage(filings, root.path("page_no").asInt(page), root.path("total_page").asInt(1));
 	}
 
-	@Override
-	public List<OpenDartCorporation> fetchListedCorporations() {
-		byte[] archive = fetchArchive("/api/corpCode.xml", null);
-		return archiveParser.parseCorporations(archive);
-	}
-
-	@Override
-	public List<OpenDartDocument> fetchDocuments(String receiptNumber) {
-		if (!receiptNumber.matches("[0-9]{14}")) {
-			throw new IllegalArgumentException("Invalid receipt number");
-		}
-		byte[] archive = fetchArchive("/api/document.xml", receiptNumber);
-		return archiveParser.parseDocuments(archive);
-	}
-
-	private byte[] fetchArchive(String path, String receiptNumber) {
-		byte[] archive = executeWithRetry(() -> restClient.get()
-			.uri(builder -> {
-				var uri = builder
-					.path(path)
-					.queryParam("crtfc_key", properties.apiKey());
-				if (receiptNumber != null) {
-					uri.queryParam("rcept_no", receiptNumber);
+	private <T> T executeWithApiKey(Function<String, T> request) {
+		List<String> apiKeys = properties.apiKeys();
+		OpenDartException lastException = null;
+		int startingIndex = Math.floorMod(activeApiKeyIndex.get(), apiKeys.size());
+		for (int offset = 0; offset < apiKeys.size(); offset++) {
+			int keyIndex = (startingIndex + offset) % apiKeys.size();
+			try {
+				T response = request.apply(apiKeys.get(keyIndex));
+				activeApiKeyIndex.set(keyIndex);
+				return response;
+			}
+			catch (OpenDartException exception) {
+				if (!exception.errorCode().equals("STATUS_020")) {
+					throw exception;
 				}
-				return uri.build();
-			})
-			.exchange((request, response) -> readResponse(response, MAX_RESPONSE_BYTES)));
-		validateArchiveResponse(archive);
-		return archive;
+				lastException = exception;
+			}
+		}
+		throw lastException == null ? new OpenDartException("STATUS_020") : lastException;
 	}
 
 	private static void validateArchiveResponse(byte[] response) {
@@ -235,5 +392,14 @@ class OpenDartClient implements OpenDartGateway {
 
 	private static String nullIfBlank(String value) {
 		return value == null || value.isBlank() ? null : value.trim();
+	}
+
+	private record DartViewerReference(
+		String documentNumber,
+		String elementId,
+		String offset,
+		String length,
+		String dtd
+	) {
 	}
 }

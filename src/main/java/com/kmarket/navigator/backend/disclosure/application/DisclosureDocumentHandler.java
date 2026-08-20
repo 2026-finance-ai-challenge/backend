@@ -8,9 +8,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import com.kmarket.navigator.backend.disclosure.application.port.DisclosureRepository;
+import com.kmarket.navigator.backend.disclosure.application.port.DocumentArchiveStore;
 import com.kmarket.navigator.backend.disclosure.application.port.DocumentJob;
 import com.kmarket.navigator.backend.disclosure.application.port.OpenDartGateway;
 import com.kmarket.navigator.backend.disclosure.application.port.OpenDartGatewayException;
+import com.kmarket.navigator.backend.disclosure.application.port.OpenDartDocumentFetch;
+import com.kmarket.navigator.backend.disclosure.application.port.OpenDartSourceException;
 
 @Service
 public class DisclosureDocumentHandler {
@@ -19,16 +22,20 @@ public class DisclosureDocumentHandler {
 	private static final int MAX_ATTEMPTS = 5;
 	private static final Duration DAILY_LIMIT_RETRY_DELAY = Duration.ofHours(24);
 	private static final Duration NETWORK_ERROR_RETRY_DELAY = Duration.ofMinutes(15);
+	private static final Duration PROVIDER_MAINTENANCE_RETRY_DELAY = Duration.ofHours(1);
 
 	private final OpenDartGateway openDartGateway;
+	private final DocumentArchiveStore documentArchiveStore;
 	private final DisclosureRepository disclosureRepository;
 	private final String workerId = UUID.randomUUID().toString();
 
 	public DisclosureDocumentHandler(
 		OpenDartGateway openDartGateway,
+		DocumentArchiveStore documentArchiveStore,
 		DisclosureRepository disclosureRepository
 	) {
 		this.openDartGateway = openDartGateway;
+		this.documentArchiveStore = documentArchiveStore;
 		this.disclosureRepository = disclosureRepository;
 	}
 
@@ -40,10 +47,21 @@ public class DisclosureDocumentHandler {
 		DocumentJob job = claimed.get();
 
 		try {
+			var fetch = openDartGateway.fetchDocuments(job.receiptNumber());
+			var archives = documentArchiveStore.store(job, fetch);
 			disclosureRepository.completeDocumentJob(
 				job.receiptNumber(),
-				openDartGateway.fetchDocuments(job.receiptNumber())
+				fetch.documents(),
+				archives
 			);
+		}
+		catch (OpenDartSourceException exception) {
+			var archives = documentArchiveStore.store(
+				job,
+				new OpenDartDocumentFetch(java.util.List.of(), java.util.List.of(exception.source()))
+			);
+			disclosureRepository.recordDocumentArchives(job.receiptNumber(), archives);
+			handleFailure(job, exception);
 		}
 		catch (RuntimeException exception) {
 			handleFailure(job, exception);
@@ -77,13 +95,37 @@ public class DisclosureDocumentHandler {
 				NETWORK_ERROR_RETRY_DELAY
 			);
 		}
-		else if (job.attempts() >= MAX_ATTEMPTS) {
-			if (errorCode.equals("STATUS_014")) {
-				disclosureRepository.markDocumentUnavailable(job.receiptNumber(), errorCode);
-			}
-			else {
+		else if (errorCode.equals("DART_VIEWER_NETWORK_ERROR")) {
+			if (job.attempts() >= MAX_ATTEMPTS) {
 				disclosureRepository.failDocumentJob(job.receiptNumber(), errorCode);
 			}
+			else {
+				disclosureRepository.retryDocumentJob(
+					job.receiptNumber(),
+					errorCode,
+					NETWORK_ERROR_RETRY_DELAY
+				);
+			}
+		}
+		else if (errorCode.equals("STATUS_800")) {
+			disclosureRepository.blockOpenDartDocumentCollection(
+				PROVIDER_MAINTENANCE_RETRY_DELAY,
+				errorCode
+			);
+			disclosureRepository.retryDocumentJob(
+				job.receiptNumber(),
+				errorCode,
+				PROVIDER_MAINTENANCE_RETRY_DELAY
+			);
+		}
+		else if (errorCode.equals("STATUS_014")) {
+			disclosureRepository.markDocumentUnavailable(job.receiptNumber(), errorCode);
+		}
+		else if (errorCode.equals("SOURCE_TEXT_CORRUPTED")) {
+			disclosureRepository.failDocumentJob(job.receiptNumber(), errorCode);
+		}
+		else if (job.attempts() >= MAX_ATTEMPTS) {
+			disclosureRepository.failDocumentJob(job.receiptNumber(), errorCode);
 		}
 		else {
 			disclosureRepository.retryDocumentJob(job.receiptNumber(), errorCode, Duration.ofMinutes(5));

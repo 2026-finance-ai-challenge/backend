@@ -27,7 +27,13 @@ public interface DisclosureRepository {
 
 	void blockOpenDartDocumentCollection(Duration delay, String reason);
 
-	void completeDocumentJob(String receiptNumber, List<OpenDartDocument> documents);
+	void completeDocumentJob(
+		String receiptNumber,
+		List<OpenDartDocument> documents,
+		List<StoredDocumentArchive> archives
+	);
+
+	void recordDocumentArchives(String receiptNumber, List<StoredDocumentArchive> archives);
 
 	void retryDocumentJob(String receiptNumber, String errorCode, Duration delay);
 

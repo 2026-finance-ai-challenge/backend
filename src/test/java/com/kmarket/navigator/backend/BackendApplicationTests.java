@@ -30,13 +30,17 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
+import com.kmarket.navigator.backend.disclosure.application.DisclosureDocumentHandler;
 import com.kmarket.navigator.backend.disclosure.application.DisclosureQueryHandler;
 import com.kmarket.navigator.backend.disclosure.application.port.DisclosureRepository;
 import com.kmarket.navigator.backend.disclosure.application.port.DisclosureBackfillRepository;
 import com.kmarket.navigator.backend.disclosure.application.port.DisclosureRagGateway;
+import com.kmarket.navigator.backend.disclosure.application.port.DocumentArchiveKind;
+import com.kmarket.navigator.backend.disclosure.application.port.DocumentArchiveStatus;
 import com.kmarket.navigator.backend.disclosure.application.port.OpenDartDocument;
 import com.kmarket.navigator.backend.disclosure.application.port.OpenDartFiling;
 import com.kmarket.navigator.backend.disclosure.application.port.OpenDartSection;
+import com.kmarket.navigator.backend.disclosure.application.port.StoredDocumentArchive;
 import com.kmarket.navigator.backend.disclosure.domain.CorporationClass;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureCursor;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureAnswer;
@@ -50,7 +54,7 @@ import com.kmarket.navigator.backend.disclosure.domain.SectionKind;
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Transactional
-@SpringBootTest(properties = "opendart.api-key=0000000000000000000000000000000000000000")
+@SpringBootTest(properties = "opendart.api-keys=0000000000000000000000000000000000000000")
 class BackendApplicationTests {
 
 	@Container
@@ -79,6 +83,9 @@ class BackendApplicationTests {
 	@MockitoBean
 	DisclosureRagGateway disclosureRagGateway;
 
+	@MockitoBean
+	DisclosureDocumentHandler disclosureDocumentHandler;
+
 	@Test
 	void contextLoads() {
 	}
@@ -88,8 +95,14 @@ class BackendApplicationTests {
 		assertThat(jdbcClient.sql("SELECT stock_code FROM service_stock_universe ORDER BY stock_code")
 			.query(String.class)
 			.list())
-			.hasSize(101)
-			.contains("005930", "0126Z0", "015760", "017670");
+			.hasSize(75)
+			.contains("005930", "0126Z0", "015760", "017670")
+			.doesNotContain(
+				"020560", "030200", "031310", "033130", "033830", "034120",
+				"035760", "036030", "036420", "036460", "036630", "037560",
+				"039290", "039340", "040300", "053210", "058400", "065530",
+				"066790", "089590", "091810", "122450", "126560", "127710",
+				"272450", "298690");
 	}
 
 	@Test
@@ -175,13 +188,61 @@ class BackendApplicationTests {
 		)).andExpect(status().isAccepted());
 
 		assertThat(jdbcClient.sql("""
-			SELECT last_error_code
+			SELECT last_error_code || ':' || priority
 			FROM ingestion_job
 			WHERE job_type = 'DISCLOSURE_DOCUMENT' AND business_key = :receiptNumber
 			""")
 			.param("receiptNumber", oldFiling.receiptNumber())
 			.query(String.class)
-			.single()).isEqualTo("ON_DEMAND");
+			.single()).isEqualTo("ON_DEMAND:0");
+	}
+
+	@Test
+	void claimsRagTargetBeforeHistoricalArchive() {
+		OpenDartFiling historical = filingAt("20100101000002", LocalDate.of(2010, 1, 1));
+		LocalDate databaseToday = jdbcClient.sql("SELECT CURRENT_DATE")
+			.query(LocalDate.class)
+			.single();
+		OpenDartFiling recent = filingAt("20260819000002", databaseToday.minusDays(1));
+		disclosureRepository.saveFiling(historical);
+		disclosureRepository.saveFiling(recent);
+		activateCommonStocks("005930");
+
+		var claimed = disclosureRepository.claimDocumentJob("priority-test").orElseThrow();
+
+		assertThat(claimed.receiptNumber()).isEqualTo(recent.receiptNumber());
+	}
+
+	@Test
+	void doesNotCreateIngestionJobsOutsideServiceStockUniverse() {
+		OpenDartFiling unsupported = new OpenDartFiling(
+			"20260818800999",
+			"00999999",
+			"지원대상외기업",
+			"999999",
+			CorporationClass.KOSPI,
+			DisclosureType.MATERIAL_EVENT,
+			"기업설명회(IR) 개최",
+			"지원대상외기업",
+			LocalDate.of(2026, 8, 18),
+			""
+		);
+
+		disclosureRepository.saveFiling(unsupported);
+
+		assertThat(jdbcClient.sql("""
+			SELECT COUNT(*)
+			FROM ingestion_job
+			WHERE business_key = :receiptNumber
+			  AND job_type IN (
+			      'DISCLOSURE_DOCUMENT',
+			      'DISCLOSURE_EMBEDDING',
+			      'DISCLOSURE_METADATA_EMBEDDING'
+			  )
+			""")
+			.param("receiptNumber", unsupported.receiptNumber())
+			.query(Integer.class)
+			.single()).isZero();
 	}
 
 	@Test
@@ -233,8 +294,19 @@ class BackendApplicationTests {
 		assertThat(disclosureRepository.saveFiling(filing)).isTrue();
 		assertThat(disclosureRepository.saveFiling(filing)).isFalse();
 		activateCommonStocks("005930");
-		disclosureRepository.completeDocumentJob(filing.receiptNumber(), List.of(document("a", "first")));
-		disclosureRepository.completeDocumentJob(filing.receiptNumber(), List.of(document("b", "second")));
+		disclosureRepository.completeDocumentJob(
+			filing.receiptNumber(),
+			List.of(document("a", "first")),
+			List.of(new StoredDocumentArchive(
+				DocumentArchiveKind.OPENDART_ZIP,
+				DocumentArchiveStatus.VERIFIED,
+				"005930_삼성전자/20260818800670.api.zip",
+				"a".repeat(64),
+				3,
+				null
+			))
+		);
+		disclosureRepository.completeDocumentJob(filing.receiptNumber(), List.of(document("b", "second")), List.of());
 
 		var detail = disclosureRepository.findByReceiptNumber(filing.receiptNumber()).orElseThrow();
 		assertThat(detail.documents()).singleElement().satisfies(document -> {
@@ -245,6 +317,21 @@ class BackendApplicationTests {
 		});
 		assertThat(jdbcClient.sql("SELECT COUNT(*) FROM disclosure_document")
 			.query(Integer.class).single()).isEqualTo(2);
+		assertThat(jdbcClient.sql("SELECT relative_path FROM disclosure_archive WHERE receipt_number = :receiptNumber")
+			.param("receiptNumber", filing.receiptNumber())
+			.query(String.class).single())
+			.isEqualTo("005930_삼성전자/20260818800670.api.zip");
+		assertThat(jdbcClient.sql("""
+			SELECT parser_version
+			FROM disclosure_document
+			WHERE disclosure_id = (
+			    SELECT id FROM disclosure WHERE receipt_number = :receiptNumber
+			)
+			  AND is_current
+			""")
+			.param("receiptNumber", filing.receiptNumber())
+			.query(String.class)
+			.single()).isEqualTo("opendart-html-v3");
 		assertThat(jdbcClient.sql("""
 			SELECT status FROM ingestion_job
 			WHERE job_type = 'DISCLOSURE_EMBEDDING' AND business_key = :receiptNumber
@@ -290,7 +377,7 @@ class BackendApplicationTests {
 		OpenDartFiling filing = filing("20260818800670");
 		disclosureRepository.saveFiling(filing);
 		activateCommonStocks("005930");
-		disclosureRepository.completeDocumentJob(filing.receiptNumber(), List.of(document("a", "first")));
+		disclosureRepository.completeDocumentJob(filing.receiptNumber(), List.of(document("a", "first")), List.of());
 
 		mockMvc.perform(post("/api/v1/disclosures/{receiptNumber}/questions", filing.receiptNumber())
 				.contentType(MediaType.APPLICATION_JSON)
@@ -320,6 +407,10 @@ class BackendApplicationTests {
 	}
 
 	private static OpenDartFiling filing(String receiptNumber) {
+		return filingAt(receiptNumber, LocalDate.of(2026, 8, 18));
+	}
+
+	private static OpenDartFiling filingAt(String receiptNumber, LocalDate filedDate) {
 		return new OpenDartFiling(
 			receiptNumber,
 			"00126380",
@@ -329,7 +420,7 @@ class BackendApplicationTests {
 			DisclosureType.MATERIAL_EVENT,
 			"기업설명회(IR) 개최",
 			"삼성전자",
-			LocalDate.of(2026, 8, 18),
+			filedDate,
 			""
 		);
 	}

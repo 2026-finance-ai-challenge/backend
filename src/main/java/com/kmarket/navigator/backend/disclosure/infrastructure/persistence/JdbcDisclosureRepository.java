@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.kmarket.navigator.backend.disclosure.application.port.DisclosureRepository;
 import com.kmarket.navigator.backend.disclosure.application.port.DocumentJob;
+import com.kmarket.navigator.backend.disclosure.application.port.StoredDocumentArchive;
 import com.kmarket.navigator.backend.disclosure.application.port.OpenDartCorporation;
 import com.kmarket.navigator.backend.disclosure.application.port.OpenDartDocument;
 import com.kmarket.navigator.backend.disclosure.application.port.OpenDartFiling;
@@ -42,6 +43,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 	private static final String DOCUMENT_JOB = "DISCLOSURE_DOCUMENT";
 	private static final String EMBEDDING_JOB = "DISCLOSURE_EMBEDDING";
 	private static final String METADATA_EMBEDDING_JOB = "DISCLOSURE_METADATA_EMBEDDING";
+	private static final String DOCUMENT_PARSER_VERSION = "opendart-html-v3";
 	private static final String OPEN_DART_DOCUMENT_PROVIDER = "OPEN_DART_DOCUMENT";
 
 	private final JdbcClient jdbcClient;
@@ -203,10 +205,19 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 		if (filing.stockCode() != null) {
 			jdbcClient.sql("""
 				INSERT INTO ingestion_job (
-				    id, job_type, business_key, status, attempts,
+				    id, job_type, business_key, stock_code, status, attempts, priority,
 				    available_at, created_at, updated_at
 				)
-				SELECT :id, :jobType, :businessKey, 'PENDING', 0, :now, :now, :now
+				SELECT :id, :jobType, :businessKey, :stockCode, 'PENDING', 0,
+				       CASE
+				           WHEN :filedDate >= CURRENT_DATE - INTERVAL '1 year'
+				             OR (
+				                 :filedDate >= CURRENT_DATE - INTERVAL '5 years'
+				                 AND :titleKo ~ '(사업|반기|분기)보고서'
+				             ) THEN 10
+				           ELSE 20
+				       END,
+				       CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 				FROM service_stock_universe universe
 				WHERE universe.stock_code = :stockCode
 				ON CONFLICT (job_type, business_key) DO NOTHING
@@ -214,7 +225,8 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 				.param("id", UUID.randomUUID())
 				.param("jobType", DOCUMENT_JOB)
 				.param("businessKey", filing.receiptNumber())
-				.param("now", now)
+				.param("filedDate", filing.filedDate())
+				.param("titleKo", filing.reportName())
 				.param("stockCode", filing.stockCode())
 				.update();
 			jdbcClient.sql("""
@@ -222,7 +234,8 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 				    id, job_type, business_key, status, attempts,
 				    available_at, created_at, updated_at
 				)
-				SELECT :id, :jobType, :businessKey, 'PENDING', 0, :now, :now, :now
+				SELECT :id, :jobType, :businessKey, 'PENDING', 0,
+				       CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 				FROM service_stock_universe universe
 				WHERE universe.stock_code = :stockCode
 				ON CONFLICT (job_type, business_key) DO NOTHING
@@ -230,7 +243,6 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 				.param("id", UUID.randomUUID())
 				.param("jobType", METADATA_EMBEDDING_JOB)
 				.param("businessKey", filing.receiptNumber())
-				.param("now", now)
 				.param("stockCode", filing.stockCode())
 				.update();
 		}
@@ -241,10 +253,11 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 	public Optional<DocumentJob> claimDocumentJob(String workerId) {
 		return jdbcClient.sql("""
 			WITH candidate AS (
-			    SELECT job.id
+			    SELECT job.id, security.stock_code, issuer.name_ko AS stock_name_ko
 			    FROM ingestion_job job
 			    JOIN disclosure disclosure ON disclosure.receipt_number = job.business_key
 			    JOIN security security ON security.id = disclosure.security_id
+			    JOIN issuer issuer ON issuer.id = security.issuer_id
 			    JOIN service_stock_universe universe ON universe.stock_code = security.stock_code
 			    WHERE job.job_type = :jobType
 			      AND security.active
@@ -264,7 +277,8 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			              AND job.locked_at < CURRENT_TIMESTAMP - INTERVAL '15 minutes'
 			          )
 			      )
-			    ORDER BY job.attempts DESC, job.available_at, job.created_at
+			    ORDER BY (job.priority <> 0), job.stock_code, job.priority,
+			             job.attempts DESC, job.available_at, job.created_at
 			    FOR UPDATE OF job SKIP LOCKED
 			    LIMIT 1
 			)
@@ -276,13 +290,15 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			    updated_at = CURRENT_TIMESTAMP
 			FROM candidate
 			WHERE job.id = candidate.id
-			RETURNING job.business_key, job.attempts
+			RETURNING job.business_key, candidate.stock_code, candidate.stock_name_ko, job.attempts
 			""")
 			.param("jobType", DOCUMENT_JOB)
 			.param("provider", OPEN_DART_DOCUMENT_PROVIDER)
 			.param("workerId", workerId)
 			.query((resultSet, rowNumber) -> new DocumentJob(
 				resultSet.getString("business_key"),
+				resultSet.getString("stock_code"),
+				resultSet.getString("stock_name_ko"),
 				resultSet.getInt("attempts")
 			))
 			.optional();
@@ -316,7 +332,11 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 
 	@Override
 	@Transactional
-	public void completeDocumentJob(String receiptNumber, List<OpenDartDocument> documents) {
+	public void completeDocumentJob(
+		String receiptNumber,
+		List<OpenDartDocument> documents,
+		List<StoredDocumentArchive> archives
+	) {
 		if (documents.isEmpty()) {
 			throw new IllegalArgumentException("Disclosure documents must not be empty");
 		}
@@ -335,12 +355,12 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 				INSERT INTO disclosure_document (
 				    id, disclosure_id, source_filename, version_no, is_current,
 				    content_hash, body_text, payload_zstd, original_bytes,
-				    compressed_bytes, created_at
+				    compressed_bytes, parser_version, created_at
 				)
 				SELECT :id, :disclosureId, :sourceFilename,
 				       COALESCE(MAX(version_no), 0) + 1, TRUE,
 				       :contentHash, NULL, :payloadZstd, :originalBytes,
-				       :compressedBytes, :createdAt
+				       :compressedBytes, :parserVersion, :createdAt
 				FROM disclosure_document
 				WHERE disclosure_id = :disclosureId AND source_filename = :sourceFilename
 				ON CONFLICT (disclosure_id, source_filename, content_hash)
@@ -348,6 +368,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 				              payload_zstd = EXCLUDED.payload_zstd,
 				              original_bytes = EXCLUDED.original_bytes,
 				              compressed_bytes = EXCLUDED.compressed_bytes,
+				              parser_version = EXCLUDED.parser_version,
 				              is_current = TRUE
 				RETURNING id
 				""")
@@ -358,6 +379,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 				.param("payloadZstd", payload.compressed())
 				.param("originalBytes", payload.originalBytes())
 				.param("compressedBytes", payload.compressedBytes())
+				.param("parserVersion", DOCUMENT_PARSER_VERSION)
 				.param("createdAt", OffsetDateTime.now(ZoneOffset.UTC))
 				.query(UUID.class)
 				.single();
@@ -366,6 +388,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 				.param("documentId", documentId)
 				.update();
 		}
+		saveDocumentArchives(disclosureId, receiptNumber, archives);
 
 		jdbcClient.sql("""
 			UPDATE disclosure
@@ -430,10 +453,67 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 
 	@Override
 	@Transactional
+	public void recordDocumentArchives(String receiptNumber, List<StoredDocumentArchive> archives) {
+		if (archives.isEmpty()) {
+			return;
+		}
+		saveDocumentArchives(disclosureId(receiptNumber), receiptNumber, archives);
+	}
+
+	private void saveDocumentArchives(
+		UUID disclosureId,
+		String receiptNumber,
+		List<StoredDocumentArchive> archives
+	) {
+		for (StoredDocumentArchive archive : archives) {
+			jdbcClient.sql("""
+				INSERT INTO disclosure_archive (
+				    id, disclosure_id, receipt_number, stock_code, stock_name_ko,
+				    archive_kind, archive_status, relative_path, sha256, size_bytes,
+				    error_code, created_at, updated_at
+				)
+				VALUES (
+				    :id, :disclosureId, :receiptNumber, :stockCode, :stockNameKo,
+				    :archiveKind, :archiveStatus, :relativePath, :sha256, :sizeBytes,
+				    :errorCode, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+				)
+				ON CONFLICT (disclosure_id, archive_kind)
+				DO UPDATE SET
+				    receipt_number = EXCLUDED.receipt_number,
+				    stock_code = EXCLUDED.stock_code,
+				    stock_name_ko = EXCLUDED.stock_name_ko,
+				    archive_status = EXCLUDED.archive_status,
+				    relative_path = EXCLUDED.relative_path,
+				    sha256 = EXCLUDED.sha256,
+				    size_bytes = EXCLUDED.size_bytes,
+				    error_code = EXCLUDED.error_code,
+				    updated_at = CURRENT_TIMESTAMP
+				""")
+				.param("id", UUID.randomUUID())
+				.param("disclosureId", disclosureId)
+				.param("receiptNumber", receiptNumber)
+				.param("stockCode", stockCode(receiptNumber))
+				.param("stockNameKo", stockName(receiptNumber))
+				.param("archiveKind", archive.kind().name())
+				.param("archiveStatus", archive.status().name())
+				.param("relativePath", archive.relativePath())
+				.param("sha256", archive.sha256())
+				.param("sizeBytes", archive.sizeBytes())
+				.param("errorCode", archive.errorCode())
+				.update();
+		}
+	}
+
+	@Override
+	@Transactional
 	public void retryDocumentJob(String receiptNumber, String errorCode, Duration delay) {
 		jdbcClient.sql("""
 			UPDATE ingestion_job
 			SET status = 'PENDING',
+			    priority = CASE
+			        WHEN :errorCode = 'DART_VIEWER_NETWORK_ERROR' THEN 30
+			        ELSE priority
+			    END,
 			    available_at = CURRENT_TIMESTAMP + (:delayMillis * INTERVAL '1 millisecond'),
 			    locked_at = NULL,
 			    locked_by = NULL,
@@ -576,15 +656,23 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 		String jobType = status.get() == DocumentStatus.READY ? EMBEDDING_JOB : DOCUMENT_JOB;
 		jdbcClient.sql("""
 			INSERT INTO ingestion_job (
-			    id, job_type, business_key, status, attempts,
+			    id, job_type, business_key, stock_code, status, attempts, priority,
 			    available_at, last_error_code, created_at, updated_at
 			)
 			VALUES (
-			    :id, :jobType, :businessKey, 'PENDING', 0,
+			    :id, :jobType, :businessKey,
+			    (
+			        SELECT security.stock_code
+			        FROM disclosure
+			        JOIN security ON security.id = disclosure.security_id
+			        WHERE disclosure.receipt_number = :businessKey
+			    ),
+			    'PENDING', 0, 0,
 			    CURRENT_TIMESTAMP, 'ON_DEMAND', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 			)
 			ON CONFLICT (job_type, business_key) DO UPDATE
-			SET status = 'PENDING', attempts = 0, available_at = CURRENT_TIMESTAMP,
+			SET stock_code = COALESCE(ingestion_job.stock_code, EXCLUDED.stock_code),
+			    status = 'PENDING', attempts = 0, priority = 0, available_at = CURRENT_TIMESTAMP,
 			    locked_at = NULL, locked_by = NULL, last_error_code = 'ON_DEMAND',
 			    updated_at = CURRENT_TIMESTAMP
 			""")
@@ -623,6 +711,30 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			))
 			.toList();
 		return row.toDetail(documents);
+	}
+
+	private String stockCode(String receiptNumber) {
+		return jdbcClient.sql("""
+			SELECT security.stock_code
+			FROM disclosure
+			JOIN security ON security.id = disclosure.security_id
+			WHERE disclosure.receipt_number = :receiptNumber
+			""")
+			.param("receiptNumber", receiptNumber)
+			.query(String.class)
+			.single();
+	}
+
+	private String stockName(String receiptNumber) {
+		return jdbcClient.sql("""
+			SELECT issuer.name_ko
+			FROM disclosure
+			JOIN issuer ON issuer.id = disclosure.issuer_id
+			WHERE disclosure.receipt_number = :receiptNumber
+			""")
+			.param("receiptNumber", receiptNumber)
+			.query(String.class)
+			.single();
 	}
 
 	private List<DisclosureSection> findSections(UUID documentId) {
