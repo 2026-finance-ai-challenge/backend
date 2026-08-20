@@ -16,7 +16,7 @@ import com.kmarket.navigator.backend.disclosure.application.DisclosureCollection
 import com.kmarket.navigator.backend.disclosure.application.DisclosureDocumentHandler;
 
 @Component
-@Profile("!test")
+@Profile("!test & !backfill")
 class DisclosureScheduler {
 
 	private static final Logger log = LoggerFactory.getLogger(DisclosureScheduler.class);

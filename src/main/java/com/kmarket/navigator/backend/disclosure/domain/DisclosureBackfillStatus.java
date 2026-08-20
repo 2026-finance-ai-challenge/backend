@@ -1,8 +1,8 @@
 package com.kmarket.navigator.backend.disclosure.domain;
 
-public enum IndexStatus {
+public enum DisclosureBackfillStatus {
 	PENDING,
-	READY,
-	UNAVAILABLE,
+	RUNNING,
+	COMPLETED,
 	FAILED
 }

@@ -9,7 +9,8 @@ public enum DisclosureType {
 	AUDIT("F"),
 	FUND("G"),
 	SECURITIZATION("H"),
-	EXCHANGE("I");
+	EXCHANGE("I"),
+	FAIR_TRADE("J");
 
 	private final String code;
 

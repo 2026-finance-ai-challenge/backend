@@ -9,7 +9,8 @@ import com.kmarket.navigator.backend.disclosure.domain.DisclosureType;
 public interface OpenDartGateway {
 
 	OpenDartPage fetchFilings(
-		LocalDate date,
+		LocalDate from,
+		LocalDate to,
 		CorporationClass corporationClass,
 		DisclosureType disclosureType,
 		int page
