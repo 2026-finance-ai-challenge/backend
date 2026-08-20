@@ -28,6 +28,7 @@ public class DisclosureQuestionHandler {
 		var indexStatus = disclosureRepository.findIndexStatus(receiptNumber)
 			.orElseThrow(() -> new BusinessException(ErrorCode.DISCLOSURE_NOT_FOUND));
 		if (indexStatus != IndexStatus.READY) {
+			disclosureRepository.requestIndexing(receiptNumber);
 			throw new BusinessException(ErrorCode.DISCLOSURE_INDEX_NOT_READY);
 		}
 		return disclosureRagGateway.ask(receiptNumber, question);
