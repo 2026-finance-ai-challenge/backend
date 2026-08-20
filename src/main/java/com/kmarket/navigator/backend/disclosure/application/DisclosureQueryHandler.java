@@ -41,4 +41,10 @@ public class DisclosureQueryHandler {
 		return disclosureRepository.findByReceiptNumber(receiptNumber)
 			.orElseThrow(() -> new BusinessException(ErrorCode.DISCLOSURE_NOT_FOUND));
 	}
+
+	public void requestIndexing(String receiptNumber) {
+		if (!disclosureRepository.requestIndexing(receiptNumber)) {
+			throw new BusinessException(ErrorCode.DISCLOSURE_NOT_FOUND);
+		}
+	}
 }

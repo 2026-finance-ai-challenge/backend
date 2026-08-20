@@ -40,4 +40,6 @@ public interface DisclosureRepository {
 	Optional<DisclosureDetail> findByReceiptNumber(String receiptNumber);
 
 	Optional<IndexStatus> findIndexStatus(String receiptNumber);
+
+	boolean requestIndexing(String receiptNumber);
 }

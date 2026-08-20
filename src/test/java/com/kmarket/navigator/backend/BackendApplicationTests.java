@@ -84,6 +84,15 @@ class BackendApplicationTests {
 	}
 
 	@Test
+	void serviceStockUniverseContainsMvpStocks() {
+		assertThat(jdbcClient.sql("SELECT stock_code FROM service_stock_universe ORDER BY stock_code")
+			.query(String.class)
+			.list())
+			.hasSize(101)
+			.contains("005930", "0126Z0", "015760", "017670");
+	}
+
+	@Test
 	void healthEndpointIsPublic() throws Exception {
 		mockMvc.perform(get("/actuator/health"))
 			.andExpect(status().isOk())
@@ -126,21 +135,53 @@ class BackendApplicationTests {
 		OpenDartFiling filing = new OpenDartFiling(
 			"20260818000213",
 			"01999999",
-			"덕양에너젠",
-			"0001A0",
+			"삼성에피스홀딩스",
+			"0126Z0",
 			CorporationClass.KOSDAQ,
 			DisclosureType.OWNERSHIP,
 			"임원ㆍ주요주주특정증권등소유상황보고서",
-			"덕양에너젠",
+			"삼성에피스홀딩스",
 			LocalDate.of(2026, 8, 18),
 			""
 		);
 		assertThat(disclosureRepository.saveFiling(filing)).isTrue();
-		activateCommonStocks("0001A0");
+		activateCommonStocks("0126Z0");
 
-		mockMvc.perform(get("/api/v1/disclosures").param("stockCode", "0001A0"))
+		mockMvc.perform(get("/api/v1/disclosures").param("stockCode", "0126Z0"))
 			.andExpect(status().isOk())
-			.andExpect(jsonPath("$.items[0].stockCode").value("0001A0"));
+			.andExpect(jsonPath("$.items[0].stockCode").value("0126Z0"));
+	}
+
+	@Test
+	void promotesOldDisclosureToOnDemandIndexing() throws Exception {
+		OpenDartFiling oldFiling = new OpenDartFiling(
+			"20100101000001",
+			"00126380",
+			"삼성전자",
+			"005930",
+			CorporationClass.KOSPI,
+			DisclosureType.PERIODIC,
+			"사업보고서",
+			"삼성전자",
+			LocalDate.of(2010, 1, 1),
+			""
+		);
+		disclosureRepository.saveFiling(oldFiling);
+		activateCommonStocks("005930");
+
+		mockMvc.perform(post(
+			"/api/v1/disclosures/{receiptNumber}/index",
+			oldFiling.receiptNumber()
+		)).andExpect(status().isAccepted());
+
+		assertThat(jdbcClient.sql("""
+			SELECT last_error_code
+			FROM ingestion_job
+			WHERE job_type = 'DISCLOSURE_DOCUMENT' AND business_key = :receiptNumber
+			""")
+			.param("receiptNumber", oldFiling.receiptNumber())
+			.query(String.class)
+			.single()).isEqualTo("ON_DEMAND");
 	}
 
 	@Test

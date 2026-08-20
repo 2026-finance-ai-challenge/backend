@@ -39,6 +39,7 @@ dependencies {
 	implementation("net.javacrumbs.shedlock:shedlock-provider-jdbc-template:7.1.0")
 	implementation("net.javacrumbs.shedlock:shedlock-spring:7.1.0")
 	implementation("org.jsoup:jsoup:1.23.1")
+	implementation("com.github.luben:zstd-jni:1.5.7-12")
 	annotationProcessor("org.springframework.boot:spring-boot-configuration-processor")
 	runtimeOnly("org.postgresql:postgresql")
 
@@ -58,7 +59,12 @@ tasks.withType<JavaCompile>().configureEach {
 
 tasks.withType<Test>().configureEach {
 	useJUnitPlatform()
+	jvmArgs("--enable-native-access=ALL-UNNAMED")
 	finalizedBy(tasks.jacocoTestReport)
+}
+
+tasks.withType<org.springframework.boot.gradle.tasks.run.BootRun>().configureEach {
+	jvmArgs("--enable-native-access=ALL-UNNAMED")
 }
 
 tasks.jacocoTestReport {

@@ -33,6 +33,10 @@ public class SecurityConfig {
 					HttpMethod.POST,
 					"/api/v1/disclosures/{receiptNumber:[0-9]{14}}/questions"
 				).permitAll()
+				.requestMatchers(
+					HttpMethod.POST,
+					"/api/v1/disclosures/{receiptNumber:[0-9]{14}}/index"
+				).permitAll()
 				.anyRequest().denyAll());
 
 		return http.build();

@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.ResponseEntity;
 
 import com.kmarket.navigator.backend.disclosure.application.DisclosureQueryHandler;
 import com.kmarket.navigator.backend.disclosure.application.DisclosureQuestionHandler;
@@ -97,5 +98,15 @@ class DisclosureController {
 		return DisclosureAnswerResponse.from(
 			questionHandler.ask(receiptNumber, request.toDomain())
 		);
+	}
+
+	@PostMapping("/{receiptNumber}/index")
+	ResponseEntity<Void> requestIndexing(
+		@PathVariable
+		@Pattern(regexp = "^[0-9]{14}$")
+		String receiptNumber
+	) {
+		queryHandler.requestIndexing(receiptNumber);
+		return ResponseEntity.accepted().build();
 	}
 }
