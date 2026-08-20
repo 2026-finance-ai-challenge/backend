@@ -9,6 +9,8 @@
 
 .codex-log/
 
+data/
+
 .gradle/
 build/
 out/

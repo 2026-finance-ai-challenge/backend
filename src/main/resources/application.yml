@@ -30,3 +30,7 @@ management:
       probes:
         enabled: true
       show-details: never
+
+opendart:
+  api-keys: ${OPENDART_API_KEYS:${OPENDART_API_KEY}}
+  archive-root: ${OPENDART_ARCHIVE_ROOT:./data/opendart-archives}

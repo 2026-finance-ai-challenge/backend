@@ -18,5 +18,5 @@ public interface OpenDartGateway {
 
 	List<OpenDartCorporation> fetchListedCorporations();
 
-	List<OpenDartDocument> fetchDocuments(String receiptNumber);
+	OpenDartDocumentFetch fetchDocuments(String receiptNumber);
 }

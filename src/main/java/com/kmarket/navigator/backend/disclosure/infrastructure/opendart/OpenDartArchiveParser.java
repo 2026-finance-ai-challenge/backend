@@ -3,6 +3,10 @@ package com.kmarket.navigator.backend.disclosure.infrastructure.opendart;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.Charset;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -21,6 +25,8 @@ import javax.xml.stream.XMLStreamReader;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
+import org.jsoup.nodes.Node;
+import org.jsoup.nodes.TextNode;
 import org.springframework.stereotype.Component;
 
 import com.kmarket.navigator.backend.disclosure.application.port.OpenDartCorporation;
@@ -38,6 +44,8 @@ class OpenDartArchiveParser {
 	private static final int MAX_ENTRY_BYTES = 50 * 1024 * 1024;
 	private static final int MAX_CORPORATION_ENTRY_BYTES = 40 * 1024 * 1024;
 	private static final int MAX_TOTAL_BYTES = 50 * 1024 * 1024;
+	private static final Charset KOREAN_CHARSET = Charset.forName("MS949");
+	private static final byte[] XML_ENTITY_MARKER = "<!ENTITY".getBytes(StandardCharsets.US_ASCII);
 
 	private final ObjectMapper objectMapper;
 
@@ -64,6 +72,13 @@ class OpenDartArchiveParser {
 		return documents;
 	}
 
+	OpenDartDocument parseViewerDocument(String receiptNumber, byte[] content) {
+		if (!receiptNumber.matches("[0-9]{14}")) {
+			throw new IllegalArgumentException("Invalid receipt number");
+		}
+		return parseDocument(new ArchiveEntry(receiptNumber + ".viewer.html", content));
+	}
+
 	private List<ArchiveEntry> unzip(byte[] archive, int maximumEntryBytes) {
 		List<ArchiveEntry> entries = new ArrayList<>();
 		int totalBytes = 0;
@@ -73,7 +88,7 @@ class OpenDartArchiveParser {
 				if (entry.isDirectory()) {
 					continue;
 				}
-				validateFilename(entry.getName());
+				String filename = sanitizeFilename(entry.getName());
 				if (entries.size() >= MAX_ENTRIES) {
 					throw new OpenDartException("ARCHIVE_ENTRY_LIMIT");
 				}
@@ -82,7 +97,7 @@ class OpenDartArchiveParser {
 				if (totalBytes > MAX_TOTAL_BYTES) {
 					throw new OpenDartException("ARCHIVE_SIZE_LIMIT");
 				}
-				entries.add(new ArchiveEntry(entry.getName(), content));
+			entries.add(new ArchiveEntry(filename, content));
 			}
 		}
 		catch (IOException exception) {
@@ -95,20 +110,18 @@ class OpenDartArchiveParser {
 	}
 
 	private OpenDartDocument parseDocument(ArchiveEntry entry) {
-		rejectXmlEntities(entry.content());
-		try {
-			Document document = Jsoup.parse(new ByteArrayInputStream(entry.content()), null, "");
-			List<OpenDartSection> sections = extractSections(document);
-			return new OpenDartDocument(
-				entry.filename(),
-				sha256(entry.content()),
-				document.body() == null ? document.text() : document.body().text(),
-				sections
-			);
+		rejectXmlEntityDeclarations(entry.content());
+		Document document = Jsoup.parse(decodeDocument(entry.content()));
+		List<OpenDartSection> sections = extractSections(document);
+		if (sections.stream().anyMatch(section -> section.text().contains("\uFFFD"))) {
+			throw new OpenDartException("SOURCE_TEXT_CORRUPTED");
 		}
-		catch (IOException exception) {
-			throw new OpenDartException("INVALID_DOCUMENT");
-		}
+		return new OpenDartDocument(
+			entry.filename(),
+			sha256(entry.content()),
+			document.body() == null ? visibleText(document) : visibleText(document.body()),
+			sections
+		);
 	}
 
 	private List<OpenDartSection> extractSections(Document document) {
@@ -118,40 +131,110 @@ class OpenDartArchiveParser {
 			sections.add(new OpenDartSection(sections.size(), SectionKind.TITLE, title, title, null));
 		}
 
-		for (Element element : document.select("h1, h2, h3, h4, h5, h6, p, table")) {
-			if (element.tagName().equals("table")) {
-				String text = normalize(element.text());
-				if (!text.isBlank()) {
-					sections.add(new OpenDartSection(
-						sections.size(),
-						SectionKind.TABLE,
-						null,
-						text,
-						tableJson(element)
-					));
-				}
-			}
-			else {
-				String text = normalize(element.text());
-				if (!text.isBlank()) {
-					sections.add(new OpenDartSection(
-						sections.size(),
-						element.tagName().startsWith("h") ? SectionKind.TITLE : SectionKind.TEXT,
-						element.tagName().startsWith("h") ? text : null,
-						text,
-						null
-					));
-				}
-			}
+		if (document.body() != null) {
+			appendVisibleSections(document.body(), sections);
 		}
-
-		if (sections.isEmpty() && document.body() != null) {
-			String text = normalize(document.body().text());
-			if (!text.isBlank()) {
-				sections.add(new OpenDartSection(0, SectionKind.TEXT, null, text, null));
-			}
+		else {
+			addTextSection(sections, normalize(document.text()), false);
 		}
 		return sections;
+	}
+
+	private void appendVisibleSections(Node node, List<OpenDartSection> sections) {
+		if (node instanceof TextNode textNode) {
+			addTextSection(sections, normalize(textNode.text()), false);
+			return;
+		}
+		if (!(node instanceof Element element)) {
+			return;
+		}
+
+		String tagName = element.tagName();
+		if (tagName.equals("script") || tagName.equals("style") || tagName.equals("noscript")) {
+			return;
+		}
+		if (tagName.equals("table")) {
+			String text = visibleText(element);
+			if (!text.isBlank()) {
+				sections.add(new OpenDartSection(
+					sections.size(),
+					SectionKind.TABLE,
+					null,
+					text,
+					tableJson(element)
+				));
+			}
+			return;
+		}
+		if (isAtomicTextElement(tagName)) {
+			String text = visibleText(element);
+			addTextSection(sections, text, tagName.startsWith("h"));
+			return;
+		}
+
+		for (Node child : element.childNodes()) {
+			appendVisibleSections(child, sections);
+		}
+	}
+
+	private static String visibleText(Node node) {
+		StringBuilder text = new StringBuilder();
+		appendVisibleText(node, text);
+		return normalize(text.toString());
+	}
+
+	private static void appendVisibleText(Node node, StringBuilder text) {
+		if (node instanceof TextNode textNode) {
+			String value = normalize(textNode.text());
+			if (!value.isBlank()) {
+				if (!text.isEmpty()) {
+					text.append(' ');
+				}
+				text.append(value);
+			}
+			return;
+		}
+		if (node instanceof Element element) {
+			String tagName = element.tagName();
+			if (tagName.equals("script") || tagName.equals("style") || tagName.equals("noscript")) {
+				return;
+			}
+		}
+		for (Node child : node.childNodes()) {
+			appendVisibleText(child, text);
+		}
+	}
+
+	private static boolean isAtomicTextElement(String tagName) {
+		return isHeading(tagName)
+			|| tagName.equals("p")
+			|| tagName.equals("pre")
+			|| tagName.equals("li")
+			|| tagName.equals("blockquote");
+	}
+
+	private static boolean isHeading(String tagName) {
+		return tagName.length() == 2
+			&& tagName.charAt(0) == 'h'
+			&& tagName.charAt(1) >= '1'
+			&& tagName.charAt(1) <= '6';
+	}
+
+	private static void addTextSection(
+		List<OpenDartSection> sections,
+		String text,
+		boolean heading
+	) {
+		if (text.isBlank()) {
+			return;
+		}
+		sections.add(new OpenDartSection(
+			sections.size(),
+			heading ? SectionKind.TITLE : SectionKind.TEXT,
+			heading ? text : null,
+			text,
+			null
+		));
 	}
 
 	private String tableJson(Element table) {
@@ -166,7 +249,7 @@ class OpenDartArchiveParser {
 	}
 
 	private List<OpenDartCorporation> parseCorporationXml(byte[] content) {
-		rejectXmlEntities(content);
+		rejectXmlEntityDeclarations(content);
 		XMLInputFactory factory = XMLInputFactory.newFactory();
 		factory.setProperty(XMLInputFactory.SUPPORT_DTD, false);
 		factory.setProperty("javax.xml.stream.isSupportingExternalEntities", false);
@@ -223,21 +306,63 @@ class OpenDartArchiveParser {
 		return output.toByteArray();
 	}
 
-	private static void validateFilename(String filename) {
+	private static String sanitizeFilename(String filename) {
 		String normalized = filename.replace('\\', '/');
-		if (normalized.length() > MAX_FILENAME_LENGTH
-			|| normalized.startsWith("/")
-			|| normalized.contains("../")
-			|| normalized.contains(":")) {
+		String safeFilename = normalized.replaceFirst("^/+", "");
+		if (safeFilename.isBlank()
+			|| safeFilename.length() > MAX_FILENAME_LENGTH
+			|| safeFilename.equals("..")
+			|| safeFilename.startsWith("../")
+			|| safeFilename.contains("/../")
+			|| safeFilename.endsWith("/..")
+			|| safeFilename.contains(":")) {
 			throw new OpenDartException("UNSAFE_ARCHIVE_PATH");
+		}
+		return safeFilename;
+	}
+
+	private static String decodeDocument(byte[] content) {
+		try {
+			return removeBom(decodeStrict(content, StandardCharsets.UTF_8));
+		}
+		catch (CharacterCodingException ignored) {
+			try {
+				return removeBom(decodeStrict(content, KOREAN_CHARSET));
+			}
+			catch (CharacterCodingException exception) {
+				throw new OpenDartException("INVALID_DOCUMENT_ENCODING");
+			}
 		}
 	}
 
-	private static void rejectXmlEntities(byte[] content) {
-		int length = Math.min(content.length, 4096);
-		String prefix = new String(content, 0, length, StandardCharsets.ISO_8859_1).toUpperCase(Locale.ROOT);
-		if (prefix.contains("<!DOCTYPE") || prefix.contains("<!ENTITY")) {
-			throw new OpenDartException("UNSAFE_XML");
+	private static String decodeStrict(byte[] content, Charset charset) throws CharacterCodingException {
+		return charset.newDecoder()
+			.onMalformedInput(CodingErrorAction.REPORT)
+			.onUnmappableCharacter(CodingErrorAction.REPORT)
+			.decode(ByteBuffer.wrap(content))
+			.toString();
+	}
+
+	private static String removeBom(String value) {
+		return value.startsWith("\uFEFF") ? value.substring(1) : value;
+	}
+
+	private static void rejectXmlEntityDeclarations(byte[] content) {
+		for (int offset = 0; offset <= content.length - XML_ENTITY_MARKER.length; offset++) {
+			boolean matched = true;
+			for (int index = 0; index < XML_ENTITY_MARKER.length; index++) {
+				int value = content[offset + index] & 0xff;
+				if (value >= 'a' && value <= 'z') {
+					value -= 'a' - 'A';
+				}
+				if (value != XML_ENTITY_MARKER[index]) {
+					matched = false;
+					break;
+				}
+			}
+			if (matched) {
+				throw new OpenDartException("UNSAFE_XML");
+			}
 		}
 	}
 
