@@ -1,5 +1,6 @@
 package com.kmarket.navigator.backend.disclosure.infrastructure.opendart;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.LocalDate;
@@ -7,6 +8,11 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
+
+import javax.xml.stream.XMLInputFactory;
+import javax.xml.stream.XMLStreamConstants;
+import javax.xml.stream.XMLStreamException;
+import javax.xml.stream.XMLStreamReader;
 
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.client.ClientHttpResponse;
@@ -32,6 +38,7 @@ class OpenDartClient implements OpenDartGateway {
 	private static final int PAGE_SIZE = 100;
 	private static final int MAX_JSON_RESPONSE_BYTES = 2 * 1024 * 1024;
 	private static final int MAX_RESPONSE_BYTES = 25 * 1024 * 1024;
+	private static final int MAX_ERROR_RESPONSE_BYTES = 64 * 1024;
 	private static final int MAX_ATTEMPTS = 3;
 
 	private final RestClient restClient;
@@ -53,7 +60,8 @@ class OpenDartClient implements OpenDartGateway {
 
 	@Override
 	public OpenDartPage fetchFilings(
-		LocalDate date,
+		LocalDate from,
+		LocalDate to,
 		CorporationClass corporationClass,
 		DisclosureType disclosureType,
 		int page
@@ -62,8 +70,8 @@ class OpenDartClient implements OpenDartGateway {
 			.uri(builder -> builder
 				.path("/api/list.json")
 				.queryParam("crtfc_key", properties.apiKey())
-				.queryParam("bgn_de", DART_DATE.format(date))
-				.queryParam("end_de", DART_DATE.format(date))
+				.queryParam("bgn_de", DART_DATE.format(from))
+				.queryParam("end_de", DART_DATE.format(to))
 				.queryParam("corp_cls", corporationClass.code())
 				.queryParam("pblntf_ty", disclosureType.code())
 				.queryParam("page_no", page)
@@ -114,7 +122,7 @@ class OpenDartClient implements OpenDartGateway {
 	}
 
 	private byte[] fetchArchive(String path, String receiptNumber) {
-		return executeWithRetry(() -> restClient.get()
+		byte[] archive = executeWithRetry(() -> restClient.get()
 			.uri(builder -> {
 				var uri = builder
 					.path(path)
@@ -125,6 +133,40 @@ class OpenDartClient implements OpenDartGateway {
 				return uri.build();
 			})
 			.exchange((request, response) -> readResponse(response, MAX_RESPONSE_BYTES)));
+		validateArchiveResponse(archive);
+		return archive;
+	}
+
+	private static void validateArchiveResponse(byte[] response) {
+		if (response.length >= 4 && response[0] == 'P' && response[1] == 'K') {
+			return;
+		}
+		if (response.length > MAX_ERROR_RESPONSE_BYTES) {
+			throw new OpenDartException("INVALID_ARCHIVE_RESPONSE");
+		}
+
+		XMLInputFactory factory = XMLInputFactory.newFactory();
+		factory.setProperty(XMLInputFactory.SUPPORT_DTD, false);
+		factory.setProperty("javax.xml.stream.isSupportingExternalEntities", false);
+		try {
+			XMLStreamReader reader = factory.createXMLStreamReader(new ByteArrayInputStream(response));
+			while (reader.hasNext()) {
+				if (reader.next() == XMLStreamConstants.START_ELEMENT
+					&& reader.getLocalName().equals("status")) {
+					String status = reader.getElementText().trim();
+					reader.close();
+					if (status.matches("[0-9]{3}")) {
+						throw new OpenDartException("STATUS_" + status);
+					}
+					break;
+				}
+			}
+			reader.close();
+		}
+		catch (XMLStreamException exception) {
+			throw new OpenDartException("INVALID_ARCHIVE_RESPONSE");
+		}
+		throw new OpenDartException("INVALID_ARCHIVE_RESPONSE");
 	}
 
 	private static byte[] readResponse(ClientHttpResponse response, int maximumBytes) {

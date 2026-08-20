@@ -1,6 +1,7 @@
 package com.kmarket.navigator.backend.disclosure.infrastructure.opendart;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
@@ -54,6 +55,7 @@ class OpenDartClientTests {
 
 		var page = client.fetchFilings(
 			LocalDate.of(2026, 8, 18),
+			LocalDate.of(2026, 8, 18),
 			CorporationClass.KOSPI,
 			DisclosureType.MATERIAL_EVENT,
 			1
@@ -64,6 +66,32 @@ class OpenDartClientTests {
 			assertThat(filing.stockCode()).isEqualTo("005930");
 			assertThat(filing.filedDate()).isEqualTo(LocalDate.of(2026, 8, 18));
 		});
+		server.verify();
+	}
+
+	@Test
+	void mapsOpenDartArchiveErrorCode() {
+		RestClient.Builder builder = RestClient.builder();
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		ObjectMapper objectMapper = new ObjectMapper();
+		OpenDartProperties properties = new OpenDartProperties();
+		properties.setApiKey("0".repeat(40));
+		OpenDartClient client = new OpenDartClient(
+			builder.baseUrl("https://opendart.fss.or.kr").build(),
+			properties,
+			new OpenDartArchiveParser(objectMapper),
+			objectMapper
+		);
+		server.expect(requestTo(containsString("/api/document.xml")))
+			.andRespond(withSuccess(
+				"<?xml version=\"1.0\" encoding=\"UTF-8\"?><result><status>014</status>"
+					+ "<message>파일이 존재하지 않습니다.</message></result>",
+				MediaType.APPLICATION_XML
+			));
+
+		assertThatThrownBy(() -> client.fetchDocuments("20260818000021"))
+			.isInstanceOfSatisfying(OpenDartException.class, exception ->
+				assertThat(exception.errorCode()).isEqualTo("STATUS_014"));
 		server.verify();
 	}
 }

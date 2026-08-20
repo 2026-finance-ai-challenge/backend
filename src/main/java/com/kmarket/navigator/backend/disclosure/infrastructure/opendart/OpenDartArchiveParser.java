@@ -35,7 +35,8 @@ class OpenDartArchiveParser {
 
 	private static final int MAX_ENTRIES = 100;
 	private static final int MAX_FILENAME_LENGTH = 500;
-	private static final int MAX_ENTRY_BYTES = 15 * 1024 * 1024;
+	private static final int MAX_ENTRY_BYTES = 50 * 1024 * 1024;
+	private static final int MAX_CORPORATION_ENTRY_BYTES = 40 * 1024 * 1024;
 	private static final int MAX_TOTAL_BYTES = 50 * 1024 * 1024;
 
 	private final ObjectMapper objectMapper;
@@ -45,7 +46,7 @@ class OpenDartArchiveParser {
 	}
 
 	List<OpenDartCorporation> parseCorporations(byte[] archive) {
-		List<ArchiveEntry> entries = unzip(archive);
+		List<ArchiveEntry> entries = unzip(archive, MAX_CORPORATION_ENTRY_BYTES);
 		if (entries.size() != 1) {
 			throw new OpenDartException("INVALID_CORPORATION_ARCHIVE");
 		}
@@ -53,7 +54,7 @@ class OpenDartArchiveParser {
 	}
 
 	List<OpenDartDocument> parseDocuments(byte[] archive) {
-		List<OpenDartDocument> documents = unzip(archive).stream()
+		List<OpenDartDocument> documents = unzip(archive, MAX_ENTRY_BYTES).stream()
 			.filter(entry -> entry.filename().toLowerCase(Locale.ROOT).endsWith(".xml"))
 			.map(this::parseDocument)
 			.toList();
@@ -63,7 +64,7 @@ class OpenDartArchiveParser {
 		return documents;
 	}
 
-	private List<ArchiveEntry> unzip(byte[] archive) {
+	private List<ArchiveEntry> unzip(byte[] archive, int maximumEntryBytes) {
 		List<ArchiveEntry> entries = new ArrayList<>();
 		int totalBytes = 0;
 		try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(archive))) {
@@ -76,7 +77,7 @@ class OpenDartArchiveParser {
 				if (entries.size() >= MAX_ENTRIES) {
 					throw new OpenDartException("ARCHIVE_ENTRY_LIMIT");
 				}
-				byte[] content = readLimited(zip, MAX_ENTRY_BYTES);
+				byte[] content = readLimited(zip, maximumEntryBytes);
 				totalBytes += content.length;
 				if (totalBytes > MAX_TOTAL_BYTES) {
 					throw new OpenDartException("ARCHIVE_SIZE_LIMIT");
@@ -189,7 +190,8 @@ class OpenDartArchiveParser {
 					}
 				}
 				else if (event == XMLStreamConstants.END_ELEMENT && reader.getLocalName().equals("list")) {
-					if (corpCode != null && nameKo != null && stockCode != null && stockCode.matches("[0-9]{6}")) {
+					if (corpCode != null && nameKo != null && stockCode != null
+						&& stockCode.matches("[0-9A-Z]{6}")) {
 						corporations.add(new OpenDartCorporation(corpCode, nameKo, blankToNull(nameEn), stockCode));
 					}
 					corpCode = null;
