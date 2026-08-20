@@ -15,6 +15,15 @@ class OpenDartClientConfig {
 
 	@Bean
 	RestClient openDartRestClient(RestClient.Builder builder) {
+		return restClient(builder, "https://opendart.fss.or.kr");
+	}
+
+	@Bean
+	RestClient dartViewerRestClient(RestClient.Builder builder) {
+		return restClient(builder, "https://dart.fss.or.kr");
+	}
+
+	private static RestClient restClient(RestClient.Builder builder, String baseUrl) {
 		HttpClient httpClient = HttpClient.newBuilder()
 			.connectTimeout(Duration.ofSeconds(5))
 			.followRedirects(HttpClient.Redirect.NEVER)
@@ -22,7 +31,7 @@ class OpenDartClientConfig {
 		JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
 		requestFactory.setReadTimeout(Duration.ofSeconds(20));
 		return builder
-			.baseUrl("https://opendart.fss.or.kr")
+			.baseUrl(baseUrl)
 			.requestFactory(requestFactory)
 			.build();
 	}
