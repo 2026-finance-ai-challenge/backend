@@ -114,6 +114,31 @@ public enum ErrorCode {
 		"AI_RATE_LIMITED",
 		"The AI request limit was reached. Try again later."
 	),
+	INVALID_TAX_DOCUMENT(
+		HttpStatus.BAD_REQUEST,
+		"INVALID_TAX_DOCUMENT",
+		"The tax document file, type, or signature is invalid."
+	),
+	TAX_DOCUMENT_NOT_FOUND(
+		HttpStatus.NOT_FOUND,
+		"TAX_DOCUMENT_NOT_FOUND",
+		"The tax document was not found."
+	),
+	TAX_DOCUMENT_NOT_RETRYABLE(
+		HttpStatus.CONFLICT,
+		"TAX_DOCUMENT_NOT_RETRYABLE",
+		"Only a failed tax document verification can be retried."
+	),
+	TAX_DOCUMENT_RATE_LIMITED(
+		HttpStatus.TOO_MANY_REQUESTS,
+		"TAX_DOCUMENT_RATE_LIMITED",
+		"The tax document upload limit was reached. Try again later."
+	),
+	TAX_DOCUMENT_STORAGE_UNAVAILABLE(
+		HttpStatus.SERVICE_UNAVAILABLE,
+		"TAX_DOCUMENT_STORAGE_UNAVAILABLE",
+		"Secure tax document storage is temporarily unavailable."
+	),
 	DISCLOSURE_NOT_FOUND(HttpStatus.NOT_FOUND, "DISCLOSURE_NOT_FOUND", "The disclosure was not found."),
 	DISCLOSURE_INDEX_NOT_READY(
 		HttpStatus.CONFLICT,

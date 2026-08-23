@@ -1,0 +1,71 @@
+{
+  "asOf": "2026-08-23",
+  "domesticDefaultRate": 22.0,
+  "domesticSourceUrl": "https://www.nts.go.kr/nts/cm/cntnts/cntntsView.do?cntntsId=7703&mi=2384",
+  "treaties": [
+    {
+      "countryCode": "US",
+      "countryName": "United States",
+      "generalDividendRate": 15.0,
+      "qualifyingCorporateRate": 10.0,
+      "minimumOwnershipPercent": 10.0,
+      "sourceUrl": "https://taxlaw.nts.go.kr/st/USESTC002M.do?txaAgrmBscId=200000000000000116"
+    },
+    {
+      "countryCode": "CA",
+      "countryName": "Canada",
+      "generalDividendRate": 15.0,
+      "qualifyingCorporateRate": 5.0,
+      "minimumOwnershipPercent": 25.0,
+      "sourceUrl": "https://taxlaw.nts.go.kr/st/USESTC002M.do?txaAgrmBscId=200000000000000135"
+    },
+    {
+      "countryCode": "GB",
+      "countryName": "United Kingdom",
+      "generalDividendRate": 15.0,
+      "qualifyingCorporateRate": 5.0,
+      "minimumOwnershipPercent": 25.0,
+      "sourceUrl": "https://taxlaw.nts.go.kr/st/USESTC002M.do?txaAgrmBscId=200000000000000113"
+    },
+    {
+      "countryCode": "SG",
+      "countryName": "Singapore",
+      "generalDividendRate": 15.0,
+      "qualifyingCorporateRate": 10.0,
+      "minimumOwnershipPercent": 10.0,
+      "sourceUrl": "https://taxlaw.nts.go.kr/st/USESTC002M.do?txaAgrmBscId=200000000000000115"
+    },
+    {
+      "countryCode": "AU",
+      "countryName": "Australia",
+      "generalDividendRate": 15.0,
+      "qualifyingCorporateRate": 5.0,
+      "minimumOwnershipPercent": 20.0,
+      "sourceUrl": "https://taxlaw.nts.go.kr/st/USESTC002M.do?txaAgrmBscId=200000000000000076"
+    },
+    {
+      "countryCode": "DE",
+      "countryName": "Germany",
+      "generalDividendRate": 15.0,
+      "qualifyingCorporateRate": 10.0,
+      "minimumOwnershipPercent": 25.0,
+      "sourceUrl": "https://taxlaw.nts.go.kr/st/USESTC002M.do?txaAgrmBscId=200000000000000087"
+    },
+    {
+      "countryCode": "CN",
+      "countryName": "China",
+      "generalDividendRate": 10.0,
+      "qualifyingCorporateRate": null,
+      "minimumOwnershipPercent": null,
+      "sourceUrl": "https://taxlaw.nts.go.kr/st/USESTC002M.do?txaAgrmBscId=200000000000000084"
+    },
+    {
+      "countryCode": "FR",
+      "countryName": "France",
+      "generalDividendRate": 15.0,
+      "qualifyingCorporateRate": 10.0,
+      "minimumOwnershipPercent": 25.0,
+      "sourceUrl": "https://taxlaw.nts.go.kr/st/USESTC002M.do?txaAgrmBscId=200000000000000090"
+    }
+  ]
+}

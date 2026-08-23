@@ -2,7 +2,7 @@
 
 외국인 투자자가 한국 주식시장의 시세·뉴스·공시를 영어로 탐색할 수 있도록 수집·정규화·조회하는 Spring Boot 서비스다.
 
-현재 구현 범위는 회원·개인화, 시장 스크리너·외국인 한도, 뉴스·공시 인텔리전스, 근거 기반 범용 AI Agent와 공시 RAG 질의응답이다.
+현재 구현 범위는 회원·개인화, 시장 스크리너·외국인 한도, 뉴스·공시 인텔리전스, 근거 기반 범용 AI Agent와 공시 RAG 질의응답, 조세조약 세율 안내와 암호화 세무 문서 검증이다.
 
 ## 프로젝트 문서
 
@@ -13,6 +13,7 @@
 - [뉴스 인텔리전스 API](docs/NEWS_API.md)
 - [공시 인텔리전스 API](docs/DISCLOSURE_API.md)
 - [AI Agent 채팅방 API](docs/CHAT_API.md)
+- [세무 자격·문서 검증 API](docs/TAX_API.md)
 - [Git 및 전달 워크플로](docs/GIT_WORKFLOW.md)
 - [Codex 저장소 지침](AGENTS.md)
 - [Codex 작업 스킬](.agents/skills/k-market-delivery/SKILL.md)
@@ -154,6 +155,7 @@ docker compose up -d
 뉴스 수집·중복 묶음·OpenAI 구조화 분석·선택 문맥 해설은 [뉴스 인텔리전스 API 문서](docs/NEWS_API.md)를 따른다.
 정정 버전 연결·구조화 원문·근거 고정 What/Why/Impact 요약은 [공시 인텔리전스 API 문서](docs/DISCLOSURE_API.md)를 따른다.
 채팅방 생성·목록·문맥 복원·낙관적 잠금 이름 변경·삭제 보존 정책은 [AI Agent 채팅방 API 문서](docs/CHAT_API.md)를 따른다.
+국가별 조세조약 세율 안내와 암호화 OCR 문서 검증은 [세무 자격·문서 검증 API 문서](docs/TAX_API.md)를 따른다.
 
 질의응답을 사용하려면 AI API 서버가 `KMARKET_AI_BASE_URL`에서 실행 중이어야 하며 두 서비스의 `KMARKET_AI_SERVICE_TOKEN`이 같아야 한다. 그 외 경로는 기본 차단한다.
 

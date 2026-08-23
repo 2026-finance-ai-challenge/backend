@@ -8,6 +8,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -16,6 +17,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.time.LocalDate;
 import java.time.Instant;
 import java.math.BigDecimal;
+import java.nio.file.Files;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -30,6 +32,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -64,6 +67,14 @@ import com.kmarket.navigator.backend.news.domain.TermReference;
 import com.kmarket.navigator.backend.chat.application.ChatGenerationWorker;
 import com.kmarket.navigator.backend.chat.application.port.AgentGateway;
 import com.kmarket.navigator.backend.chat.domain.AgentAnswer;
+import com.kmarket.navigator.backend.tax.application.TaxDocumentWorker;
+import com.kmarket.navigator.backend.tax.application.port.TaxDocumentGateway;
+import com.kmarket.navigator.backend.tax.domain.TaxDocumentFields;
+import com.kmarket.navigator.backend.tax.domain.TaxDocumentIssue;
+import com.kmarket.navigator.backend.tax.domain.TaxDocumentStatus;
+import com.kmarket.navigator.backend.tax.domain.TaxDocumentType;
+import com.kmarket.navigator.backend.tax.domain.TaxDocumentVerification;
+import com.kmarket.navigator.backend.tax.infrastructure.storage.TaxDocumentProperties;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -72,7 +83,10 @@ import tools.jackson.databind.ObjectMapper;
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Transactional
-@SpringBootTest(properties = "opendart.api-keys=0000000000000000000000000000000000000000")
+@SpringBootTest(properties = {
+	"opendart.api-keys=0000000000000000000000000000000000000000",
+	"kmarket.tax.documents.encryption-key-base64=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+})
 class BackendApplicationTests {
 
 	@Container
@@ -121,11 +135,144 @@ class BackendApplicationTests {
 	@MockitoBean
 	AgentGateway agentGateway;
 
+	@MockitoBean
+	TaxDocumentGateway taxDocumentGateway;
+
 	@Autowired
 	ChatGenerationWorker chatGenerationWorker;
 
+	@Autowired
+	TaxDocumentWorker taxDocumentWorker;
+
+	@Autowired
+	TaxDocumentProperties taxDocumentProperties;
+
 	@Test
 	void contextLoads() {
+	}
+
+	@Test
+	void returnsDataDrivenTreatyRatesWithoutMakingEligibilityDetermination() throws Exception {
+		mockMvc.perform(get("/api/v1/tax/countries"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$[?(@.countryCode == 'US')]").exists());
+		mockMvc.perform(post("/api/v1/tax/eligibility")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{"residencyCountry":"US","investorType":"INDIVIDUAL"}
+					"""))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.treatyDataAvailable").value(true))
+			.andExpect(jsonPath("$.domesticDefaultRate").value(22.0))
+			.andExpect(jsonPath("$.treatyDividendRate").value(15.0))
+			.andExpect(jsonPath("$.sourceUrl").value(org.hamcrest.Matchers.containsString("taxlaw.nts.go.kr")))
+			.andExpect(jsonPath("$.caveats[0]").exists());
+		mockMvc.perform(post("/api/v1/tax/eligibility")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{"residencyCountry":"ZZ","investorType":"INDIVIDUAL"}
+					"""))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.treatyDataAvailable").value(false))
+			.andExpect(jsonPath("$.treatyDividendRate").doesNotExist());
+	}
+
+	@Test
+	void encryptsValidatesVerifiesIsolatesAndPurgesTaxDocuments() throws Exception {
+		when(taxDocumentGateway.verify(any(), any(), any(), any(), any(), any(), any()))
+			.thenReturn(new TaxDocumentVerification(
+				TaxDocumentType.RESIDENCY_CERTIFICATE,
+				TaxDocumentStatus.VERIFIED,
+				new TaxDocumentFields(
+					"Jane Investor",
+					"US",
+					"2026-01-10",
+					null,
+					"IRS",
+					"CERT-100",
+					null,
+					null,
+					"INDIVIDUAL"
+				),
+				List.of(),
+				List.of(new TaxDocumentIssue(
+					"AUTHENTICITY_NOT_CONFIRMED",
+					"INFO",
+					"Screening does not constitute government approval."
+				)),
+				new BigDecimal("0.9700"),
+				new BigDecimal("0.0200"),
+				false,
+				"gpt-5-mini",
+				"tax-document-v1"
+			));
+		AuthFixture owner = signupAndLogin("tax_owner");
+		AuthFixture other = signupAndLogin("tax_other");
+		byte[] pdf = "%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+		MockMultipartFile file = new MockMultipartFile(
+			"file",
+			"residency.pdf",
+			"application/pdf",
+			pdf
+		);
+		String responseBody = mockMvc.perform(multipart("/api/v1/me/tax-documents")
+				.file(file)
+				.param("documentType", "RESIDENCY_CERTIFICATE")
+				.param("expectedResidencyCountry", "US")
+				.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isAccepted())
+			.andExpect(jsonPath("$.status").value("PROCESSING"))
+			.andReturn().getResponse().getContentAsString();
+		UUID documentId = UUID.fromString(objectMapper.readTree(responseBody).get("id").stringValue());
+		String storageKey = jdbcClient.sql("SELECT storage_key FROM tax_document WHERE id = :id")
+			.param("id", documentId)
+			.query(String.class)
+			.single();
+		byte[] encrypted = Files.readAllBytes(taxDocumentProperties.root().resolve(storageKey));
+		assertThat(encrypted).startsWith("KMTD1".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+		assertThat(encrypted).isNotEqualTo(pdf);
+
+		taxDocumentWorker.process();
+		mockMvc.perform(get("/api/v1/me/tax-documents/{documentId}", documentId)
+				.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.status").value("VERIFIED"))
+			.andExpect(jsonPath("$.fields.residencyCountry").value("US"))
+			.andExpect(jsonPath("$.modelId").value("gpt-5-mini"));
+		mockMvc.perform(get("/api/v1/me/tax-documents/{documentId}", documentId)
+				.header("Authorization", "Bearer " + other.accessToken()))
+			.andExpect(status().isNotFound());
+
+		mockMvc.perform(delete("/api/v1/me/tax-documents/{documentId}", documentId)
+				.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isNoContent());
+		jdbcClient.sql("UPDATE tax_document SET purge_after = CURRENT_TIMESTAMP WHERE id = :id")
+			.param("id", documentId)
+			.update();
+		taxDocumentWorker.purgeDeleted();
+		assertThat(Files.exists(taxDocumentProperties.root().resolve(storageKey))).isFalse();
+		assertThat(jdbcClient.sql("SELECT purged_at IS NOT NULL FROM tax_document WHERE id = :id")
+			.param("id", documentId)
+			.query(Boolean.class)
+			.single()).isTrue();
+	}
+
+	@Test
+	void rejectsTaxDocumentsWithMismatchedOrActiveContentSignatures() throws Exception {
+		AuthFixture owner = signupAndLogin("tax_invalid");
+		MockMultipartFile activePdf = new MockMultipartFile(
+			"file",
+			"attack.pdf",
+			"application/pdf",
+			"%PDF-1.7\n/OpenAction 1 0 R\n%%EOF".getBytes(java.nio.charset.StandardCharsets.US_ASCII)
+		);
+		mockMvc.perform(multipart("/api/v1/me/tax-documents")
+				.file(activePdf)
+				.param("documentType", "RESIDENCY_CERTIFICATE")
+				.param("expectedResidencyCountry", "US")
+				.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.code").value("INVALID_TAX_DOCUMENT"));
 	}
 
 	@Test
