@@ -55,6 +55,24 @@ curl --fail --silent --show-error "http://127.0.0.1:${AI_PORT}/health" >/dev/nul
 curl --fail --silent --show-error "http://127.0.0.1:${BACKEND_PORT}/actuator/health" >/dev/null
 curl --fail --silent --show-error "http://127.0.0.1:${FRONTEND_PORT}/healthz" >/dev/null
 curl --fail --silent --show-error "http://127.0.0.1:${FRONTEND_PORT}/api/v1/market/indices" >/dev/null
+COMPOSE_PROJECT_NAME="$project_name" compose exec -T ai-api python -c 'import os; from pathlib import Path; from k_market_ai.news.classifier import HanaNewsSignalClassifier; classifier = HanaNewsSignalClassifier(Path("/opt/hannah"), expected_commit=os.environ["KMARKET_AI_HANA_EXPECTED_COMMIT"], runtime_environment="development"); result = classifier.classify("삼성전자 신규 공급 계약", ("삼성전자가 신규 공급 계약을 체결했다.",), ("삼성전자",)); assert result.model_version.startswith("hana-finance-")'
+test_login_id="verify_$$"
+signup_status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+  -H 'Content-Type: application/json' \
+  -d "{\"loginId\":\"${test_login_id}\",\"password\":\"Docker!Pass123\",\"passwordConfirm\":\"Docker!Pass123\",\"nationality\":\"US\",\"investorType\":\"INDIVIDUAL\",\"termsAccepted\":true,\"privacyAccepted\":true}" \
+  "http://127.0.0.1:${FRONTEND_PORT}/api/v1/auth/signup")
+if [ "$signup_status" != "201" ]; then
+  echo "회원가입 통합 검증에 실패했습니다." >&2
+  exit 1
+fi
+login_response=$(curl --fail --silent --show-error \
+  -H 'Content-Type: application/json' \
+  -d "{\"loginId\":\"${test_login_id}\",\"password\":\"Docker!Pass123\"}" \
+  "http://127.0.0.1:${FRONTEND_PORT}/api/v1/auth/login")
+if ! printf '%s' "$login_response" | grep -q '"accessToken"'; then
+  echo "Redis 세션 기반 JWT 발급 검증에 실패했습니다." >&2
+  exit 1
+fi
 if ! curl --fail --silent --show-error --head "http://127.0.0.1:${FRONTEND_PORT}/" | grep -qi "content-security-policy"; then
   echo "프론트엔드 보안 헤더 검증에 실패했습니다." >&2
   exit 1
