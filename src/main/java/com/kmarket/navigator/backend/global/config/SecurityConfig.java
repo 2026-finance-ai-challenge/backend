@@ -59,7 +59,8 @@ public class SecurityConfig {
 				).permitAll()
 				.requestMatchers(
 					HttpMethod.GET,
-					"/api/v1/disclosures/{receiptNumber:[0-9]{14}}"
+					"/api/v1/disclosures/{receiptNumber:[0-9]{14}}",
+					"/api/v1/disclosures/{receiptNumber:[0-9]{14}}/insight"
 				).permitAll()
 				.requestMatchers(
 					HttpMethod.POST,
@@ -67,7 +68,8 @@ public class SecurityConfig {
 				).permitAll()
 				.requestMatchers(
 					HttpMethod.POST,
-					"/api/v1/disclosures/{receiptNumber:[0-9]{14}}/index"
+					"/api/v1/disclosures/{receiptNumber:[0-9]{14}}/index",
+					"/api/v1/disclosures/{receiptNumber:[0-9]{14}}/insight"
 				).permitAll()
 				.anyRequest().denyAll())
 			.addFilterBefore(bearerTokenAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

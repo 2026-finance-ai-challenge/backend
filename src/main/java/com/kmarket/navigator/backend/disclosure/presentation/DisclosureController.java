@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.http.ResponseEntity;
 
 import com.kmarket.navigator.backend.disclosure.application.DisclosureQueryHandler;
+import com.kmarket.navigator.backend.disclosure.application.DisclosureInsightHandler;
 import com.kmarket.navigator.backend.disclosure.application.DisclosureQuestionHandler;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureCursor;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureListQuery;
@@ -37,16 +38,37 @@ class DisclosureController {
 
 	private final DisclosureQueryHandler queryHandler;
 	private final DisclosureQuestionHandler questionHandler;
+	private final DisclosureInsightHandler insightHandler;
 	private final ObjectMapper objectMapper;
 
 	DisclosureController(
 		DisclosureQueryHandler queryHandler,
 		DisclosureQuestionHandler questionHandler,
+		DisclosureInsightHandler insightHandler,
 		ObjectMapper objectMapper
 	) {
 		this.queryHandler = queryHandler;
 		this.questionHandler = questionHandler;
+		this.insightHandler = insightHandler;
 		this.objectMapper = objectMapper;
+	}
+
+	@GetMapping("/{receiptNumber}/insight")
+	DisclosureInsightResponse findInsight(
+		@PathVariable
+		@Pattern(regexp = "^[0-9]{14}$")
+		String receiptNumber
+	) {
+		return DisclosureInsightResponse.from(insightHandler.find(receiptNumber));
+	}
+
+	@PostMapping("/{receiptNumber}/insight")
+	DisclosureInsightResponse generateInsight(
+		@PathVariable
+		@Pattern(regexp = "^[0-9]{14}$")
+		String receiptNumber
+	) {
+		return DisclosureInsightResponse.from(insightHandler.generate(receiptNumber));
 	}
 
 	@GetMapping

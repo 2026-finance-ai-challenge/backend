@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -40,6 +42,7 @@ import com.kmarket.navigator.backend.disclosure.application.DisclosureQueryHandl
 import com.kmarket.navigator.backend.disclosure.application.port.DisclosureRepository;
 import com.kmarket.navigator.backend.disclosure.application.port.DisclosureBackfillRepository;
 import com.kmarket.navigator.backend.disclosure.application.port.DisclosureRagGateway;
+import com.kmarket.navigator.backend.disclosure.application.port.DisclosureInsightGateway;
 import com.kmarket.navigator.backend.disclosure.application.port.DocumentArchiveKind;
 import com.kmarket.navigator.backend.disclosure.application.port.DocumentArchiveStatus;
 import com.kmarket.navigator.backend.disclosure.application.port.OpenDartDocument;
@@ -50,6 +53,7 @@ import com.kmarket.navigator.backend.disclosure.domain.CorporationClass;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureCursor;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureAnswer;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureListQuery;
+import com.kmarket.navigator.backend.disclosure.domain.DisclosureInsightGeneration;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureType;
 import com.kmarket.navigator.backend.disclosure.domain.ListedCommonStock;
 import com.kmarket.navigator.backend.disclosure.domain.Market;
@@ -104,6 +108,9 @@ class BackendApplicationTests {
 
 	@MockitoBean
 	DisclosureDocumentHandler disclosureDocumentHandler;
+
+	@MockitoBean
+	DisclosureInsightGateway disclosureInsightGateway;
 
 	@MockitoBean
 	NewsAiGateway newsAiGateway;
@@ -838,6 +845,42 @@ class BackendApplicationTests {
 	}
 
 	@Test
+	void linksCorrectionFilingsToThePreviousVersion() throws Exception {
+		OpenDartFiling original = filing("20260818800674");
+		OpenDartFiling correction = new OpenDartFiling(
+			"20260819800675",
+			original.corpCode(),
+			original.corporationName(),
+			original.stockCode(),
+			original.corporationClass(),
+			original.disclosureType(),
+			"[기재정정]기업설명회(IR) 개최",
+			original.submitter(),
+			original.filedDate().plusDays(1),
+			"정"
+		);
+
+		disclosureRepository.saveFiling(correction);
+		disclosureRepository.saveFiling(original);
+		activateCommonStocks("005930");
+
+		var detail = disclosureRepository.findByReceiptNumber(correction.receiptNumber()).orElseThrow();
+		assertThat(detail.versions()).hasSize(2);
+		assertThat(detail.versions().getFirst().receiptNumber()).isEqualTo(original.receiptNumber());
+		assertThat(detail.versions().getLast()).satisfies(version -> {
+			assertThat(version.receiptNumber()).isEqualTo(correction.receiptNumber());
+			assertThat(version.correctionOfReceiptNumber()).isEqualTo(original.receiptNumber());
+			assertThat(version.current()).isTrue();
+		});
+
+		mockMvc.perform(get("/api/v1/disclosures/{receiptNumber}", correction.receiptNumber()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.versions.length()").value(2))
+			.andExpect(jsonPath("$.versions[1].correctionOfReceiptNumber").value(original.receiptNumber()))
+			.andExpect(jsonPath("$.versions[1].current").value(true));
+	}
+
+	@Test
 	void filtersAndPaginatesDisclosureList() {
 		disclosureRepository.saveFiling(filing("20260818800670"));
 		disclosureRepository.saveFiling(filing("20260818800671"));
@@ -894,6 +937,60 @@ class BackendApplicationTests {
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.answer").value("Revenue increased. [C1]"))
 			.andExpect(jsonPath("$.model").value("test-model"));
+	}
+
+	@Test
+	void generatesAndCachesEvidenceBoundDisclosureInsightForCurrentDocumentVersion() throws Exception {
+		OpenDartFiling filing = filing("20260823800002");
+		disclosureRepository.saveFiling(filing);
+		activateCommonStocks("005930");
+		disclosureRepository.completeDocumentJob(
+			filing.receiptNumber(),
+			List.of(document("f", "The company approved a new semiconductor facility.")),
+			List.of()
+		);
+		when(disclosureInsightGateway.summarize(
+			eq(filing.receiptNumber()),
+			eq(filing.reportName()),
+			any()
+		)).thenAnswer(invocation -> {
+			@SuppressWarnings("unchecked")
+			var evidence = (List<com.kmarket.navigator.backend.disclosure.domain.DisclosureInsightEvidence>)
+				invocation.getArgument(2);
+			assertThat(evidence).hasSize(1);
+			assertThat(evidence.getFirst().content()).contains("semiconductor facility");
+			return new DisclosureInsightGeneration(
+				"The company approved a new semiconductor facility.",
+				"The filing does not state an additional reason.",
+				"The facility may increase production capacity.",
+				List.of(evidence.getFirst().id()),
+				true,
+				null,
+				"gpt-5-mini",
+				"filing-summary-v1"
+			);
+		});
+
+		JsonNode generated = response(post(
+			"/api/v1/disclosures/{receiptNumber}/insight",
+			filing.receiptNumber()
+		));
+		assertThat(generated.get("what").stringValue()).contains("semiconductor facility");
+		assertThat(generated.get("sourceSectionIds")).hasSize(1);
+		assertThat(generated.get("contentVersionHash").stringValue()).hasSize(64);
+
+		mockMvc.perform(get(
+				"/api/v1/disclosures/{receiptNumber}/insight",
+				filing.receiptNumber()
+			))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.sufficientEvidence").value(true))
+			.andExpect(jsonPath("$.promptVersion").value("filing-summary-v1"));
+		verify(disclosureInsightGateway, times(1)).summarize(
+			eq(filing.receiptNumber()),
+			eq(filing.reportName()),
+			any()
+		);
 	}
 
 	private static OpenDartFiling filing(String receiptNumber) {

@@ -11,6 +11,7 @@
 - [관심종목·최근 조회·알림 API](docs/PERSONALIZATION_API.md)
 - [시장·스크리너·외국인 한도 API](docs/MARKET_API.md)
 - [뉴스 인텔리전스 API](docs/NEWS_API.md)
+- [공시 인텔리전스 API](docs/DISCLOSURE_API.md)
 - [Git 및 전달 워크플로](docs/GIT_WORKFLOW.md)
 - [Codex 저장소 지침](AGENTS.md)
 - [Codex 작업 스킬](.agents/skills/k-market-delivery/SKILL.md)
@@ -142,12 +143,15 @@ docker compose up -d
 
 - `GET /api/v1/disclosures`: 공시 목록 조회
 - `GET /api/v1/disclosures/{receiptNumber}`: 공시 상세 조회
+- `GET /api/v1/disclosures/{receiptNumber}/insight`: 현재 원문 버전의 AI 요약 조회
+- `POST /api/v1/disclosures/{receiptNumber}/insight`: 현재 원문 버전의 AI 요약 생성 또는 재사용
 - `POST /api/v1/disclosures/{receiptNumber}/questions`: 선택 공시 기반 질의응답
 - `POST /api/v1/disclosures/{receiptNumber}/index`: 온디맨드 청크 색인 요청
 
 회원가입·로그인·토큰 회전·로그아웃·프로필 API는 [회원 인증 API 문서](docs/AUTH_API.md)를 따른다. 비밀번호는 Argon2id로 해시하고, 15분 Access JWT와 회전형 Refresh Token의 상태는 Redis에서 관리한다.
 관심종목·최근 조회·알림함 API는 [사용자 개인화 API 문서](docs/PERSONALIZATION_API.md)를 따르며 모든 조회·수정에서 JWT 사용자 소유권을 검증한다.
 뉴스 수집·중복 묶음·OpenAI 구조화 분석·선택 문맥 해설은 [뉴스 인텔리전스 API 문서](docs/NEWS_API.md)를 따른다.
+정정 버전 연결·구조화 원문·근거 고정 What/Why/Impact 요약은 [공시 인텔리전스 API 문서](docs/DISCLOSURE_API.md)를 따른다.
 
 질의응답을 사용하려면 AI API 서버가 `KMARKET_AI_BASE_URL`에서 실행 중이어야 하며 두 서비스의 `KMARKET_AI_SERVICE_TOKEN`이 같아야 한다. 그 외 경로는 기본 차단한다.
 

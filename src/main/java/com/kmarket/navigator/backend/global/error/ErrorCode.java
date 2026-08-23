@@ -64,6 +64,16 @@ public enum ErrorCode {
 		"DISCLOSURE_INDEX_NOT_READY",
 		"The disclosure is not ready for questions."
 	),
+	DISCLOSURE_DOCUMENT_NOT_READY(
+		HttpStatus.CONFLICT,
+		"DISCLOSURE_DOCUMENT_NOT_READY",
+		"The disclosure document is not ready for AI insight."
+	),
+	DISCLOSURE_INSIGHT_NOT_READY(
+		HttpStatus.NOT_FOUND,
+		"DISCLOSURE_INSIGHT_NOT_READY",
+		"An AI insight has not been generated for the current document version."
+	),
 	AI_SERVICE_UNAVAILABLE(
 		HttpStatus.SERVICE_UNAVAILABLE,
 		"AI_SERVICE_UNAVAILABLE",
