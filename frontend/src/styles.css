@@ -169,6 +169,15 @@ h1, h2, h3, p { overflow-wrap: anywhere; }
 .news-card h3 { margin: 0; font-size: 15px; line-height: 1.45; }
 .news-card > p { flex: 1; color: #8faab2; font-size: 10px; line-height: 1.6; }
 .news-grid.light .news-card > p, .content-page .news-card > p { color: var(--muted); }
+.news-card-insight { overflow: hidden; max-height: 0; opacity: 0; transition: max-height .24s ease, opacity .24s ease; }
+.news-card:hover .news-card-insight, .news-card:focus-visible .news-card-insight { max-height: 230px; opacity: 1; }
+.news-card-insight > span { color: var(--mint); font-size: 7px; font-weight: 800; letter-spacing: .12em; }
+.news-card-insight dl { display: grid; gap: 5px; margin: 7px 0; }
+.news-card-insight dl > div { display: grid; grid-template-columns: 42px 1fr; gap: 7px; }
+.news-card-insight dt { color: var(--mint); font-size: 8px; font-weight: 800; }
+.news-card-insight dd { margin: 0; color: #c8d8d9; font-size: 8px; line-height: 1.45; }
+.news-grid.light .news-card-insight > span, .news-grid.light .news-card-insight dt, .content-page .news-card-insight > span, .content-page .news-card-insight dt { color: var(--teal-dark); }
+.news-grid.light .news-card-insight dd, .content-page .news-card-insight dd { color: var(--muted); }
 .news-card footer { display: flex; justify-content: space-between; gap: 10px; padding-top: 11px; border-top: 1px solid rgba(154, 183, 188, .15); color: #819da5; font-size: 8px; }
 .dart-pulse, .foreign-section { padding-top: 110px; padding-bottom: 110px; }
 .filing-list { border-top: 1px solid var(--line); }

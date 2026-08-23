@@ -343,6 +343,7 @@ export function NewsCard({ article }: { article: NewsArticle }) {
     <div className="news-image">{article.thumbnailUrl ? <img src={article.thumbnailUrl} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span>KM</span>}</div>
     <div className="news-tags"><span className={`sentiment ${(article.sentiment || '').toLowerCase()}`}>{article.sentiment || 'Pending'}</span><span>{article.importance || 'Unrated'}</span>{article.relatedCoverageCount > 1 && <span>＋{article.relatedCoverageCount - 1} related</span>}</div>
     <h3>{article.englishTitle || article.originalTitle}</h3><p>{article.what || article.originalExcerpt || 'AI analysis is pending.'}</p>
+    <div className="news-card-insight"><span>AI INSIGHT</span><dl><div><dt>What</dt><dd>{article.what || 'Unavailable'}</dd></div><div><dt>Why</dt><dd>{article.why || 'Unavailable'}</dd></div><div><dt>Impact</dt><dd>{article.impact || 'Unavailable'}</dd></div></dl></div>
     <footer><span>{article.publisher}</span><time>{formatDate(article.publishedAt)}</time></footer>
   </a>
 }

@@ -44,8 +44,10 @@ function HeroSearch() {
 }
 
 export function HomePage() {
+  const profile = useProfile()
   const indices = useRemote(() => api<Index[]>('/api/v1/market/indices'), [])
   const stocks = useRemote(() => api<{ items: Stock[] }>('/api/v1/market/stocks?sort=VOLUME_DESC&limit=6'), [])
+  const watchlist = useRemote(() => profile ? api<{ items: Stock[] }>('/api/v1/market/stocks?watchlist=true&limit=6') : Promise.resolve({ items: [] }), [profile])
   const news = useRemote(() => api<NewsPage>('/api/v1/news?sort=IMPORTANCE&limit=6'), [])
   const filings = useRemote(() => api<FilingPage>('/api/v1/disclosures?limit=6'), [])
   const limits = useRemote(() => api<ForeignMonitor[]>('/api/v1/market/foreign-limits'), [])
@@ -59,6 +61,8 @@ export function HomePage() {
       <RemoteBoundary state={indices} empty={(value) => !value.length}>{(value) => <div className="index-grid">{value.map((index) => <article key={index.indexCode}><span>{index.indexName}</span><b>{formatNumber(index.currentValue, { maximumFractionDigits: 2 })}</b><strong className={(index.changeRate || 0) >= 0 ? 'up' : 'down'}>{index.changeRate === null ? 'Unavailable' : `${index.changeRate >= 0 ? '+' : ''}${index.changeRate.toFixed(2)}%`}</strong><small>{index.status} · {formatDate(index.asOf)}</small></article>)}</div>}</RemoteBoundary>
       <div className="split-heading"><h3>Popular stocks</h3><a href={appHash('screener')}>Open screener →</a></div>
       <RemoteBoundary state={stocks} empty={(value) => !value.items.length}>{(value) => <div className="stock-strip">{value.items.map((stock) => <StockMiniCard key={stock.stockCode} stock={stock} />)}</div>}</RemoteBoundary>
+      <div className="split-heading"><h3>My Watchlist</h3>{profile && <a href={appHash('account')}>Manage watchlist →</a>}</div>
+      {!profile ? <StatusPanel title="Sign in to see your watchlist" message="Stocks added from search or detail pages will appear in this snapshot." action={{ label: 'Sign in', run: () => navigate('auth', undefined, { returnTo: appHash('home') }) }} /> : <RemoteBoundary state={watchlist} empty={(value) => !value.items.length}>{(value) => <div className="stock-strip">{value.items.map((stock) => <StockMiniCard key={stock.stockCode} stock={stock} />)}</div>}</RemoteBoundary>}
     </section>
     <section className="page-section dark-section"><div className="section-head light"><div><p className="eyebrow">AI NEWS INTELLIGENCE</p><h2>Know what happened.<br />Understand why it matters.</h2></div><a href={appHash('news')}>View all news →</a></div><RemoteBoundary state={news} empty={(value) => !value.items.length}>{(value) => <div className="news-grid">{value.items.map((article) => <NewsCard key={article.id} article={article} />)}</div>}</RemoteBoundary></section>
     <section className="page-section dart-pulse"><div className="section-head"><div><p className="eyebrow">DART PULSE</p><h2>Latest corporate filings</h2></div><a href={appHash('dart')}>View all filings →</a></div><RemoteBoundary state={filings} empty={(value) => !value.items.length}>{(value) => <div className="filing-list">{value.items.map((filing) => <FilingRow filing={filing} key={filing.receiptNumber} />)}</div>}</RemoteBoundary></section>
