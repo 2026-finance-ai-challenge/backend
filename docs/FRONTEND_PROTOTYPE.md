@@ -24,15 +24,17 @@ npm --prefix frontend run dev
 
 | 화면 | 해시 경로 | 주요 API |
 | --- | --- | --- |
-| 랜딩·통합검색 | `#/home`, `#/search` | `/api/v1/market/*`, `/api/v1/news`, `/api/v1/disclosures` |
-| 스크리너 | `#/screener` | `/api/v1/market/stocks`, `/foreign-limits` |
+| 랜딩·통합검색 | `#/home`, `#/search` | 자동완성·관심종목·종목/기간/공시 유형/감성/중요도 필터와 시장·뉴스·공시 API |
+| 스크리너 | `#/screener` | 시장·업종·등락률·거래량·관심종목·거래 유의 필터, `/api/v1/market/stocks`, `/foreign-limits` |
 | 종목 상세 | `#/stock/{code}` | 종목 상세·이력·글로벌 피어 |
-| 뉴스 | `#/news`, `#/article/{id}` | 뉴스 목록·상세·용어 해설 |
-| DART | `#/dart`, `#/filing/{receipt}` | 공시 목록·상세·요약·색인·질문 |
-| Tax Guide | `#/tax` | 국가·자격 비교·사용자 문서 검증 |
+| 뉴스 | `#/news`, `#/article/{id}` | 전체·관심종목 범위, 뉴스 목록·상세·본문 선택 해설·문맥 질문 |
+| DART | `#/dart`, `#/filing/{receipt}` | 기간·유형·정정 필터, 색인 상태, 목록·상세·요약·색인·문단 질문 |
+| Tax Guide | `#/tax` | 국가·투자자 유형 자격 비교, 필요 서류, 사용자 문서 검증, Tax Agent 문맥 |
 | 회원·마이페이지 | `#/auth`, `#/account` | 인증·프로필·관심종목·최근 조회·알림·채팅·문서 |
 
-AI Agent는 모든 화면에서 열 수 있으며 현재 Stock·News·Filing·Tax 문맥을 새 채팅방에 연결한다. 공시 문맥은 접수번호와 문서 버전을 함께 저장한다.
+AI Agent는 모든 화면에서 열 수 있으며 `Ask AI` 액션이 현재 Stock·News·Filing·Tax 문맥의 기존 채팅방을 찾거나 문맥이 고정된 새 채팅방을 만든다. 선택한 뉴스 문장과 공시 문단은 입력창에 전달할 수 있다. 공시 문맥은 접수번호와 문서 버전을 함께 저장한다.
+
+`Holdings` 뉴스 범위는 주문·보유 자산 브로커 연동이 제품 제외 범위이므로 가짜 목록을 만들지 않고 연결되지 않은 상태를 표시한다. 실시간 공급자나 생성형 AI가 비활성화된 경우에도 `Unavailable`, stale, partial failure, insufficient evidence를 서로 구분한다.
 
 ## 인증 계약
 
