@@ -9,6 +9,7 @@
 - [제품 범위](docs/PRODUCT_SCOPE.md)
 - [Redis JWT 회원 인증 API](docs/AUTH_API.md)
 - [관심종목·최근 조회·알림 API](docs/PERSONALIZATION_API.md)
+- [시장·스크리너·외국인 한도 API](docs/MARKET_API.md)
 - [Git 및 전달 워크플로](docs/GIT_WORKFLOW.md)
 - [Codex 저장소 지침](AGENTS.md)
 - [Codex 작업 스킬](.agents/skills/k-market-delivery/SKILL.md)

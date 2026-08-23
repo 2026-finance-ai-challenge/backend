@@ -43,6 +43,28 @@ opendart:
   archive-root: ${OPENDART_ARCHIVE_ROOT:./data/opendart-archives}
 
 kmarket:
+  market:
+    collection-interval: ${KMARKET_MARKET_COLLECTION_INTERVAL:60s}
+    collection-initial-delay: ${KMARKET_MARKET_COLLECTION_INITIAL_DELAY:15s}
+    kis:
+      enabled: ${KMARKET_KIS_ENABLED:false}
+      base-url: ${KMARKET_KIS_BASE_URL:https://openapi.koreainvestment.com:9443}
+      app-key: ${KMARKET_KIS_APP_KEY:}
+      app-secret: ${KMARKET_KIS_APP_SECRET:}
+      connect-timeout: ${KMARKET_KIS_CONNECT_TIMEOUT:3s}
+      read-timeout: ${KMARKET_KIS_READ_TIMEOUT:5s}
+      collection-delay: ${KMARKET_KIS_COLLECTION_DELAY:125ms}
+      redis-key-prefix: ${KMARKET_KIS_REDIS_KEY_PREFIX:kmarket:market:kis}
+    krx:
+      enabled: ${KMARKET_KRX_ENABLED:false}
+      base-url: ${KMARKET_KRX_BASE_URL:https://data.krx.co.kr}
+      login-path: ${KMARKET_KRX_LOGIN_PATH:/contents/MDC/COMS/client/MDCCOMS001D1.cmd}
+      member-id: ${KMARKET_KRX_MEMBER_ID:}
+      password: ${KMARKET_KRX_PASSWORD:}
+      history-bld: ${KMARKET_KRX_HISTORY_BLD:dbms/MDC/STAT/standard/MDCSTAT03702}
+      connect-timeout: ${KMARKET_KRX_CONNECT_TIMEOUT:3s}
+      read-timeout: ${KMARKET_KRX_READ_TIMEOUT:10s}
+      collection-cron: ${KMARKET_KRX_COLLECTION_CRON:0 30 18 * * MON-FRI}
   identity:
     access-token-ttl: ${KMARKET_ACCESS_TOKEN_TTL:15m}
     refresh-token-ttl: ${KMARKET_REFRESH_TOKEN_TTL:14d}

@@ -33,6 +33,7 @@ class KisStockMasterParserTests {
 			assertThat(stock.stockCode()).isEqualTo("005930");
 			assertThat(stock.nameKo()).isEqualTo("삼성전자");
 			assertThat(stock.market()).isEqualTo(Market.KOSPI);
+			assertThat(stock.isinCode()).isEqualTo("KR7005930003");
 		});
 	}
 
@@ -64,7 +65,8 @@ class KisStockMasterParserTests {
 	) throws IOException {
 		ByteArrayOutputStream output = new ByteArrayOutputStream();
 		output.write(("   " + code).getBytes(StandardCharsets.US_ASCII));
-		output.write(" ".repeat(12).getBytes(StandardCharsets.US_ASCII));
+		String isinCode = code.equals("005930") ? "KR7005930003" : " ".repeat(12);
+		output.write(isinCode.getBytes(StandardCharsets.US_ASCII));
 		output.write(name.getBytes(KOREAN_CHARSET));
 		byte[] tail = " ".repeat(tailLength).getBytes(StandardCharsets.US_ASCII);
 		System.arraycopy(group.getBytes(StandardCharsets.US_ASCII), 0, tail, 0, 2);

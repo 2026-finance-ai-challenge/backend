@@ -377,6 +377,164 @@ class BackendApplicationTests {
 	}
 
 	@Test
+	void servesSupportedMarketSearchScreenerQuotesAndForeignLimitSignals() throws Exception {
+		disclosureRepository.saveFiling(filing("20260818800680"));
+		disclosureRepository.saveFiling(new OpenDartFiling(
+			"20260818800681",
+			"00113526",
+			"대한항공",
+			"003490",
+			CorporationClass.KOSPI,
+			DisclosureType.PERIODIC,
+			"반기보고서",
+			"대한항공",
+			LocalDate.of(2026, 8, 18),
+			""
+		));
+		activateCommonStocks("005930", "003490");
+		jdbcClient.sql("""
+			UPDATE issuer i
+			SET name_en = CASE s.stock_code
+			    WHEN '005930' THEN 'Samsung Electronics'
+			    WHEN '003490' THEN 'Korean Air'
+			END
+			FROM security s
+			WHERE s.issuer_id = i.id AND s.stock_code IN ('005930', '003490')
+			""").update();
+		jdbcClient.sql("""
+			UPDATE security
+			SET sector = CASE stock_code
+			    WHEN '005930' THEN 'Semiconductors'
+			    WHEN '003490' THEN 'Airlines'
+			END
+			WHERE stock_code IN ('005930', '003490')
+			""").update();
+
+		UUID samsungId = securityId("005930");
+		UUID koreanAirId = securityId("003490");
+		jdbcClient.sql("""
+			INSERT INTO market_quote_snapshot (
+			    security_id, current_price_krw, change_amount_krw, change_rate,
+			    open_price_krw, high_price_krw, low_price_krw, volume, market_session,
+			    vi_active, single_price_trading, price_limit_state, trading_halted,
+			    status_available, data_status, as_of, received_at, source
+			)
+			VALUES
+			    (:samsungId, 78000, 1200, 1.5625, 77000, 78500, 76800, 15000000, 'REGULAR',
+			     FALSE, FALSE, 'NONE', FALSE, TRUE, 'LIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'KIS_REST'),
+			    (:koreanAirId, 24500, -200, -0.8097, 24700, 24900, 24300, 800000, 'REGULAR',
+			     FALSE, FALSE, 'NONE', FALSE, TRUE, 'LIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'KIS_REST')
+			""")
+			.param("samsungId", samsungId)
+			.param("koreanAirId", koreanAirId)
+			.update();
+		jdbcClient.sql("""
+			INSERT INTO exchange_rate_snapshot (
+			    currency, krw_per_unit, data_status, as_of, source
+			)
+			VALUES ('USD', 1300, 'LIVE', CURRENT_TIMESTAMP, 'TEST_FX')
+			""").update();
+		jdbcClient.sql("""
+			INSERT INTO market_index_snapshot (
+			    index_code, index_name, current_value, change_amount, change_rate,
+			    volume, data_status, as_of, received_at, source
+			)
+			VALUES (
+			    '0001', 'KOSPI', 2850.50, 10.20, 0.3591,
+			    500000000, 'LIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'KIS_REST'
+			)
+			""").update();
+		jdbcClient.sql("""
+			INSERT INTO foreign_ownership_snapshot (
+			    security_id, base_date, foreign_owned_quantity, total_listed_quantity,
+			    foreign_limit_quantity, available_quantity, ownership_rate,
+			    limit_exhaustion_rate, collected_at, source
+			)
+			VALUES
+			    (:securityId, DATE '2026-08-20', 380000000, 1000000000, 450000000, 70000000,
+			     38.0, 84.4444, CURRENT_TIMESTAMP, 'KRX'),
+			    (:securityId, DATE '2026-08-21', 395000000, 1000000000, 450000000, 55000000,
+			     39.5, 87.7778, CURRENT_TIMESTAMP, 'KRX'),
+			    (:securityId, DATE '2026-08-22', 409500000, 1000000000, 450000000, 40500000,
+			     40.95, 91.0, CURRENT_TIMESTAMP, 'KRX')
+			""")
+			.param("securityId", koreanAirId)
+			.update();
+		jdbcClient.sql("""
+			INSERT INTO market_daily_price (
+			    security_id, trading_date, open_price_krw, high_price_krw,
+			    low_price_krw, close_price_krw, volume, source, collected_at
+			)
+			VALUES
+			    (:securityId, DATE '2026-08-20', 75000, 77000, 74500, 76500, 10000000, 'KRX', CURRENT_TIMESTAMP),
+			    (:securityId, DATE '2026-08-21', 76500, 78500, 76000, 78000, 15000000, 'KRX', CURRENT_TIMESTAMP)
+			""")
+			.param("securityId", samsungId)
+			.update();
+
+		String loginId = "market_" + UUID.randomUUID().toString().substring(0, 8);
+		String password = "Secure!Pass123";
+		mockMvc.perform(post("/api/v1/auth/signup")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{"loginId":"%s","password":"%s","passwordConfirm":"%s",
+					 "nationality":"US","investorType":"INDIVIDUAL",
+					 "termsAccepted":true,"privacyAccepted":true}
+					""".formatted(loginId, password, password)))
+			.andExpect(status().isCreated());
+		JsonNode login = response(post("/api/v1/auth/login")
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("{\"loginId\":\"%s\",\"password\":\"%s\"}".formatted(loginId, password)));
+		String accessToken = login.get("accessToken").stringValue();
+		mockMvc.perform(put("/api/v1/me/watchlist/{stockCode}", "005930")
+				.header("Authorization", "Bearer " + accessToken))
+			.andExpect(status().isOk());
+
+		mockMvc.perform(get("/api/v1/market/stocks/search")
+				.header("Authorization", "Bearer " + accessToken)
+				.param("query", "Samsung"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.count").value(1))
+			.andExpect(jsonPath("$.items[0].stockCode").value("005930"))
+			.andExpect(jsonPath("$.items[0].watchlisted").value(true));
+		mockMvc.perform(get("/api/v1/market/stocks")
+				.header("Authorization", "Bearer " + accessToken)
+				.param("watchlist", "true")
+				.param("sort", "CHANGE_DESC"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.count").value(1))
+			.andExpect(jsonPath("$.items[0].quote.status").value("LIVE"));
+		mockMvc.perform(get("/api/v1/market/stocks").param("watchlist", "true"))
+			.andExpect(status().isUnauthorized())
+			.andExpect(jsonPath("$.code").value("AUTHENTICATION_REQUIRED"));
+
+		mockMvc.perform(get("/api/v1/market/stocks/{stockCode}", "005930"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.currentPriceUsd").value(60.0))
+			.andExpect(jsonPath("$.subjectToForeignAcquisitionLimit").value(false))
+			.andExpect(jsonPath("$.foreignOwnership.status").value("UNAVAILABLE"));
+		mockMvc.perform(get("/api/v1/market/foreign-limits"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$[0].stock.stockCode").value("003490"))
+			.andExpect(jsonPath("$[0].warning").value(true))
+			.andExpect(jsonPath("$[0].prediction.status").value("AVAILABLE"))
+			.andExpect(jsonPath("$[0].prediction.observationCount").value(3));
+		mockMvc.perform(get("/api/v1/market/indices"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$[0].status").value("LIVE"))
+			.andExpect(jsonPath("$[1].status").value("UNAVAILABLE"))
+			.andExpect(jsonPath("$[2].indexName").value("KOSPI 200"));
+		mockMvc.perform(get("/api/v1/market/stocks/{stockCode}/history", "005930"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.status").value("CLOSED"))
+			.andExpect(jsonPath("$.items.length()").value(2))
+			.andExpect(jsonPath("$.items[1].closePriceKrw").value(78000));
+		mockMvc.perform(get("/api/v1/market/stocks/{stockCode}", "999999"))
+			.andExpect(status().isNotFound())
+			.andExpect(jsonPath("$.code").value("UNSUPPORTED_STOCK"));
+	}
+
+	@Test
 	void rejectsInvalidListParameters() throws Exception {
 		mockMvc.perform(get("/api/v1/disclosures").param("stockCode", "123"))
 			.andExpect(status().isBadRequest())
@@ -698,5 +856,12 @@ class BackendApplicationTests {
 				.map(stockCode -> new ListedCommonStock(stockCode, stockCode, Market.KOSPI))
 				.toList()
 		);
+	}
+
+	private UUID securityId(String stockCode) {
+		return jdbcClient.sql("SELECT id FROM security WHERE stock_code = :stockCode")
+			.param("stockCode", stockCode)
+			.query(UUID.class)
+			.single();
 	}
 }

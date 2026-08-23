@@ -83,16 +83,20 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			.update();
 
 		for (ListedCommonStock stock : stocks) {
-			int updated = jdbcClient.sql("""
+			JdbcClient.StatementSpec statement = jdbcClient.sql("""
 				UPDATE security
 				SET market = :market, common_stock = TRUE, active = TRUE,
+				    isin_code = COALESCE(:isinCode, isin_code),
 				    master_updated_at = :now, updated_at = :now
 				WHERE stock_code = :stockCode
 				""")
 				.param("market", stock.market().name())
 				.param("now", now)
-				.param("stockCode", stock.stockCode())
-				.update();
+				.param("stockCode", stock.stockCode());
+			statement = stock.isinCode() == null
+				? statement.param("isinCode", null, java.sql.Types.CHAR)
+				: statement.param("isinCode", stock.isinCode());
+			int updated = statement.update();
 			if (updated != 1) {
 				throw new IllegalStateException("Stock master code is missing from OpenDART corporations");
 			}

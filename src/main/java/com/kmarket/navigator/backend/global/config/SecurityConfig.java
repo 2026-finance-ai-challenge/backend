@@ -51,6 +51,7 @@ public class SecurityConfig {
 					"/api/v1/auth/logout-all"
 				).authenticated()
 				.requestMatchers(HttpMethod.GET, "/api/v1/disclosures").permitAll()
+				.requestMatchers(HttpMethod.GET, "/api/v1/market/**").permitAll()
 				.requestMatchers(
 					HttpMethod.GET,
 					"/api/v1/disclosures/{receiptNumber:[0-9]{14}}"
