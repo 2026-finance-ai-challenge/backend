@@ -7,6 +7,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.zip.CRC32;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -148,6 +150,27 @@ class OpenDartArchiveParserTests {
 				exception -> assertThat(exception.errorCode()).isEqualTo("EMPTY_DOCUMENT_ARCHIVE"));
 	}
 
+	@Test
+	void rejectsArchiveWhenLocalEntryMetadataDiffersFromCentralDirectory() {
+		assertThatThrownBy(() -> parser.parseDocuments(malformedLocalHeaderZip()))
+			.isInstanceOfSatisfying(OpenDartException.class,
+				exception -> assertThat(exception.errorCode()).isEqualTo("INVALID_ARCHIVE"));
+	}
+
+	@Test
+	void acceptsDocumentEntryLargerThanLegacyLimit() {
+		byte[] prefix = "<html><body><p>".getBytes(StandardCharsets.UTF_8);
+		byte[] suffix = "</p></body></html>".getBytes(StandardCharsets.UTF_8);
+		byte[] content = new byte[51 * 1024 * 1024];
+		Arrays.fill(content, (byte)'a');
+		System.arraycopy(prefix, 0, content, 0, prefix.length);
+		System.arraycopy(suffix, 0, content, content.length - suffix.length, suffix.length);
+
+		var document = parser.parseDocuments(zip("filing.xml", content)).getFirst();
+
+		assertThat(document.bodyText()).startsWith("a");
+	}
+
 	private static byte[] zip(String filename, byte[] content) {
 		try {
 			ByteArrayOutputStream output = new ByteArrayOutputStream();
@@ -157,6 +180,31 @@ class OpenDartArchiveParserTests {
 				zip.closeEntry();
 			}
 			return output.toByteArray();
+		}
+		catch (IOException exception) {
+			throw new IllegalStateException(exception);
+		}
+	}
+
+	private static byte[] malformedLocalHeaderZip() {
+		byte[] content = "<html><body><p>원문</p></body></html>".getBytes(StandardCharsets.UTF_8);
+		try {
+			ByteArrayOutputStream output = new ByteArrayOutputStream();
+			ZipEntry entry = new ZipEntry("filing.xml");
+			CRC32 crc = new CRC32();
+			crc.update(content);
+			entry.setMethod(ZipEntry.STORED);
+			entry.setSize(content.length);
+			entry.setCompressedSize(content.length);
+			entry.setCrc(crc.getValue());
+			try (ZipOutputStream zip = new ZipOutputStream(output)) {
+				zip.putNextEntry(entry);
+				zip.write(content);
+				zip.closeEntry();
+			}
+			byte[] archive = output.toByteArray();
+			Arrays.fill(archive, 18, 26, (byte) 0);
+			return archive;
 		}
 		catch (IOException exception) {
 			throw new IllegalStateException(exception);

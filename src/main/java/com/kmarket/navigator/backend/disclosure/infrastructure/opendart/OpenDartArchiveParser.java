@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.zip.CRC32;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -41,9 +42,9 @@ class OpenDartArchiveParser {
 
 	private static final int MAX_ENTRIES = 100;
 	private static final int MAX_FILENAME_LENGTH = 500;
-	private static final int MAX_ENTRY_BYTES = 50 * 1024 * 1024;
+	private static final int MAX_ENTRY_BYTES = 128 * 1024 * 1024;
 	private static final int MAX_CORPORATION_ENTRY_BYTES = 40 * 1024 * 1024;
-	private static final int MAX_TOTAL_BYTES = 50 * 1024 * 1024;
+	private static final int MAX_TOTAL_BYTES = 128 * 1024 * 1024;
 	private static final Charset KOREAN_CHARSET = Charset.forName("MS949");
 	private static final byte[] XML_ENTITY_MARKER = "<!ENTITY".getBytes(StandardCharsets.US_ASCII);
 
@@ -80,33 +81,133 @@ class OpenDartArchiveParser {
 	}
 
 	private List<ArchiveEntry> unzip(byte[] archive, int maximumEntryBytes) {
+		List<CentralEntry> centralEntries = readCentralEntries(archive);
 		List<ArchiveEntry> entries = new ArrayList<>();
 		int totalBytes = 0;
+		int centralIndex = 0;
 		try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(archive))) {
 			ZipEntry entry;
 			while ((entry = zip.getNextEntry()) != null) {
+				if (centralIndex >= centralEntries.size()) {
+					throw new OpenDartException("INVALID_ARCHIVE");
+				}
+				CentralEntry centralEntry = centralEntries.get(centralIndex++);
+				String normalizedFilename = sanitizeFilename(entry.getName());
+				if (!centralEntry.filename().equals(normalizedFilename)) {
+					throw new OpenDartException("INVALID_ARCHIVE");
+				}
 				if (entry.isDirectory()) {
 					continue;
 				}
-				String filename = sanitizeFilename(entry.getName());
 				if (entries.size() >= MAX_ENTRIES) {
 					throw new OpenDartException("ARCHIVE_ENTRY_LIMIT");
 				}
 				byte[] content = readLimited(zip, maximumEntryBytes);
+				if (centralEntry.size() != content.length || centralEntry.crc() != crc32(content)) {
+					throw new OpenDartException("INVALID_ARCHIVE");
+				}
 				totalBytes += content.length;
 				if (totalBytes > MAX_TOTAL_BYTES) {
 					throw new OpenDartException("ARCHIVE_SIZE_LIMIT");
 				}
-			entries.add(new ArchiveEntry(filename, content));
+				entries.add(new ArchiveEntry(normalizedFilename, content));
 			}
 		}
 		catch (IOException exception) {
+			throw new OpenDartException("INVALID_ARCHIVE");
+		}
+		if (centralIndex != centralEntries.size()) {
 			throw new OpenDartException("INVALID_ARCHIVE");
 		}
 		if (entries.isEmpty()) {
 			throw new OpenDartException("EMPTY_ARCHIVE");
 		}
 		return entries;
+	}
+
+	private static List<CentralEntry> readCentralEntries(byte[] archive) {
+		int endRecord = findEndOfCentralDirectory(archive);
+		int totalEntries = unsignedShort(archive, endRecord + 10);
+		long centralSize = unsignedInt(archive, endRecord + 12);
+		long centralOffset = unsignedInt(archive, endRecord + 16);
+		if (totalEntries > MAX_ENTRIES
+			|| centralOffset > Integer.MAX_VALUE
+			|| centralSize > Integer.MAX_VALUE
+			|| centralOffset + centralSize > endRecord) {
+			throw new OpenDartException("INVALID_ARCHIVE");
+		}
+
+		List<CentralEntry> entries = new ArrayList<>(totalEntries);
+		int cursor = (int) centralOffset;
+		int centralEnd = cursor + (int) centralSize;
+		for (int index = 0; index < totalEntries; index++) {
+			if (cursor + 46 > centralEnd || readInt(archive, cursor) != 0x02014B50) {
+				throw new OpenDartException("INVALID_ARCHIVE");
+			}
+			int filenameLength = unsignedShort(archive, cursor + 28);
+			int extraLength = unsignedShort(archive, cursor + 30);
+			int commentLength = unsignedShort(archive, cursor + 32);
+			int recordLength = 46 + filenameLength + extraLength + commentLength;
+			if (cursor + recordLength > centralEnd) {
+				throw new OpenDartException("INVALID_ARCHIVE");
+			}
+			String filename = sanitizeFilename(new String(
+				archive,
+				cursor + 46,
+				filenameLength,
+				StandardCharsets.UTF_8
+			));
+			entries.add(new CentralEntry(
+				filename,
+				unsignedInt(archive, cursor + 16),
+				unsignedInt(archive, cursor + 24)
+			));
+			cursor += recordLength;
+		}
+		if (cursor != centralEnd) {
+			throw new OpenDartException("INVALID_ARCHIVE");
+		}
+		return entries;
+	}
+
+	private static int findEndOfCentralDirectory(byte[] archive) {
+		int first = Math.max(0, archive.length - 65_557);
+		for (int index = archive.length - 22; index >= first; index--) {
+			if (readInt(archive, index) == 0x06054B50) {
+				return index;
+			}
+		}
+		throw new OpenDartException("INVALID_ARCHIVE");
+	}
+
+	private static int readInt(byte[] bytes, int offset) {
+		if (offset < 0 || offset + 4 > bytes.length) {
+			throw new OpenDartException("INVALID_ARCHIVE");
+		}
+		return (bytes[offset] & 0xFF)
+			| ((bytes[offset + 1] & 0xFF) << 8)
+			| ((bytes[offset + 2] & 0xFF) << 16)
+			| ((bytes[offset + 3] & 0xFF) << 24);
+	}
+
+	private static long unsignedInt(byte[] bytes, int offset) {
+		return Integer.toUnsignedLong(readInt(bytes, offset));
+	}
+
+	private static int unsignedShort(byte[] bytes, int offset) {
+		if (offset < 0 || offset + 2 > bytes.length) {
+			throw new OpenDartException("INVALID_ARCHIVE");
+		}
+		return (bytes[offset] & 0xFF) | ((bytes[offset + 1] & 0xFF) << 8);
+	}
+
+	private static long crc32(byte[] content) {
+		CRC32 crc = new CRC32();
+		crc.update(content);
+		return crc.getValue();
+	}
+
+	private record CentralEntry(String filename, long crc, long size) {
 	}
 
 	private OpenDartDocument parseDocument(ArchiveEntry entry) {

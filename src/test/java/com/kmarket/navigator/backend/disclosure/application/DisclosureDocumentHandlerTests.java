@@ -69,10 +69,10 @@ class DisclosureDocumentHandlerTests {
 	}
 
 	@Test
-	void retriesViewerNetworkFailureWithoutBlockingOpenDart() {
+	void retriesViewerNetworkFailureBeforeProviderThreshold() {
 		OpenDartGateway openDartGateway = mock(OpenDartGateway.class);
 		DisclosureRepository repository = mock(DisclosureRepository.class);
-		DocumentJob job = new DocumentJob("20010324000163", "005930", "삼성전자", 3);
+		DocumentJob job = new DocumentJob("20010324000163", "005930", "삼성전자", 1);
 		when(repository.claimDocumentJob(org.mockito.ArgumentMatchers.any()))
 			.thenReturn(Optional.of(job));
 		when(openDartGateway.fetchDocuments(job.receiptNumber()))
@@ -93,7 +93,7 @@ class DisclosureDocumentHandlerTests {
 	}
 
 	@Test
-	void failsViewerNetworkFailureAfterMaximumAttempts() {
+	void retriesViewerNetworkFailureAfterMaximumAttempts() {
 		OpenDartGateway openDartGateway = mock(OpenDartGateway.class);
 		DisclosureRepository repository = mock(DisclosureRepository.class);
 		DocumentJob job = new DocumentJob("20010324000164", "005930", "삼성전자", 5);
@@ -105,9 +105,12 @@ class DisclosureDocumentHandlerTests {
 		boolean processed = new DisclosureDocumentHandler(openDartGateway, mock(DocumentArchiveStore.class), repository).processNext();
 
 		assertThat(processed).isTrue();
-		verify(repository).failDocumentJob(job.receiptNumber(), "DART_VIEWER_NETWORK_ERROR");
-		verify(repository, never()).retryDocumentJob(
-			org.mockito.ArgumentMatchers.any(),
+		verify(repository).retryDocumentJob(
+			job.receiptNumber(),
+			"DART_VIEWER_NETWORK_ERROR",
+			Duration.ofHours(6)
+		);
+		verify(repository, never()).blockOpenDartDocumentCollection(
 			org.mockito.ArgumentMatchers.any(),
 			org.mockito.ArgumentMatchers.any()
 		);

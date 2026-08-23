@@ -12,6 +12,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.zip.CRC32;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -244,6 +245,46 @@ class OpenDartClientTests {
 		viewerServer.verify();
 	}
 
+	@Test
+	void fallsBackToOfficialDartViewerWhenOpenDartArchiveIsMalformed() {
+		RestClient.Builder openDartBuilder = RestClient.builder();
+		RestClient.Builder viewerBuilder = RestClient.builder();
+		MockRestServiceServer openDartServer = MockRestServiceServer.bindTo(openDartBuilder).build();
+		MockRestServiceServer viewerServer = MockRestServiceServer.bindTo(viewerBuilder).build();
+		ObjectMapper objectMapper = new ObjectMapper();
+		OpenDartProperties properties = new OpenDartProperties();
+		properties.setApiKey("0".repeat(40));
+		OpenDartClient client = new OpenDartClient(
+			openDartBuilder.baseUrl("https://opendart.fss.or.kr").build(),
+			viewerBuilder.baseUrl("https://dart.fss.or.kr").build(),
+			properties,
+			new OpenDartArchiveParser(objectMapper),
+			objectMapper
+		);
+
+		openDartServer.expect(requestTo(containsString("/api/document.xml")))
+			.andRespond(withSuccess(malformedZip(), MediaType.APPLICATION_OCTET_STREAM));
+		viewerServer.expect(requestTo(containsString("/dsaf001/main.do")))
+			.andRespond(withSuccess(
+				"viewDoc(\"20010321000242\", \"159696\", \"0\", \"0\", \"0\", \"dart2.dtd\", \"\")",
+				MediaType.TEXT_HTML
+			));
+		viewerServer.expect(requestTo(containsString("/report/viewer.do")))
+			.andRespond(withSuccess(
+				"<html><body><p>웹 뷰어 대체 원문</p></body></html>",
+				MediaType.TEXT_HTML
+			));
+
+		var fetch = client.fetchDocuments("20010321000242");
+
+		assertThat(fetch.documents()).singleElement().satisfies(document ->
+			assertThat(document.bodyText()).contains("웹 뷰어 대체 원문"));
+		assertThat(fetch.sources()).anySatisfy(source ->
+			assertThat(source.status()).isEqualTo(DocumentArchiveStatus.REJECTED));
+		openDartServer.verify();
+		viewerServer.verify();
+	}
+
 	private static byte[] zip(String filename, byte[] content) {
 		try {
 			ByteArrayOutputStream output = new ByteArrayOutputStream();
@@ -253,6 +294,31 @@ class OpenDartClientTests {
 				zip.closeEntry();
 			}
 			return output.toByteArray();
+		}
+		catch (IOException exception) {
+			throw new IllegalStateException(exception);
+		}
+	}
+
+	private static byte[] malformedZip() {
+		byte[] content = "<html><body><p>손상된 압축</p></body></html>".getBytes(StandardCharsets.UTF_8);
+		try {
+			ByteArrayOutputStream output = new ByteArrayOutputStream();
+			ZipEntry entry = new ZipEntry("filing.xml");
+			CRC32 crc = new CRC32();
+			crc.update(content);
+			entry.setMethod(ZipEntry.STORED);
+			entry.setSize(content.length);
+			entry.setCompressedSize(content.length);
+			entry.setCrc(crc.getValue());
+			try (ZipOutputStream zip = new ZipOutputStream(output)) {
+				zip.putNextEntry(entry);
+				zip.write(content);
+				zip.closeEntry();
+			}
+			byte[] archive = output.toByteArray();
+			java.util.Arrays.fill(archive, 18, 26, (byte) 0);
+			return archive;
 		}
 		catch (IOException exception) {
 			throw new IllegalStateException(exception);
