@@ -6,6 +6,8 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
+import jakarta.servlet.http.HttpServletRequest;
+
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -23,7 +25,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.kmarket.navigator.backend.identity.domain.AuthenticatedUser;
+import com.kmarket.navigator.backend.identity.infrastructure.ClientContextResolver;
 import com.kmarket.navigator.backend.stock.application.ForeignLimitMonitor;
+import com.kmarket.navigator.backend.stock.application.GlobalPeerService;
 import com.kmarket.navigator.backend.stock.application.MarketHistory;
 import com.kmarket.navigator.backend.stock.application.MarketService;
 import com.kmarket.navigator.backend.stock.application.MarketStockDetail;
@@ -31,6 +35,7 @@ import com.kmarket.navigator.backend.stock.domain.ExchangeRateSnapshot;
 import com.kmarket.navigator.backend.stock.domain.ForeignLimitPolicy;
 import com.kmarket.navigator.backend.stock.domain.ForeignLimitPrediction;
 import com.kmarket.navigator.backend.stock.domain.ForeignOwnershipSnapshot;
+import com.kmarket.navigator.backend.stock.domain.GlobalPeerAnalysis;
 import com.kmarket.navigator.backend.stock.domain.MarketDailyPrice;
 import com.kmarket.navigator.backend.stock.domain.MarketDataStatus;
 import com.kmarket.navigator.backend.stock.domain.MarketIndexSnapshot;
@@ -48,9 +53,17 @@ public class MarketController {
 
 	private static final String STOCK_CODE_PATTERN = "^[0-9A-Za-z]{6}$";
 	private final MarketService service;
+	private final GlobalPeerService globalPeerService;
+	private final ClientContextResolver clientContextResolver;
 
-	public MarketController(MarketService service) {
+	public MarketController(
+		MarketService service,
+		GlobalPeerService globalPeerService,
+		ClientContextResolver clientContextResolver
+	) {
 		this.service = service;
+		this.globalPeerService = globalPeerService;
+		this.clientContextResolver = clientContextResolver;
 	}
 
 	@GetMapping("/stocks/search")
@@ -123,6 +136,17 @@ public class MarketController {
 		@RequestParam(defaultValue = "365") @Min(1) @Max(1250) int limit
 	) {
 		return noStore(MarketHistoryResponse.from(service.history(stockCode, from, to, limit)));
+	}
+
+	@GetMapping("/stocks/{stockCode}/global-peers")
+	public ResponseEntity<GlobalPeerAnalysis> globalPeers(
+		@PathVariable @Pattern(regexp = STOCK_CODE_PATTERN) String stockCode,
+		HttpServletRequest request
+	) {
+		return noStore(globalPeerService.analyze(
+			stockCode,
+			clientContextResolver.resolve(request).ipHash()
+		));
 	}
 
 	private <T> ResponseEntity<T> noStore(T body) {

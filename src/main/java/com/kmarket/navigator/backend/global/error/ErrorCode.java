@@ -114,6 +114,16 @@ public enum ErrorCode {
 		"AI_RATE_LIMITED",
 		"The AI request limit was reached. Try again later."
 	),
+	GLOBAL_PEER_DATA_UNAVAILABLE(
+		HttpStatus.NOT_FOUND,
+		"GLOBAL_PEER_DATA_UNAVAILABLE",
+		"Validated global peer data is not available for this stock."
+	),
+	GLOBAL_PEER_GENERATION_IN_PROGRESS(
+		HttpStatus.CONFLICT,
+		"GLOBAL_PEER_GENERATION_IN_PROGRESS",
+		"Global peer analysis is already being generated. Try again shortly."
+	),
 	INVALID_TAX_DOCUMENT(
 		HttpStatus.BAD_REQUEST,
 		"INVALID_TAX_DOCUMENT",

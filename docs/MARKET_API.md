@@ -17,6 +17,9 @@
 | `GET` | `/api/v1/market/indices` | KOSPI·KOSDAQ·KOSPI 200 스냅샷 |
 | `GET` | `/api/v1/market/foreign-limits` | 4개 종목 한도 게이지와 Min/Base/Max 예측 |
 | `GET` | `/api/v1/market/stocks/{stockCode}/history` | 일별 OHLCV 차트 데이터 |
+| `GET` | `/api/v1/market/stocks/{stockCode}/global-peers` | 데이터 랭커와 OpenAI 구조화 설명 기반 글로벌 피어 분석 |
+
+글로벌 피어 분석은 하나금융 프로젝트에서 검증한 산업·사업모델·규모·재무 하이브리드 랭킹 아티팩트를 사용한다. 서버가 고정한 상위 3개 피어와 4개 강점 키를 OpenAI가 변경할 수 없도록 계약을 검증하며, OpenAI는 영문 설명만 생성한다. 생성 결과는 데이터 버전별로 저장해 중복 비용을 막고 Redis 분산 잠금과 IP 해시별 요청 제한을 적용한다. 피어 자료가 없는 종목은 임의 결과 대신 `GLOBAL_PEER_DATA_UNAVAILABLE`을 반환한다.
 
 관심종목 필터는 JWT 인증이 필요하며, 인증 없이 `watchlist=true`를 요청하면 `401 AUTHENTICATION_REQUIRED`를 반환한다.
 

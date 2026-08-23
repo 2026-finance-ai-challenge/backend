@@ -47,6 +47,9 @@ opendart:
   archive-root: ${OPENDART_ARCHIVE_ROOT:./data/opendart-archives}
 
 kmarket:
+
+  global-peer:
+    data-version: ${KMARKET_GLOBAL_PEER_DATA_VERSION:hana-global-peer-2026-07-21-openai-v1}
   tax:
     documents:
       root: ${KMARKET_TAX_DOCUMENT_ROOT:./data/tax-documents}

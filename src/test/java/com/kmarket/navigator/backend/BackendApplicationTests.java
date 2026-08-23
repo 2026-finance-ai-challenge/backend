@@ -50,6 +50,7 @@ import com.kmarket.navigator.backend.disclosure.application.port.DocumentArchive
 import com.kmarket.navigator.backend.disclosure.application.port.DocumentArchiveStatus;
 import com.kmarket.navigator.backend.disclosure.application.port.OpenDartDocument;
 import com.kmarket.navigator.backend.disclosure.application.port.OpenDartFiling;
+import com.kmarket.navigator.backend.disclosure.application.port.OpenDartCorporation;
 import com.kmarket.navigator.backend.disclosure.application.port.OpenDartSection;
 import com.kmarket.navigator.backend.disclosure.application.port.StoredDocumentArchive;
 import com.kmarket.navigator.backend.disclosure.domain.CorporationClass;
@@ -75,6 +76,8 @@ import com.kmarket.navigator.backend.tax.domain.TaxDocumentStatus;
 import com.kmarket.navigator.backend.tax.domain.TaxDocumentType;
 import com.kmarket.navigator.backend.tax.domain.TaxDocumentVerification;
 import com.kmarket.navigator.backend.tax.infrastructure.storage.TaxDocumentProperties;
+import com.kmarket.navigator.backend.stock.application.port.GlobalPeerGateway;
+import com.kmarket.navigator.backend.stock.domain.GlobalPeerAnalysis;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -137,6 +140,9 @@ class BackendApplicationTests {
 
 	@MockitoBean
 	TaxDocumentGateway taxDocumentGateway;
+
+	@MockitoBean
+	GlobalPeerGateway globalPeerGateway;
 
 	@Autowired
 	ChatGenerationWorker chatGenerationWorker;
@@ -273,6 +279,28 @@ class BackendApplicationTests {
 				.header("Authorization", "Bearer " + owner.accessToken()))
 			.andExpect(status().isBadRequest())
 			.andExpect(jsonPath("$.code").value("INVALID_TAX_DOCUMENT"));
+	}
+
+	@Test
+	void generatesAndCachesGroundedGlobalPeerAnalysis() throws Exception {
+		disclosureRepository.upsertCorporations(List.of(new OpenDartCorporation(
+			"00126380",
+			"삼성전자",
+			"Samsung Electronics",
+			"005930"
+		)));
+		activateCommonStocks("005930");
+		when(globalPeerGateway.analyze(eq("005930"), any())).thenReturn(globalPeerAnalysis());
+
+		for (int request = 0; request < 2; request++) {
+			mockMvc.perform(get("/api/v1/market/stocks/{stockCode}/global-peers", "005930"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.primaryPeer.ticker").value("INTC"))
+				.andExpect(jsonPath("$.comparisons.length()").value(3))
+				.andExpect(jsonPath("$.keyStrengths.length()").value(4))
+				.andExpect(jsonPath("$.financialDataAsOf").value("2025-12-31"));
+		}
+		verify(globalPeerGateway, times(1)).analyze(eq("005930"), any());
 	}
 
 	@Test
@@ -1460,6 +1488,73 @@ class BackendApplicationTests {
 
 	private static OpenDartFiling filing(String receiptNumber) {
 		return filingAt(receiptNumber, LocalDate.of(2026, 8, 18));
+	}
+
+	private static GlobalPeerAnalysis globalPeerAnalysis() {
+		var intel = globalPeer(1, "overall_business", "INTC", "Intel", "0.5201");
+		var tsm = globalPeer(2, "semiconductor", "TSM", "Taiwan Semiconductor", "0.4942");
+		var micron = globalPeer(3, "memory", "MU", "Micron Technology", "0.4870");
+		return new GlobalPeerAnalysis(
+			"005930",
+			"삼성전자",
+			"Samsung Electronics",
+			"KOSPI",
+			"Information Technology",
+			"Semiconductors",
+			"Consumer electronics and appliance manufacturing",
+			"Samsung Electronics and its closest global peers",
+			"The comparison is informational and not a one-for-one valuation substitute.",
+			intel,
+			List.of(intel, tsm, micron),
+			List.of(
+				new GlobalPeerAnalysis.Comparison("overall_business", "Overall reference.", intel),
+				new GlobalPeerAnalysis.Comparison("semiconductor", "Foundry reference.", tsm),
+				new GlobalPeerAnalysis.Comparison("memory", "Memory reference.", micron)
+			),
+			List.of(
+				new GlobalPeerAnalysis.Strength("AI Technology", "AI capability.", "ai"),
+				new GlobalPeerAnalysis.Strength("Consumer Devices", "Device reach.", "devices"),
+				new GlobalPeerAnalysis.Strength("Foundry Capability", "Foundry scale.", "foundry"),
+				new GlobalPeerAnalysis.Strength("Memory Technology", "Memory portfolio.", "memory")
+			),
+			new BigDecimal("0.5201"),
+			"MEDIUM",
+			LocalDate.of(2025, 12, 31),
+			"global-peer-ranker-test-v1",
+			"gpt-5-mini",
+			"global-peer-narrative-v1",
+			"TEST"
+		);
+	}
+
+	private static GlobalPeerAnalysis.GlobalPeer globalPeer(
+		int rank,
+		String dimension,
+		String ticker,
+		String companyName,
+		String similarity
+	) {
+		return new GlobalPeerAnalysis.GlobalPeer(
+			dimension,
+			rank,
+			ticker,
+			companyName,
+			"NASDAQ",
+			"US",
+			new BigDecimal(similarity),
+			List.of("semiconductors"),
+			"Information Technology",
+			"Semiconductors",
+			"Semiconductor design and manufacturing",
+			"MEGA_CAP",
+			2025,
+			new BigDecimal("658355740000"),
+			new BigDecimal("52853000000"),
+			new BigDecimal("1000000000"),
+			new BigDecimal("500000000"),
+			"SEC_COMPANYFACTS",
+			new BigDecimal("0.7760")
+		);
 	}
 
 	private AuthFixture signupAndLogin(String prefix) throws Exception {
