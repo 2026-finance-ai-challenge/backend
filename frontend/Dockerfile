@@ -5,7 +5,8 @@ COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY tsconfig.json tsconfig.node.json vite.config.ts index.html ./
 COPY src src
-RUN npm run build
+COPY test test
+RUN npm test && npm run build
 
 FROM nginxinc/nginx-unprivileged:1.31.3-alpine3.24
 

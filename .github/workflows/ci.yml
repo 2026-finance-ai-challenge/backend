@@ -45,7 +45,11 @@ jobs:
           REDIS_PASSWORD: ci-redis-password
           KMARKET_CONTEXT_PEPPER: ci-context-pepper-at-least-32-bytes
           KMARKET_JWT_SECRET_BASE64: bG9jYWwtdGVzdC1qd3Qtc2VjcmV0LTAxMjM0NTY3ODktQUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVotYWJjZGVmZ2g=
+          KMARKET_TAX_DOCUMENT_KEY_BASE64: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
         run: docker compose config --quiet
 
       - name: Backend 이미지 빌드
         run: docker build --tag kmarket-backend:ci .
+
+      - name: Frontend 이미지 빌드 및 테스트
+        run: docker build --tag kmarket-frontend:ci frontend
