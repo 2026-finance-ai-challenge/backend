@@ -182,7 +182,11 @@ type RawGeneration = { id: string; status: string; errorCode: string | null }
 
 export type AgentContext = { type: 'GENERAL' | 'STOCK' | 'NEWS' | 'FILING' | 'TAX_GUIDE'; referenceId?: string; title?: string }
 
-function AgentPanel({ context, close }: { context: AgentContext; close: () => void }) {
+export function openAgent(prompt = ''): void {
+  window.dispatchEvent(new CustomEvent('kmarket:open-agent', { detail: { prompt } }))
+}
+
+function AgentPanel({ context, close, initialPrompt, promptNonce }: { context: AgentContext; close: () => void; initialPrompt: string; promptNonce: number }) {
   const profile = useProfile()
   const [rooms, setRooms] = useState<RawRoom[]>([])
   const [room, setRoom] = useState<RawRoom | null>(null)
@@ -197,9 +201,15 @@ function AgentPanel({ context, close }: { context: AgentContext; close: () => vo
     if (!profile) return
     const result = await api<RawRoom[]>('/api/v1/me/chats')
     setRooms(result)
-    if (!room && result[0]) setRoom(result[0])
+    if (!room) {
+      const contextual = context.referenceId
+        ? result.find((item) => item.context.type === context.type && item.context.referenceId === context.referenceId)
+        : result[0]
+      setRoom(contextual || null)
+    }
   }
   useEffect(() => { void reloadRooms().catch(() => setError('Chat rooms could not be loaded.')) }, [profile]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (initialPrompt) setInput(initialPrompt) }, [initialPrompt, promptNonce])
   useEffect(() => {
     if (!room) { setMessages([]); return }
     api<RawMessage[]>(`/api/v1/me/chats/${room.id}/messages`).then(setMessages).catch(() => setError('Messages could not be loaded.'))
@@ -292,10 +302,20 @@ const nav: Array<{ route: RouteName; label: string; labelKo: string }> = [
 export function AppShell({ location, context, children }: { location: AppLocation; context: AgentContext; children: ReactNode }) {
   const profile = useProfile()
   const [agent, setAgent] = useState(false)
+  const [agentPrompt, setAgentPrompt] = useState({ value: '', nonce: 0 })
   const [mobileMenu, setMobileMenu] = useState(false)
   const [locale, setLocale] = useState<Locale>('en')
   useEffect(() => setMobileMenu(false), [location.route, location.id])
   useEffect(() => { document.documentElement.lang = locale === 'ko' ? 'ko' : 'en' }, [locale])
+  useEffect(() => {
+    const open = (event: Event) => {
+      const prompt = event instanceof CustomEvent && typeof event.detail?.prompt === 'string' ? event.detail.prompt : ''
+      setAgentPrompt((current) => ({ value: prompt, nonce: current.nonce + 1 }))
+      setAgent(true)
+    }
+    window.addEventListener('kmarket:open-agent', open)
+    return () => window.removeEventListener('kmarket:open-agent', open)
+  }, [])
   const active = location.route === 'stock-detail' ? 'screener' : location.route === 'filing-detail' ? 'dart' : location.route === 'news-detail' ? 'news' : location.route
   return <div className={`app-shell ${agent ? 'agent-open' : ''}`}>
     <header className="gnb">
@@ -307,7 +327,7 @@ export function AppShell({ location, context, children }: { location: AppLocatio
     </header>
     {locale === 'ko' && <div className="locale-note" role="status">English primary · 주요 탐색 레이블을 한국어로 함께 표시합니다.</div>}
     <main>{children}</main>
-    {agent && <AgentPanel context={context} close={() => setAgent(false)} />}
+    {agent && <AgentPanel context={context} close={() => setAgent(false)} initialPrompt={agentPrompt.value} promptNonce={agentPrompt.nonce} />}
     {agent && <button className="agent-backdrop" onClick={() => setAgent(false)} aria-label="Close AI Agent overlay" />}
   </div>
 }
