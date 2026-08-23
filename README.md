@@ -8,6 +8,7 @@
 
 - [제품 범위](docs/PRODUCT_SCOPE.md)
 - [Redis JWT 회원 인증 API](docs/AUTH_API.md)
+- [관심종목·최근 조회·알림 API](docs/PERSONALIZATION_API.md)
 - [Git 및 전달 워크플로](docs/GIT_WORKFLOW.md)
 - [Codex 저장소 지침](AGENTS.md)
 - [Codex 작업 스킬](.agents/skills/k-market-delivery/SKILL.md)
@@ -143,6 +144,7 @@ docker compose up -d
 - `POST /api/v1/disclosures/{receiptNumber}/index`: 온디맨드 청크 색인 요청
 
 회원가입·로그인·토큰 회전·로그아웃·프로필 API는 [회원 인증 API 문서](docs/AUTH_API.md)를 따른다. 비밀번호는 Argon2id로 해시하고, 15분 Access JWT와 회전형 Refresh Token의 상태는 Redis에서 관리한다.
+관심종목·최근 조회·알림함 API는 [사용자 개인화 API 문서](docs/PERSONALIZATION_API.md)를 따르며 모든 조회·수정에서 JWT 사용자 소유권을 검증한다.
 
 질의응답을 사용하려면 AI API 서버가 `KMARKET_AI_BASE_URL`에서 실행 중이어야 하며 두 서비스의 `KMARKET_AI_SERVICE_TOKEN`이 같아야 한다. 그 외 경로는 기본 차단한다.
 

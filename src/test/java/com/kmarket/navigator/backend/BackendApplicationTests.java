@@ -4,8 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -249,6 +251,129 @@ class BackendApplicationTests {
 			.andExpect(status().isTooManyRequests())
 			.andExpect(result -> assertThat(result.getResponse().getHeader("Retry-After")).isNotBlank())
 			.andExpect(jsonPath("$.code").value("LOGIN_RATE_LIMITED"));
+	}
+
+	@Test
+	void managesWatchlistRecentItemsAndOwnedNotifications() throws Exception {
+		OpenDartFiling disclosure = filing("20260818800679");
+		disclosureRepository.saveFiling(disclosure);
+		activateCommonStocks("005930");
+
+		String loginId = "personal_" + UUID.randomUUID().toString().substring(0, 8);
+		String password = "Secure!Pass123";
+		mockMvc.perform(post("/api/v1/auth/signup")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{"loginId":"%s","password":"%s","passwordConfirm":"%s",
+					 "nationality":"US","investorType":"INDIVIDUAL",
+					 "termsAccepted":true,"privacyAccepted":true}
+					""".formatted(loginId, password, password)))
+			.andExpect(status().isCreated());
+		JsonNode login = response(post("/api/v1/auth/login")
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("{\"loginId\":\"%s\",\"password\":\"%s\"}".formatted(loginId, password)));
+		String accessToken = login.get("accessToken").stringValue();
+		UUID userId = UUID.fromString(login.get("user").get("id").stringValue());
+
+		for (int request = 0; request < 2; request++) {
+			mockMvc.perform(put("/api/v1/me/watchlist/{stockCode}", "005930")
+					.header("Authorization", "Bearer " + accessToken))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.stockCode").value("005930"));
+		}
+		mockMvc.perform(get("/api/v1/me/watchlist")
+				.header("Authorization", "Bearer " + accessToken))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.count").value(1))
+			.andExpect(jsonPath("$.items[0].nameKo").value("삼성전자"));
+
+		mockMvc.perform(post("/api/v1/me/recently-viewed")
+				.header("Authorization", "Bearer " + accessToken)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"itemType\":\"STOCK\",\"referenceId\":\"005930\",\"stockCode\":\"005930\"}"))
+			.andExpect(status().isOk());
+		mockMvc.perform(post("/api/v1/me/recently-viewed")
+				.header("Authorization", "Bearer " + accessToken)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{"itemType":"FILING","referenceId":"%s","stockCode":"005930"}
+					""".formatted(disclosure.receiptNumber())))
+			.andExpect(status().isOk());
+		mockMvc.perform(get("/api/v1/me/recently-viewed")
+				.header("Authorization", "Bearer " + accessToken))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.length()").value(2));
+
+		UUID notificationId = UUID.randomUUID();
+		String otherLoginId = "personal_other_" + UUID.randomUUID().toString().substring(0, 8);
+		String otherProfileBody = mockMvc.perform(post("/api/v1/auth/signup")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{"loginId":"%s","password":"%s","passwordConfirm":"%s",
+					 "nationality":"GB","investorType":"INDIVIDUAL",
+					 "termsAccepted":true,"privacyAccepted":true}
+					""".formatted(otherLoginId, password, password)))
+			.andExpect(status().isCreated())
+			.andReturn()
+			.getResponse()
+			.getContentAsString();
+		JsonNode otherProfile = objectMapper.readTree(otherProfileBody);
+		UUID otherUserId = UUID.fromString(otherProfile.get("id").stringValue());
+		UUID otherNotificationId = UUID.randomUUID();
+		jdbcClient.sql("""
+			INSERT INTO user_notification (
+			    id, user_id, notification_type, title, body, reference_type,
+			    reference_id, created_at
+			)
+			VALUES (
+			    :id, :userId, 'DISCLOSURE', 'New filing', 'A watched company filed a report.',
+			    'FILING', :referenceId, CURRENT_TIMESTAMP
+			)
+			""")
+			.param("id", notificationId)
+			.param("userId", userId)
+			.param("referenceId", disclosure.receiptNumber())
+			.update();
+		jdbcClient.sql("""
+			INSERT INTO user_notification (
+			    id, user_id, notification_type, title, body, created_at
+			)
+			VALUES (
+			    :id, :userId, 'SYSTEM', 'Private notification', 'Another user owns this item.',
+			    CURRENT_TIMESTAMP
+			)
+			""")
+			.param("id", otherNotificationId)
+			.param("userId", otherUserId)
+			.update();
+
+		mockMvc.perform(get("/api/v1/me/notifications")
+				.header("Authorization", "Bearer " + accessToken))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.unreadCount").value(1))
+			.andExpect(jsonPath("$.items[0].id").value(notificationId.toString()))
+			.andExpect(jsonPath("$.items[0].read").value(false));
+		mockMvc.perform(put("/api/v1/me/notifications/{notificationId}/read", notificationId)
+				.header("Authorization", "Bearer " + accessToken))
+			.andExpect(status().isNoContent());
+		mockMvc.perform(put("/api/v1/me/notifications/{notificationId}/read", otherNotificationId)
+				.header("Authorization", "Bearer " + accessToken))
+			.andExpect(status().isNotFound())
+			.andExpect(jsonPath("$.code").value("NOTIFICATION_NOT_FOUND"));
+		mockMvc.perform(get("/api/v1/me/notifications")
+				.header("Authorization", "Bearer " + accessToken)
+				.param("cursor", "not-a-cursor"))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.code").value("INVALID_CURSOR"));
+		mockMvc.perform(get("/api/v1/me/notifications")
+				.header("Authorization", "Bearer " + accessToken))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.unreadCount").value(0))
+			.andExpect(jsonPath("$.items[0].read").value(true));
+
+		mockMvc.perform(delete("/api/v1/me/watchlist/{stockCode}", "005930")
+				.header("Authorization", "Bearer " + accessToken))
+			.andExpect(status().isNoContent());
 	}
 
 	@Test
