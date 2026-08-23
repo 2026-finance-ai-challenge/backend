@@ -41,4 +41,8 @@ jobs:
         env:
           SPRING_DATASOURCE_USERNAME: ci
           SPRING_DATASOURCE_PASSWORD: ci-password
+          KMARKET_AI_SERVICE_TOKEN: ci-service-token
         run: docker compose config --quiet
+
+      - name: Backend 이미지 빌드
+        run: docker build --tag kmarket-backend:ci .

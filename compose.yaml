@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: ${SPRING_DATASOURCE_USERNAME:?required}
       POSTGRES_PASSWORD: ${SPRING_DATASOURCE_PASSWORD:?required}
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql
     healthcheck:
@@ -15,6 +15,100 @@ services:
       timeout: 3s
       retries: 10
     stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+
+  ai-api:
+    build:
+      context: ../AI
+      dockerfile: Dockerfile
+    environment:
+      KMARKET_AI_ENVIRONMENT: ${KMARKET_AI_ENVIRONMENT:-local}
+      KMARKET_AI_ALLOWED_HOSTS: '["localhost","127.0.0.1","ai-api"]'
+      KMARKET_AI_DATABASE_URL: postgresql://${SPRING_DATASOURCE_USERNAME:?required}:${SPRING_DATASOURCE_PASSWORD:?required}@postgres:5432/kmarket
+      KMARKET_AI_SERVICE_TOKEN: ${KMARKET_AI_SERVICE_TOKEN:?required}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    ports:
+      - "127.0.0.1:${AI_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 20s
+
+  rag-worker:
+    build:
+      context: ../AI
+      dockerfile: Dockerfile
+    command: ["k-market-rag-worker"]
+    profiles: ["worker"]
+    environment:
+      KMARKET_AI_ENVIRONMENT: ${KMARKET_AI_ENVIRONMENT:-local}
+      KMARKET_AI_DATABASE_URL: postgresql://${SPRING_DATASOURCE_USERNAME:?required}:${SPRING_DATASOURCE_PASSWORD:?required}@postgres:5432/kmarket
+    depends_on:
+      postgres:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    volumes:
+      - model-cache:/home/kmarket/.cache
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/kmarket
+      SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME:?required}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD:?required}
+      OPENDART_API_KEYS: ${OPENDART_API_KEYS:-}
+      OPENDART_ARCHIVE_ROOT: /app/data/opendart-archives
+      KMARKET_AI_BASE_URL: http://ai-api:8000
+      KMARKET_AI_SERVICE_TOKEN: ${KMARKET_AI_SERVICE_TOKEN:?required}
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ai-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/actuator/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    volumes:
+      - ./data/opendart-archives:/app/data/opendart-archives:ro
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
 
 volumes:
   postgres-data:
+  model-cache:
