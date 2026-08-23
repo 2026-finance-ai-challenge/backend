@@ -70,6 +70,14 @@ class JdbcNewsRepository implements NewsRepository {
 			  AND (CAST(:marketImpact AS varchar) IS NULL OR article.market_impact = :marketImpact)
 			  AND (CAST(:marketImpactImportance AS varchar) IS NULL
 			       OR article.market_impact_importance = :marketImpactImportance)
+			  AND (CAST(:watchlistOnly AS boolean) = FALSE OR EXISTS (
+			    SELECT 1
+			    FROM news_article_security watched_article
+			    JOIN watchlist_item watched
+			      ON watched.security_id = watched_article.security_id
+			    WHERE watched_article.article_id = article.id
+			      AND watched.user_id = :watchlistUserId
+			  ))
 			  AND (CAST(:fromTime AS timestamptz) IS NULL OR article.published_at >= :fromTime)
 			  AND (CAST(:toTime AS timestamptz) IS NULL OR article.published_at <= :toTime)
 			  AND (
@@ -107,6 +115,8 @@ class JdbcNewsRepository implements NewsRepository {
 			query.marketImpactImportance() == null ? null : query.marketImpactImportance().name(),
 			Types.VARCHAR
 		);
+		statement = statement.param("watchlistOnly", query.watchlistOnly());
+		statement = nullable(statement, "watchlistUserId", query.userId(), Types.OTHER);
 		statement = nullable(statement, "fromTime", atUtc(query.from()), Types.TIMESTAMP_WITH_TIMEZONE);
 		statement = nullable(statement, "toTime", atUtc(query.to()), Types.TIMESTAMP_WITH_TIMEZONE);
 		statement = nullable(

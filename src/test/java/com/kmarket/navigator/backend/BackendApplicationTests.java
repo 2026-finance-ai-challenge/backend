@@ -1058,6 +1058,20 @@ class BackendApplicationTests {
 				.param("limit", "1"))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.count").value(1));
+		mockMvc.perform(get("/api/v1/market/stocks")
+				.param("sector", "Semiconductors")
+				.param("minChangeRate", "1")
+				.param("maxChangeRate", "2")
+				.param("minVolume", "10000000")
+				.param("maxVolume", "20000000"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.count").value(1))
+			.andExpect(jsonPath("$.items[0].stockCode").value("005930"));
+		mockMvc.perform(get("/api/v1/market/stocks")
+				.param("minVolume", "200")
+				.param("maxVolume", "100"))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
 
 		mockMvc.perform(get("/api/v1/market/stocks/{stockCode}", "005930"))
 			.andExpect(status().isOk())
@@ -1100,6 +1114,10 @@ class BackendApplicationTests {
 			Instant.parse("2026-08-23T09:00:00Z"),
 			"MEDIUM"
 		);
+		AuthFixture newsOwner = signupAndLogin("news_owner");
+		mockMvc.perform(put("/api/v1/me/watchlist/{stockCode}", "005930")
+				.header("Authorization", "Bearer " + newsOwner.accessToken()))
+			.andExpect(status().isOk());
 		when(newsAiGateway.explainTerm(eq("rights offering"), any(), any(), any()))
 			.thenReturn(new TermExplanation(
 				"rights offering",
@@ -1123,6 +1141,14 @@ class BackendApplicationTests {
 		assertThat(firstPage.get("items").get(0).get("id").stringValue())
 			.isEqualTo(firstArticleId.toString());
 		assertThat(firstPage.get("nextCursor").stringValue()).isNotBlank();
+		mockMvc.perform(get("/api/v1/news").param("watchlist", "true"))
+			.andExpect(status().isUnauthorized())
+			.andExpect(jsonPath("$.code").value("AUTHENTICATION_REQUIRED"));
+		mockMvc.perform(get("/api/v1/news")
+				.header("Authorization", "Bearer " + newsOwner.accessToken())
+				.param("watchlist", "true"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.items.length()").value(2));
 		mockMvc.perform(get("/api/v1/news")
 				.param("marketImpactImportance", "HIGH"))
 			.andExpect(status().isOk())
