@@ -305,6 +305,21 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 	}
 
 	@Override
+	public boolean isOpenDartDocumentCollectionBlocked() {
+		return jdbcClient.sql("""
+			SELECT EXISTS (
+			    SELECT 1
+			    FROM ingestion_provider_throttle
+			    WHERE provider = :provider
+			      AND blocked_until > CURRENT_TIMESTAMP
+			)
+			""")
+			.param("provider", OPEN_DART_DOCUMENT_PROVIDER)
+			.query(Boolean.class)
+			.single();
+	}
+
+	@Override
 	public void blockOpenDartDocumentCollection(Duration delay, String reason) {
 		jdbcClient.sql("""
 			INSERT INTO ingestion_provider_throttle (

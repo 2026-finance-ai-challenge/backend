@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.LocalDate;
@@ -109,6 +110,24 @@ class DisclosureCollectionHandlerTests {
 
 		assertThatThrownBy(() -> handler.collect(FROM, LocalDate.of(2026, 4, 1)))
 			.isInstanceOf(IllegalArgumentException.class);
+		verify(repository, org.mockito.Mockito.never()).findActiveCommonStockCodes();
+	}
+
+	@Test
+	void skipsCollectionWhenOpenDartDocumentProviderIsBlocked() {
+		OpenDartGateway openDartGateway = mock(OpenDartGateway.class);
+		ListedStockGateway listedStockGateway = mock(ListedStockGateway.class);
+		DisclosureRepository repository = mock(DisclosureRepository.class);
+		when(repository.isOpenDartDocumentCollectionBlocked()).thenReturn(true);
+
+		int saved = new DisclosureCollectionHandler(
+			openDartGateway,
+			listedStockGateway,
+			repository
+		).collect(FROM, TO);
+
+		assertThat(saved).isZero();
+		verifyNoInteractions(openDartGateway, listedStockGateway);
 		verify(repository, org.mockito.Mockito.never()).findActiveCommonStockCodes();
 	}
 
