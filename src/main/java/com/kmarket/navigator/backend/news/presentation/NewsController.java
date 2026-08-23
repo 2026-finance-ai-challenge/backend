@@ -56,6 +56,7 @@ class NewsController {
 		@RequestParam(required = false) NewsSentiment sentiment,
 		@RequestParam(required = false) NewsImportance importance,
 		@RequestParam(required = false) MarketImpact marketImpact,
+		@RequestParam(required = false) NewsImportance marketImpactImportance,
 		@RequestParam(required = false)
 		@DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
 		Instant from,
@@ -76,6 +77,7 @@ class NewsController {
 			sentiment,
 			importance,
 			marketImpact,
+			marketImpactImportance,
 			from,
 			to,
 			sort,

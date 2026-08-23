@@ -100,6 +100,8 @@ export type NewsArticle = {
   sentiment: string | null
   importance: string | null
   marketImpact: string | null
+  marketImpactImportance: string | null
+  marketImpactScore: number | null
   confidence: Record<string, number | null>
   originalUrl: string
   publisher: string

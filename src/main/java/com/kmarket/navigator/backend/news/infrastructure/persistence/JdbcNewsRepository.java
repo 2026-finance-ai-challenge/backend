@@ -68,6 +68,8 @@ class JdbcNewsRepository implements NewsRepository {
 			  AND (CAST(:sentiment AS varchar) IS NULL OR article.sentiment = :sentiment)
 			  AND (CAST(:importance AS varchar) IS NULL OR article.importance = :importance)
 			  AND (CAST(:marketImpact AS varchar) IS NULL OR article.market_impact = :marketImpact)
+			  AND (CAST(:marketImpactImportance AS varchar) IS NULL
+			       OR article.market_impact_importance = :marketImpactImportance)
 			  AND (CAST(:fromTime AS timestamptz) IS NULL OR article.published_at >= :fromTime)
 			  AND (CAST(:toTime AS timestamptz) IS NULL OR article.published_at <= :toTime)
 			  AND (
@@ -97,6 +99,12 @@ class JdbcNewsRepository implements NewsRepository {
 			statement,
 			"marketImpact",
 			query.marketImpact() == null ? null : query.marketImpact().name(),
+			Types.VARCHAR
+		);
+		statement = nullable(
+			statement,
+			"marketImpactImportance",
+			query.marketImpactImportance() == null ? null : query.marketImpactImportance().name(),
 			Types.VARCHAR
 		);
 		statement = nullable(statement, "fromTime", atUtc(query.from()), Types.TIMESTAMP_WITH_TIMEZONE);
@@ -395,7 +403,10 @@ class JdbcNewsRepository implements NewsRepository {
 			    what_summary = :whatSummary, why_summary = :whySummary,
 			    impact_summary = :impactSummary, event_type = :eventType,
 			    sentiment = :sentiment, importance = :importance,
-			    market_impact = :marketImpact, event_confidence = :eventConfidence,
+			    market_impact = :marketImpact,
+			    market_impact_importance = :marketImpactImportance,
+			    market_impact_score = :marketImpactScore,
+			    event_confidence = :eventConfidence,
 			    sentiment_confidence = :sentimentConfidence,
 			    importance_confidence = :importanceConfidence,
 			    market_impact_confidence = :marketImpactConfidence,
@@ -413,6 +424,8 @@ class JdbcNewsRepository implements NewsRepository {
 			.param("sentiment", analysis.sentiment().name())
 			.param("importance", analysis.importance().name())
 			.param("marketImpact", analysis.marketImpact().name())
+			.param("marketImpactImportance", analysis.marketImpactImportance().name())
+			.param("marketImpactScore", analysis.marketImpactScore())
 			.param("eventConfidence", analysis.eventConfidence())
 			.param("sentimentConfidence", analysis.sentimentConfidence())
 			.param("importanceConfidence", analysis.importanceConfidence())
@@ -547,7 +560,8 @@ class JdbcNewsRepository implements NewsRepository {
 			article.id(), article.clusterId(), article.originalTitle(), article.originalExcerpt(),
 			article.originalBody(), article.englishTitle(), article.englishBody(), article.what(),
 			article.why(), article.impact(), article.eventType(), article.sentiment(),
-			article.importance(), article.marketImpact(), article.eventConfidence(),
+			article.importance(), article.marketImpact(), article.marketImpactImportance(),
+			article.marketImpactScore(), article.eventConfidence(),
 			article.sentimentConfidence(), article.importanceConfidence(),
 			article.marketImpactConfidence(), article.originalUrl(), article.canonicalUrl(),
 			article.publisher(), article.thumbnailUrl(), article.contentAvailability(),
@@ -594,6 +608,11 @@ class JdbcNewsRepository implements NewsRepository {
 			enumValue(NewsSentiment.class, resultSet.getString("sentiment")),
 			enumValue(NewsImportance.class, resultSet.getString("importance")),
 			enumValue(MarketImpact.class, resultSet.getString("market_impact")),
+			enumValue(
+				NewsImportance.class,
+				resultSet.getString("market_impact_importance")
+			),
+			resultSet.getBigDecimal("market_impact_score"),
 			resultSet.getBigDecimal("event_confidence"),
 			resultSet.getBigDecimal("sentiment_confidence"),
 			resultSet.getBigDecimal("importance_confidence"),
@@ -622,7 +641,7 @@ class JdbcNewsRepository implements NewsRepository {
 				  WHEN 'CRITICAL' THEN 4 WHEN 'HIGH' THEN 3
 				  WHEN 'MEDIUM' THEN 2 WHEN 'LOW' THEN 1 ELSE 0 END
 				""";
-			case MARKET_IMPACT -> "COALESCE(article.market_impact_confidence, 0)";
+			case MARKET_IMPACT -> "COALESCE(article.market_impact_score, 0)";
 		};
 	}
 

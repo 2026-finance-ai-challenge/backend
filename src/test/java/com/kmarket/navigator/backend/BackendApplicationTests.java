@@ -1123,6 +1123,11 @@ class BackendApplicationTests {
 		assertThat(firstPage.get("items").get(0).get("id").stringValue())
 			.isEqualTo(firstArticleId.toString());
 		assertThat(firstPage.get("nextCursor").stringValue()).isNotBlank();
+		mockMvc.perform(get("/api/v1/news")
+				.param("marketImpactImportance", "HIGH"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.items.length()").value(1))
+			.andExpect(jsonPath("$.items[0].id").value(firstArticleId.toString()));
 
 		mockMvc.perform(get("/api/v1/news")
 				.param("stockCode", "005930")
@@ -1136,6 +1141,9 @@ class BackendApplicationTests {
 		mockMvc.perform(get("/api/v1/news/{articleId}", firstArticleId))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.analysisStatus").value("READY"))
+			.andExpect(jsonPath("$.marketImpact").value("POSITIVE"))
+			.andExpect(jsonPath("$.marketImpactImportance").value("HIGH"))
+			.andExpect(jsonPath("$.marketImpactScore").value(0.55))
 			.andExpect(jsonPath("$.contentAvailability").value("SOURCE_EXCERPT"))
 			.andExpect(jsonPath("$.relatedStocks[0].stockCode").value("005930"));
 
@@ -1724,7 +1732,8 @@ class BackendApplicationTests {
 			    id, cluster_id, provider, provider_article_id, original_title,
 			    original_excerpt, english_title, english_body, what_summary,
 			    why_summary, impact_summary, event_type, sentiment, importance,
-			    market_impact, event_confidence, sentiment_confidence,
+			    market_impact, market_impact_importance, market_impact_score,
+			    event_confidence, sentiment_confidence,
 			    importance_confidence, market_impact_confidence, original_url,
 			    canonical_url, canonical_url_hash, publisher, content_availability,
 			    analysis_status, model_id, prompt_version, published_at, collected_at,
@@ -1735,7 +1744,8 @@ class BackendApplicationTests {
 			    :excerpt, :title, :excerpt, 'A market event occurred.',
 			    'The article states the reason.', 'The event may affect future operations.',
 			    'CORPORATE_ACTION', 'POSITIVE', :importance, 'POSITIVE',
-			    0.90, 0.85, 0.80, 0.75, :url, :url, :hash, 'news.example.com',
+			    :importance, 0.55, 0.90, 0.85, 0.80, 0.75,
+			    :url, :url, :hash, 'news.example.com',
 			    'SOURCE_EXCERPT', 'READY', 'gpt-5-mini', 'news-analysis-v1',
 			    :publishedAt, :publishedAt, :publishedAt
 			)

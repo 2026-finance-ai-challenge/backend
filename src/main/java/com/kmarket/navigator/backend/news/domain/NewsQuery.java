@@ -8,6 +8,7 @@ public record NewsQuery(
 	NewsSentiment sentiment,
 	NewsImportance importance,
 	MarketImpact marketImpact,
+	NewsImportance marketImpactImportance,
 	Instant from,
 	Instant to,
 	NewsSort sort,
