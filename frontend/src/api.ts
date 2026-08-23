@@ -112,8 +112,8 @@ export async function api<T>(path: string, init: RequestInit = {}, allowRefresh 
     return api<T>(path, init, false)
   }
   if (!response.ok) throw new ApiError(await problemFrom(response))
-  if (response.status === 204) return undefined as T
-  return response.json() as Promise<T>
+  const text = await response.text()
+  return (text ? JSON.parse(text) : undefined) as T
 }
 
 export function queryString(values: Record<string, string | number | boolean | null | undefined>): string {

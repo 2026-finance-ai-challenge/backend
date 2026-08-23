@@ -44,18 +44,21 @@ type TaxDocument = {
   updatedAt: string
 }
 
-export function TaxPage() {
+export function TaxPage({ initialCountry, initialInvestorType }: { initialCountry?: string; initialInvestorType?: InvestorType }) {
   const profile = useProfile()
   const countries = useRemote(() => api<Country[]>('/api/v1/tax/countries'), [])
-  const [country, setCountry] = useState(profile?.nationality || 'US')
-  const [investorType, setInvestorType] = useState<InvestorType>(profile?.investorType || 'INDIVIDUAL')
+  const [country, setCountry] = useState(initialCountry || profile?.nationality || 'US')
+  const [investorType, setInvestorType] = useState<InvestorType>(initialInvestorType || profile?.investorType || 'INDIVIDUAL')
   const [result, setResult] = useState<Eligibility | null>(null)
   const [checking, setChecking] = useState(false)
   const [error, setError] = useState('')
   const documents = useRemote(() => profile ? api<TaxDocument[]>('/api/v1/me/tax-documents') : Promise.resolve([]), [profile])
   const check = async (event: FormEvent) => {
     event.preventDefault(); setChecking(true); setError('')
-    try { setResult(await api<Eligibility>('/api/v1/tax/eligibility', { method: 'POST', body: JSON.stringify({ residencyCountry: country, investorType }) })) }
+    try {
+      setResult(await api<Eligibility>('/api/v1/tax/eligibility', { method: 'POST', body: JSON.stringify({ residencyCountry: country, investorType }) }))
+      navigate('tax', undefined, { country, investorType })
+    }
     catch (reason) { setError(reason instanceof Error ? reason.message : 'Treaty data could not be checked.') }
     finally { setChecking(false) }
   }
