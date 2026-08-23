@@ -67,10 +67,26 @@ export function RemoteBoundary<T>({ state, children, empty, className }: {
   if (state.loading && state.data === null) return <div className={`skeleton-stack ${className || ''}`} aria-label="Loading"><i /><i /><i /></div>
   if (state.error) {
     const rateLimited = state.error.status === 429
+    const unauthorized = state.error.status === 401
+    const forbidden = state.error.status === 403
+    const unsupported = state.error.code === 'UNSUPPORTED_STOCK'
+    const aiFailure = state.error.code.startsWith('AI_') || state.error.code.includes('PROVIDER')
+    const title = rateLimited ? 'Usage limit reached'
+      : unauthorized ? 'Sign in required'
+        : forbidden ? 'You do not have access to this resource'
+          : unsupported ? 'Unsupported stock'
+            : aiFailure ? 'AI analysis is temporarily unavailable'
+              : 'This section is temporarily unavailable'
+    const message = rateLimited && state.error.retryAfter ? `Try again after ${state.error.retryAfter}.`
+      : unsupported ? 'K-Market Navigator supports the published 75-stock universe only.'
+        : state.error.message
+    const action = unauthorized
+      ? { label: 'Sign in', run: () => navigate('auth', undefined, { returnTo: window.location.hash }) }
+      : forbidden || unsupported ? undefined : { label: 'Retry', run: state.retry }
     return <StatusPanel
-      title={rateLimited ? 'Usage limit reached' : 'This section is temporarily unavailable'}
-      message={rateLimited && state.error.retryAfter ? `Try again after ${state.error.retryAfter}.` : state.error.message}
-      action={{ label: 'Retry', run: state.retry }} tone={rateLimited ? 'warning' : 'error'}
+      title={title}
+      message={message}
+      action={action} tone={rateLimited || unsupported ? 'warning' : 'error'}
     />
   }
   if (state.data === null) return null
