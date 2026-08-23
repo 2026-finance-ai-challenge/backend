@@ -9,6 +9,13 @@ spring:
       ddl-auto: validate
   lifecycle:
     timeout-per-shutdown-phase: 20s
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:127.0.0.1}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+      password: ${SPRING_DATA_REDIS_PASSWORD:}
+      connect-timeout: 2s
+      timeout: 2s
 
 server:
   shutdown: graceful
@@ -34,3 +41,13 @@ management:
 opendart:
   api-keys: ${OPENDART_API_KEYS:${OPENDART_API_KEY}}
   archive-root: ${OPENDART_ARCHIVE_ROOT:./data/opendart-archives}
+
+kmarket:
+  identity:
+    access-token-ttl: ${KMARKET_ACCESS_TOKEN_TTL:15m}
+    refresh-token-ttl: ${KMARKET_REFRESH_TOKEN_TTL:14d}
+    context-pepper: ${KMARKET_CONTEXT_PEPPER}
+    jwt-issuer: ${KMARKET_JWT_ISSUER:k-market-navigator}
+    jwt-audience: ${KMARKET_JWT_AUDIENCE:k-market-navigator-api}
+    jwt-secret-base64: ${KMARKET_JWT_SECRET_BASE64}
+    redis-key-prefix: ${KMARKET_REDIS_KEY_PREFIX:kmarket:identity}

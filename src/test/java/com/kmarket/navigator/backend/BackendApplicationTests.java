@@ -27,6 +27,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
@@ -50,6 +51,9 @@ import com.kmarket.navigator.backend.disclosure.domain.ListedCommonStock;
 import com.kmarket.navigator.backend.disclosure.domain.Market;
 import com.kmarket.navigator.backend.disclosure.domain.SectionKind;
 
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+
 @Testcontainers
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
@@ -65,6 +69,11 @@ class BackendApplicationTests {
 				.asCompatibleSubstituteFor("postgres")
 		);
 
+	@Container
+	@ServiceConnection(name = "redis")
+	static final GenericContainer<?> REDIS = new GenericContainer<>(DockerImageName.parse("redis:8.6.2"))
+		.withExposedPorts(6379);
+
 	@Autowired
 	MockMvc mockMvc;
 
@@ -79,6 +88,9 @@ class BackendApplicationTests {
 
 	@Autowired
 	JdbcClient jdbcClient;
+
+	@Autowired
+	ObjectMapper objectMapper;
 
 	@MockitoBean
 	DisclosureRagGateway disclosureRagGateway;
@@ -121,11 +133,122 @@ class BackendApplicationTests {
 	}
 
 	@Test
-	void writeApiIsDeniedByDefault() throws Exception {
+	void protectedAndUnknownApisRequireAuthenticationByDefault() throws Exception {
 		mockMvc.perform(post("/api/v1/disclosures"))
-			.andExpect(status().isForbidden());
+			.andExpect(status().isUnauthorized());
 		mockMvc.perform(get("/api/v1/disclosures/not-a-receipt"))
-			.andExpect(status().isForbidden());
+			.andExpect(status().isUnauthorized());
+	}
+
+	@Test
+	void issuesJwtAndRotatesRefreshTokenWithRedisSessionValidation() throws Exception {
+		String loginId = "investor_" + UUID.randomUUID().toString().substring(0, 8);
+		String password = "Secure!Pass123";
+		mockMvc.perform(post("/api/v1/auth/signup")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{
+					  "loginId": "%s",
+					  "password": "%s",
+					  "passwordConfirm": "%s",
+					  "nationality": "US",
+					  "investorType": "INDIVIDUAL",
+					  "termsAccepted": true,
+					  "privacyAccepted": true
+					}
+					""".formatted(loginId, password, password)))
+			.andExpect(status().isCreated());
+		assertThat(jdbcClient.sql("SELECT password_hash FROM user_account WHERE login_id = :loginId")
+			.param("loginId", loginId)
+			.query(String.class)
+			.single()).startsWith("{argon2}$argon2id$");
+
+		JsonNode login = response(post("/api/v1/auth/login")
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("""
+				{"loginId":"%s","password":"%s"}
+				""".formatted(loginId, password)));
+		String firstAccessToken = login.get("accessToken").stringValue();
+		String firstRefreshToken = login.get("refreshToken").stringValue();
+		assertThat(firstAccessToken.split("\\.")).hasSize(3);
+		assertThat(firstRefreshToken).startsWith("kmr_");
+
+		mockMvc.perform(get("/api/v1/me").header("Authorization", "Bearer " + firstAccessToken))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.loginId").value(loginId));
+		mockMvc.perform(get("/api/v1/me").header("Authorization", "Bearer " + firstAccessToken + "x"))
+			.andExpect(status().isUnauthorized());
+
+		JsonNode refreshed = response(post("/api/v1/auth/refresh")
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("{\"refreshToken\":\"%s\"}".formatted(firstRefreshToken)));
+		String secondAccessToken = refreshed.get("accessToken").stringValue();
+		String secondRefreshToken = refreshed.get("refreshToken").stringValue();
+		assertThat(secondRefreshToken).isNotEqualTo(firstRefreshToken);
+
+		mockMvc.perform(post("/api/v1/auth/refresh")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"refreshToken\":\"%s\"}".formatted(firstRefreshToken)))
+			.andExpect(status().isUnauthorized())
+			.andExpect(jsonPath("$.code").value("REFRESH_TOKEN_REUSE_DETECTED"));
+
+		mockMvc.perform(get("/api/v1/me").header("Authorization", "Bearer " + secondAccessToken))
+			.andExpect(status().isUnauthorized());
+	}
+
+	@Test
+	void logoutImmediatelyInvalidatesJwtSession() throws Exception {
+		String loginId = "logout_" + UUID.randomUUID().toString().substring(0, 8);
+		String password = "Secure!Pass123";
+		mockMvc.perform(post("/api/v1/auth/signup")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{"loginId":"%s","password":"%s","passwordConfirm":"%s",
+					 "nationality":"GB","investorType":"INDIVIDUAL",
+					 "termsAccepted":true,"privacyAccepted":true}
+					""".formatted(loginId, password, password)))
+			.andExpect(status().isCreated());
+		JsonNode login = response(post("/api/v1/auth/login")
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("{\"loginId\":\"%s\",\"password\":\"%s\"}".formatted(loginId, password)));
+		String accessToken = login.get("accessToken").stringValue();
+		String refreshToken = login.get("refreshToken").stringValue();
+
+		mockMvc.perform(post("/api/v1/auth/logout")
+				.header("Authorization", "Bearer " + accessToken)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"refreshToken\":\"%s\"}".formatted(refreshToken)))
+			.andExpect(status().isNoContent());
+
+		mockMvc.perform(get("/api/v1/me").header("Authorization", "Bearer " + accessToken))
+			.andExpect(status().isUnauthorized());
+	}
+
+	@Test
+	void rateLimitsRepeatedLoginFailuresInRedis() throws Exception {
+		String loginId = "limited_" + UUID.randomUUID().toString().substring(0, 8);
+		String password = "Secure!Pass123";
+		mockMvc.perform(post("/api/v1/auth/signup")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{"loginId":"%s","password":"%s","passwordConfirm":"%s",
+					 "nationality":"CA","investorType":"INDIVIDUAL",
+					 "termsAccepted":true,"privacyAccepted":true}
+					""".formatted(loginId, password, password)))
+			.andExpect(status().isCreated());
+
+		for (int attempt = 0; attempt < 5; attempt++) {
+			mockMvc.perform(post("/api/v1/auth/login")
+					.contentType(MediaType.APPLICATION_JSON)
+					.content("{\"loginId\":\"%s\",\"password\":\"Wrong!Pass123\"}".formatted(loginId)))
+				.andExpect(status().isUnauthorized());
+		}
+		mockMvc.perform(post("/api/v1/auth/login")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"loginId\":\"%s\",\"password\":\"%s\"}".formatted(loginId, password)))
+			.andExpect(status().isTooManyRequests())
+			.andExpect(result -> assertThat(result.getResponse().getHeader("Retry-After")).isNotBlank())
+			.andExpect(jsonPath("$.code").value("LOGIN_RATE_LIMITED"));
 	}
 
 	@Test
@@ -408,6 +531,16 @@ class BackendApplicationTests {
 
 	private static OpenDartFiling filing(String receiptNumber) {
 		return filingAt(receiptNumber, LocalDate.of(2026, 8, 18));
+	}
+
+	private JsonNode response(org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder request)
+		throws Exception {
+		String body = mockMvc.perform(request)
+			.andExpect(status().isOk())
+			.andReturn()
+			.getResponse()
+			.getContentAsString();
+		return objectMapper.readTree(body);
 	}
 
 	private static OpenDartFiling filingAt(String receiptNumber, LocalDate filedDate) {

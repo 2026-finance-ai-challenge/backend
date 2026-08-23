@@ -6,6 +6,47 @@ public enum ErrorCode {
 	INVALID_REQUEST(HttpStatus.BAD_REQUEST, "INVALID_REQUEST", "The request is invalid."),
 	INVALID_CURSOR(HttpStatus.BAD_REQUEST, "INVALID_CURSOR", "The pagination cursor is invalid."),
 	INVALID_DATE_RANGE(HttpStatus.BAD_REQUEST, "INVALID_DATE_RANGE", "The date range is invalid."),
+	AUTHENTICATION_REQUIRED(
+		HttpStatus.UNAUTHORIZED,
+		"AUTHENTICATION_REQUIRED",
+		"Authentication is required."
+	),
+	INVALID_LOGIN_CREDENTIALS(
+		HttpStatus.UNAUTHORIZED,
+		"INVALID_LOGIN_CREDENTIALS",
+		"The login ID or password is invalid."
+	),
+	INVALID_REFRESH_TOKEN(
+		HttpStatus.UNAUTHORIZED,
+		"INVALID_REFRESH_TOKEN",
+		"The refresh token is invalid or expired."
+	),
+	REFRESH_TOKEN_REUSE_DETECTED(
+		HttpStatus.UNAUTHORIZED,
+		"REFRESH_TOKEN_REUSE_DETECTED",
+		"Refresh token reuse was detected. Sign in again."
+	),
+	LOGIN_RATE_LIMITED(
+		HttpStatus.TOO_MANY_REQUESTS,
+		"LOGIN_RATE_LIMITED",
+		"Too many login attempts. Try again later."
+	),
+	LOGIN_ID_ALREADY_EXISTS(
+		HttpStatus.CONFLICT,
+		"LOGIN_ID_ALREADY_EXISTS",
+		"The login ID is already in use."
+	),
+	USER_NOT_FOUND(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "The user account was not found."),
+	UNSUPPORTED_STOCK(
+		HttpStatus.NOT_FOUND,
+		"UNSUPPORTED_STOCK",
+		"The stock is outside the supported 75-stock universe."
+	),
+	NOTIFICATION_NOT_FOUND(
+		HttpStatus.NOT_FOUND,
+		"NOTIFICATION_NOT_FOUND",
+		"The notification was not found."
+	),
 	DISCLOSURE_NOT_FOUND(HttpStatus.NOT_FOUND, "DISCLOSURE_NOT_FOUND", "The disclosure was not found."),
 	DISCLOSURE_INDEX_NOT_READY(
 		HttpStatus.CONFLICT,

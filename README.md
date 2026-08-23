@@ -7,6 +7,7 @@
 ## 프로젝트 문서
 
 - [제품 범위](docs/PRODUCT_SCOPE.md)
+- [Redis JWT 회원 인증 API](docs/AUTH_API.md)
 - [Git 및 전달 워크플로](docs/GIT_WORKFLOW.md)
 - [Codex 저장소 지침](AGENTS.md)
 - [Codex 작업 스킬](.agents/skills/k-market-delivery/SKILL.md)
@@ -117,6 +118,7 @@ DB에는 섹션 구조를 보존한 Zstandard payload를 공시별 한 벌만 �
 - Java 25 LTS
 - Spring Boot 4.1.0
 - PostgreSQL 18
+- Redis 8
 
 ## 실행
 
@@ -139,6 +141,8 @@ docker compose up -d
 - `GET /api/v1/disclosures/{receiptNumber}`: 공시 상세 조회
 - `POST /api/v1/disclosures/{receiptNumber}/questions`: 선택 공시 기반 질의응답
 - `POST /api/v1/disclosures/{receiptNumber}/index`: 온디맨드 청크 색인 요청
+
+회원가입·로그인·토큰 회전·로그아웃·프로필 API는 [회원 인증 API 문서](docs/AUTH_API.md)를 따른다. 비밀번호는 Argon2id로 해시하고, 15분 Access JWT와 회전형 Refresh Token의 상태는 Redis에서 관리한다.
 
 질의응답을 사용하려면 AI API 서버가 `KMARKET_AI_BASE_URL`에서 실행 중이어야 하며 두 서비스의 `KMARKET_AI_SERVICE_TOKEN`이 같아야 한다. 그 외 경로는 기본 차단한다.
 

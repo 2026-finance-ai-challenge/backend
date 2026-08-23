@@ -42,6 +42,9 @@ jobs:
           SPRING_DATASOURCE_USERNAME: ci
           SPRING_DATASOURCE_PASSWORD: ci-password
           KMARKET_AI_SERVICE_TOKEN: ci-service-token
+          REDIS_PASSWORD: ci-redis-password
+          KMARKET_CONTEXT_PEPPER: ci-context-pepper-at-least-32-bytes
+          KMARKET_JWT_SECRET_BASE64: bG9jYWwtdGVzdC1qd3Qtc2VjcmV0LTAxMjM0NTY3ODktQUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVotYWJjZGVmZ2g=
         run: docker compose config --quiet
 
       - name: Backend 이미지 빌드
