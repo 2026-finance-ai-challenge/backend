@@ -22,9 +22,11 @@ public record DisclosureDetail(
 	DocumentStatus documentStatus,
 	IndexStatus indexStatus,
 	String officialUrl,
-	List<DisclosureDocument> documents
+	List<DisclosureDocument> documents,
+	List<DisclosureVersion> versions
 ) {
 	public DisclosureDetail {
 		documents = List.copyOf(documents);
+		versions = List.copyOf(versions);
 	}
 }

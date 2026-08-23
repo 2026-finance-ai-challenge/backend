@@ -28,9 +28,11 @@ import com.kmarket.navigator.backend.disclosure.application.port.OpenDartFiling;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureDetail;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureDocument;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureListQuery;
+import com.kmarket.navigator.backend.disclosure.domain.DisclosureInsight;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureSection;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureSummary;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureType;
+import com.kmarket.navigator.backend.disclosure.domain.DisclosureVersion;
 import com.kmarket.navigator.backend.disclosure.domain.DocumentStatus;
 import com.kmarket.navigator.backend.disclosure.domain.IndexStatus;
 import com.kmarket.navigator.backend.disclosure.domain.ListedCommonStock;
@@ -83,16 +85,20 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			.update();
 
 		for (ListedCommonStock stock : stocks) {
-			int updated = jdbcClient.sql("""
+			JdbcClient.StatementSpec statement = jdbcClient.sql("""
 				UPDATE security
 				SET market = :market, common_stock = TRUE, active = TRUE,
+				    isin_code = COALESCE(:isinCode, isin_code),
 				    master_updated_at = :now, updated_at = :now
 				WHERE stock_code = :stockCode
 				""")
 				.param("market", stock.market().name())
 				.param("now", now)
-				.param("stockCode", stock.stockCode())
-				.update();
+				.param("stockCode", stock.stockCode());
+			statement = stock.isinCode() == null
+				? statement.param("isinCode", null, java.sql.Types.CHAR)
+				: statement.param("isinCode", stock.isinCode());
+			int updated = statement.update();
 			if (updated != 1) {
 				throw new IllegalStateException("Stock master code is missing from OpenDART corporations");
 			}
@@ -142,16 +148,19 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 		UUID securityId = filing.stockCode() == null
 			? null
 			: upsertSecurity(issuerId, filing.stockCode(), filing.corporationClass().market());
+		String filingFamilyKey = filingFamilyKey(filing.reportName());
 
 		Optional<UUID> inserted = jdbcClient.sql("""
 			INSERT INTO disclosure (
 			    id, receipt_number, issuer_id, security_id, disclosure_type, title_ko,
 			    submitter, filed_date, detected_at, official_url, remark, correction,
+			    filing_family_key,
 			    document_status, created_at, updated_at
 			)
 			VALUES (
 			    :id, :receiptNumber, :issuerId, :securityId, :disclosureType, :titleKo,
 			    :submitter, :filedDate, :detectedAt, :officialUrl, :remark, :correction,
+			    :filingFamilyKey,
 			    'PENDING', :createdAt, :updatedAt
 			)
 			ON CONFLICT (receipt_number) DO NOTHING
@@ -169,6 +178,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			.param("officialUrl", officialUrl(filing.receiptNumber()))
 			.param("remark", filing.remark())
 			.param("correction", isCorrection(filing))
+			.param("filingFamilyKey", filingFamilyKey)
 			.param("createdAt", now)
 			.param("updatedAt", now)
 			.query(UUID.class)
@@ -185,6 +195,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 				    filed_date = :filedDate,
 				    remark = :remark,
 				    correction = :correction,
+				    filing_family_key = :filingFamilyKey,
 				    updated_at = :updatedAt
 				WHERE receipt_number = :receiptNumber
 				""")
@@ -196,11 +207,14 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 				.param("filedDate", filing.filedDate())
 				.param("remark", filing.remark())
 				.param("correction", isCorrection(filing))
+				.param("filingFamilyKey", filingFamilyKey)
 				.param("updatedAt", now)
 				.param("receiptNumber", filing.receiptNumber())
 				.update();
+			relinkCorrectionFamily(issuerId, filingFamilyKey);
 			return false;
 		}
+		relinkCorrectionFamily(issuerId, filingFamilyKey);
 
 		if (filing.stockCode() != null) {
 			jdbcClient.sql("""
@@ -616,7 +630,8 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 	@Override
 	public Optional<DisclosureDetail> findByReceiptNumber(String receiptNumber) {
 		Optional<DisclosureDetailRow> detail = jdbcClient.sql("""
-			SELECT d.id, d.receipt_number, i.dart_corp_code, i.name_ko, i.name_en,
+			SELECT d.id, d.issuer_id, d.filing_family_key, d.receipt_number,
+			       i.dart_corp_code, i.name_ko, i.name_en,
 			       s.stock_code, COALESCE(s.market, 'UNKNOWN') AS market,
 			       d.disclosure_type, d.title_ko, NULL AS title_en, d.submitter,
 			       d.filed_date, d.detected_at, d.remark, d.correction,
@@ -632,6 +647,85 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			.query(this::mapDetailRow)
 			.optional();
 		return detail.map(this::withDocuments);
+	}
+
+	@Override
+	public Optional<DisclosureInsight> findInsight(
+		String receiptNumber,
+		String contentVersionHash
+	) {
+		return jdbcClient.sql("""
+			SELECT disclosure.receipt_number, insight.content_version_hash,
+			       insight.what_summary, insight.why_summary, insight.impact_summary,
+			       insight.source_section_ids, insight.sufficient_evidence,
+			       insight.refusal_reason, insight.model_id, insight.prompt_version,
+			       insight.generated_at
+			FROM disclosure_ai_summary insight
+			JOIN disclosure ON disclosure.id = insight.disclosure_id
+			WHERE disclosure.receipt_number = :receiptNumber
+			  AND insight.content_version_hash = :contentVersionHash
+			""")
+			.param("receiptNumber", receiptNumber)
+			.param("contentVersionHash", contentVersionHash)
+			.query((resultSet, rowNumber) -> new DisclosureInsight(
+				resultSet.getString("receipt_number"),
+				resultSet.getString("content_version_hash"),
+				resultSet.getString("what_summary"),
+				resultSet.getString("why_summary"),
+				resultSet.getString("impact_summary"),
+				uuidArray(resultSet, "source_section_ids"),
+				resultSet.getBoolean("sufficient_evidence"),
+				resultSet.getString("refusal_reason"),
+				resultSet.getString("model_id"),
+				resultSet.getString("prompt_version"),
+				resultSet.getObject("generated_at", OffsetDateTime.class).toInstant()
+			))
+			.optional();
+	}
+
+	@Override
+	public void saveInsight(DisclosureInsight insight) {
+		String sourceIds = insight.sourceSectionIds().stream()
+			.map(UUID::toString)
+			.collect(java.util.stream.Collectors.joining(","));
+		JdbcClient.StatementSpec statement = jdbcClient.sql("""
+			INSERT INTO disclosure_ai_summary (
+			    disclosure_id, content_version_hash, what_summary, why_summary,
+			    impact_summary, source_section_ids, sufficient_evidence,
+			    refusal_reason, model_id, prompt_version, generated_at
+			)
+			SELECT disclosure.id, :contentVersionHash, :whatSummary, :whySummary,
+			       :impactSummary,
+			       CASE WHEN CAST(:sourceIds AS varchar) = '' THEN ARRAY[]::uuid[]
+			            ELSE string_to_array(:sourceIds, ',')::uuid[] END,
+			       :sufficientEvidence, :refusalReason, :modelId, :promptVersion,
+			       :generatedAt
+			FROM disclosure
+			WHERE disclosure.receipt_number = :receiptNumber
+			ON CONFLICT (disclosure_id) DO UPDATE
+			SET content_version_hash = EXCLUDED.content_version_hash,
+			    what_summary = EXCLUDED.what_summary,
+			    why_summary = EXCLUDED.why_summary,
+			    impact_summary = EXCLUDED.impact_summary,
+			    source_section_ids = EXCLUDED.source_section_ids,
+			    sufficient_evidence = EXCLUDED.sufficient_evidence,
+			    refusal_reason = EXCLUDED.refusal_reason,
+			    model_id = EXCLUDED.model_id,
+			    prompt_version = EXCLUDED.prompt_version,
+			    generated_at = EXCLUDED.generated_at
+			""")
+			.param("receiptNumber", insight.receiptNumber())
+			.param("contentVersionHash", insight.contentVersionHash())
+			.param("sourceIds", sourceIds)
+			.param("sufficientEvidence", insight.sufficientEvidence())
+			.param("modelId", insight.modelId())
+			.param("promptVersion", insight.promptVersion())
+			.param("generatedAt", insight.generatedAt().atOffset(ZoneOffset.UTC))
+			.param("whatSummary", insight.what(), java.sql.Types.VARCHAR)
+			.param("whySummary", insight.why(), java.sql.Types.VARCHAR)
+			.param("impactSummary", insight.impact(), java.sql.Types.VARCHAR)
+			.param("refusalReason", insight.refusalReason(), java.sql.Types.VARCHAR);
+		statement.update();
 	}
 
 	@Override
@@ -725,7 +819,48 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 					: payloadCodec.decode(document.payload())
 			))
 			.toList();
-		return row.toDetail(documents);
+		List<DisclosureVersion> versions = jdbcClient.sql("""
+			SELECT version.receipt_number, version.title_ko, version.filed_date,
+			       version.correction,
+			       predecessor.receipt_number AS correction_of_receipt_number
+			FROM disclosure version
+			LEFT JOIN disclosure predecessor ON predecessor.id = version.correction_of_id
+			WHERE version.issuer_id = :issuerId
+			  AND version.filing_family_key = :filingFamilyKey
+			ORDER BY version.receipt_number
+			""")
+			.param("issuerId", row.issuerId())
+			.param("filingFamilyKey", row.filingFamilyKey())
+			.query((resultSet, rowNumber) -> new DisclosureVersion(
+				resultSet.getString("receipt_number"),
+				resultSet.getString("title_ko"),
+				resultSet.getObject("filed_date", java.time.LocalDate.class),
+				resultSet.getBoolean("correction"),
+				resultSet.getString("correction_of_receipt_number"),
+				row.receiptNumber().equals(resultSet.getString("receipt_number"))
+			))
+			.list();
+		return row.toDetail(documents, versions);
+	}
+
+	private void relinkCorrectionFamily(UUID issuerId, String filingFamilyKey) {
+		jdbcClient.sql("""
+			WITH ordered_versions AS (
+			    SELECT id, correction,
+			           lag(id) OVER (ORDER BY receipt_number) AS previous_id
+			    FROM disclosure
+			    WHERE issuer_id = :issuerId
+			      AND filing_family_key = :filingFamilyKey
+			)
+			UPDATE disclosure target
+			SET correction_of_id = ordered_versions.previous_id
+			FROM ordered_versions
+			WHERE target.id = ordered_versions.id
+			  AND ordered_versions.correction
+			""")
+			.param("issuerId", issuerId)
+			.param("filingFamilyKey", filingFamilyKey)
+			.update();
 	}
 
 	private String stockCode(String receiptNumber) {
@@ -830,6 +965,17 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 		Map<String, Object> parameters,
 		DisclosureListQuery query
 	) {
+		if (query.query() != null) {
+			sql.append("""
+				 AND (
+				     d.title_ko ILIKE '%' || :query || '%' ESCAPE '\\'
+				     OR i.name_ko ILIKE '%' || :query || '%' ESCAPE '\\'
+				     OR COALESCE(i.name_en, '') ILIKE '%' || :query || '%' ESCAPE '\\'
+				     OR s.stock_code ILIKE '%' || :query || '%' ESCAPE '\\'
+				 )
+				""");
+			parameters.put("query", escapeLike(query.query()));
+		}
 		if (query.stockCode() != null) {
 			sql.append(" AND s.stock_code = :stockCode");
 			parameters.put("stockCode", query.stockCode());
@@ -852,6 +998,10 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			}
 			sql.append(" AND d.disclosure_type IN (").append(String.join(", ", names)).append(')');
 		}
+		if (query.correction() != null) {
+			sql.append(" AND d.correction = :correction");
+			parameters.put("correction", query.correction());
+		}
 		if (query.cursor() != null) {
 			sql.append("""
 				 AND (
@@ -862,6 +1012,10 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			parameters.put("cursorDate", query.cursor().filedDate());
 			parameters.put("cursorReceiptNumber", query.cursor().receiptNumber());
 		}
+	}
+
+	private String escapeLike(String value) {
+		return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
 	}
 
 	private DisclosureSummary mapSummary(ResultSet resultSet, int rowNumber) throws SQLException {
@@ -887,6 +1041,8 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 	private DisclosureDetailRow mapDetailRow(ResultSet resultSet, int rowNumber) throws SQLException {
 		return new DisclosureDetailRow(
 			resultSet.getObject("id", UUID.class),
+			resultSet.getObject("issuer_id", UUID.class),
+			resultSet.getString("filing_family_key"),
 			resultSet.getString("receipt_number"),
 			resultSet.getString("dart_corp_code"),
 			resultSet.getString("name_ko"),
@@ -907,8 +1063,25 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 		);
 	}
 
+	private List<UUID> uuidArray(ResultSet resultSet, String column) throws SQLException {
+		java.sql.Array sqlArray = resultSet.getArray(column);
+		if (sqlArray == null) {
+			return List.of();
+		}
+		Object[] values = (Object[]) sqlArray.getArray();
+		return java.util.Arrays.stream(values)
+			.map(value -> value instanceof UUID id ? id : UUID.fromString(value.toString()))
+			.toList();
+	}
+
 	private static boolean isCorrection(OpenDartFiling filing) {
 		return filing.reportName().contains("정정") || filing.remark().contains("정");
+	}
+
+	private static String filingFamilyKey(String title) {
+		return title
+			.replaceFirst("^\\s*(?:\\[(?:기재정정|첨부정정|정정)]|(?:기재정정|첨부정정|정정))\\s*", "")
+			.trim();
 	}
 
 	private static String officialUrl(String receiptNumber) {
@@ -921,6 +1094,8 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 
 	private record DisclosureDetailRow(
 		UUID id,
+		UUID issuerId,
+		String filingFamilyKey,
 		String receiptNumber,
 		String corpCode,
 		String issuerNameKo,
@@ -939,7 +1114,10 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 		IndexStatus indexStatus,
 		String officialUrl
 	) {
-		private DisclosureDetail toDetail(List<DisclosureDocument> documents) {
+		private DisclosureDetail toDetail(
+			List<DisclosureDocument> documents,
+			List<DisclosureVersion> versions
+		) {
 			return new DisclosureDetail(
 				receiptNumber,
 				corpCode,
@@ -958,7 +1136,8 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 				documentStatus,
 				indexStatus,
 				officialUrl,
-				documents
+				documents,
+				versions
 			);
 		}
 	}

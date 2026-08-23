@@ -20,6 +20,8 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
+import com.kmarket.navigator.backend.global.config.RequestIdFilter;
+
 @RestControllerAdvice
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
@@ -30,7 +32,18 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 		BusinessException exception,
 		HttpServletRequest request
 	) {
-		return problem(exception.errorCode(), request, null);
+		ResponseEntity<ProblemDetail> response = problem(
+			exception.errorCode(),
+			request,
+			exception.properties()
+		);
+		Object retryAfter = exception.properties().get("retryAfterSeconds");
+		if (retryAfter instanceof Number seconds) {
+			return ResponseEntity.status(response.getStatusCode())
+				.header(HttpHeaders.RETRY_AFTER, Long.toString(seconds.longValue()))
+				.body(response.getBody());
+		}
+		return response;
 	}
 
 	@ExceptionHandler(ConstraintViolationException.class)
@@ -46,7 +59,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 		Exception exception,
 		HttpServletRequest request
 	) {
-		log.error("처리하지 못한 서버 오류: {}", exception.getClass().getName());
+		log.error("처리하지 못한 서버 오류", exception);
 		return problem(ErrorCode.INTERNAL_SERVER_ERROR, request, null);
 	}
 
@@ -98,6 +111,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 		detail.setInstance(URI.create(request.getRequestURI()));
 		detail.setProperty("code", errorCode.code());
 		detail.setProperty("timestamp", Instant.now());
+		detail.setProperty("requestId", request.getAttribute(RequestIdFilter.ATTRIBUTE));
 		if (properties != null) {
 			properties.forEach(detail::setProperty);
 		}

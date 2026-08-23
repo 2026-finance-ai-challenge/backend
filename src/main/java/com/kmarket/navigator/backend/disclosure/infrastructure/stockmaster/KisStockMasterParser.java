@@ -52,11 +52,15 @@ class KisStockMasterParser {
 			if (stockCode.length() > 6) {
 				stockCode = stockCode.substring(stockCode.length() - 6);
 			}
+			String isinCode = ascii(line, 9, 12);
+			if (!isinCode.matches("[A-Z]{2}[A-Z0-9]{10}")) {
+				isinCode = null;
+			}
 			String nameKo = decode(line, 21, tailStart - 21).trim();
 			if (!stockCode.matches("[0-9A-Z]{6}") || nameKo.isBlank()) {
 				throw new ListedStockGatewayException("Invalid stock master row");
 			}
-			stocks.add(new ListedCommonStock(stockCode, nameKo, market));
+			stocks.add(new ListedCommonStock(stockCode, nameKo, market, isinCode));
 		}
 		return List.copyOf(stocks);
 	}

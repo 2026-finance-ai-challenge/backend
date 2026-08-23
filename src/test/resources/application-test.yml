@@ -1,0 +1,4 @@
+kmarket:
+  identity:
+    context-pepper: integration-test-context-pepper-32
+    jwt-secret-base64: bG9jYWwtdGVzdC1qd3Qtc2VjcmV0LTAxMjM0NTY3ODktQUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVotYWJjZGVmZ2g=

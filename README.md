@@ -1,12 +1,22 @@
 # K-Market-Navigator Backend
 
-외국인 투자자가 한국 상장기업 공시를 탐색할 수 있도록 OpenDART 공시를 수집·저장·조회하는 Spring Boot 서비스다.
+외국인 투자자가 한국 주식시장의 시세·뉴스·공시를 영어로 탐색할 수 있도록 수집·정규화·조회하는 Spring Boot 서비스다.
 
-현재 구현 범위는 실시간·과거 공시 수집, 공시 목록·상세, 공시 RAG 질의응답이다.
+기능정의서 v2.0 기준 회원·개인화, 시장 스크리너·외국인 한도, 뉴스·공시 인텔리전스, 근거 기반 범용 AI Agent와 공시 RAG, 글로벌 피어, 조세조약 안내와 암호화 세무 문서 검증을 구현했다. 실제 Backend API에 연결된 React 프로토타입도 같은 저장소에서 실행한다.
 
 ## 프로젝트 문서
 
 - [제품 범위](docs/PRODUCT_SCOPE.md)
+- [Redis JWT 회원 인증 API](docs/AUTH_API.md)
+- [관심종목·최근 조회·알림 API](docs/PERSONALIZATION_API.md)
+- [시장·스크리너·외국인 한도 API](docs/MARKET_API.md)
+- [뉴스 인텔리전스 API](docs/NEWS_API.md)
+- [공시 인텔리전스 API](docs/DISCLOSURE_API.md)
+- [AI Agent 채팅방 API](docs/CHAT_API.md)
+- [세무 자격·문서 검증 API](docs/TAX_API.md)
+- [글로벌 피어 API](docs/GLOBAL_PEER_API.md)
+- [프론트 프로토타입 인계 가이드](docs/FRONTEND_PROTOTYPE.md)
+- [기능정의서 v2.0 구현 현황](docs/IMPLEMENTATION_STATUS.md)
 - [Git 및 전달 워크플로](docs/GIT_WORKFLOW.md)
 - [Codex 저장소 지침](AGENTS.md)
 - [Codex 작업 스킬](.agents/skills/k-market-delivery/SKILL.md)
@@ -117,6 +127,7 @@ DB에는 섹션 구조를 보존한 Zstandard payload를 공시별 한 벌만 �
 - Java 25 LTS
 - Spring Boot 4.1.0
 - PostgreSQL 18
+- Redis 8
 
 ## 실행
 
@@ -125,11 +136,14 @@ cp .env.example .env
 set -a
 source .env
 set +a
-docker compose up -d
-./gradlew bootRun
+docker compose up --build -d
 ```
 
 `.env`는 로컬에서만 사용하며 Git에 포함하지 않는다. 배포 환경의 설정은 실행 시점에 외부에서 주입한다.
+
+- 사용자 화면: `http://127.0.0.1:15101`
+- Backend 상태: `http://127.0.0.1:8080/actuator/health`
+- AI 상태: `http://127.0.0.1:8000/health`
 
 `OPENDART_API_KEYS`는 쉼표로 구분한 키 목록이며, 앞 키가 `STATUS_020`을 반환하면 다음 키로 자동 전환한다.
 
@@ -137,8 +151,19 @@ docker compose up -d
 
 - `GET /api/v1/disclosures`: 공시 목록 조회
 - `GET /api/v1/disclosures/{receiptNumber}`: 공시 상세 조회
+- `GET /api/v1/disclosures/{receiptNumber}/insight`: 현재 원문 버전의 AI 요약 조회
+- `POST /api/v1/disclosures/{receiptNumber}/insight`: 현재 원문 버전의 AI 요약 생성 또는 재사용
 - `POST /api/v1/disclosures/{receiptNumber}/questions`: 선택 공시 기반 질의응답
 - `POST /api/v1/disclosures/{receiptNumber}/index`: 온디맨드 청크 색인 요청
+
+회원가입·로그인·토큰 회전·로그아웃·프로필 API는 [회원 인증 API 문서](docs/AUTH_API.md)를 따른다. 비밀번호는 Argon2id로 해시하고, 15분 Access JWT와 회전형 Refresh Token의 상태는 Redis에서 관리한다.
+관심종목·최근 조회·알림함 API는 [사용자 개인화 API 문서](docs/PERSONALIZATION_API.md)를 따르며 모든 조회·수정에서 JWT 사용자 소유권을 검증한다.
+뉴스 수집·중복 묶음·OpenAI 구조화 분석·선택 문맥 해설은 [뉴스 인텔리전스 API 문서](docs/NEWS_API.md)를 따른다.
+정정 버전 연결·구조화 원문·근거 고정 What/Why/Impact 요약은 [공시 인텔리전스 API 문서](docs/DISCLOSURE_API.md)를 따른다.
+채팅방 생성·목록·문맥 복원·낙관적 잠금 이름 변경·삭제 보존 정책은 [AI Agent 채팅방 API 문서](docs/CHAT_API.md)를 따른다.
+국가별 조세조약 세율 안내와 암호화 OCR 문서 검증은 [세무 자격·문서 검증 API 문서](docs/TAX_API.md)를 따른다.
+글로벌 피어 랭킹과 비교 인사이트는 [글로벌 피어 API 문서](docs/GLOBAL_PEER_API.md)를 따른다.
+화면별 API 연결과 별도 프론트 구현 시 재사용할 계약은 [프론트 프로토타입 인계 가이드](docs/FRONTEND_PROTOTYPE.md)를 따른다.
 
 질의응답을 사용하려면 AI API 서버가 `KMARKET_AI_BASE_URL`에서 실행 중이어야 하며 두 서비스의 `KMARKET_AI_SERVICE_TOKEN`이 같아야 한다. 그 외 경로는 기본 차단한다.
 
@@ -154,5 +179,7 @@ set +a
 ## 검증
 
 ```shell
-./gradlew test
+./scripts/verify-local.sh
 ```
+
+검증 스크립트는 Backend·AI·PostgreSQL·Redis·Frontend를 별도 Compose 프로젝트로 빌드하고 테스트한 뒤 컨테이너와 검증용 볼륨을 삭제한다. 운영 데이터 볼륨에는 접근하지 않는다.

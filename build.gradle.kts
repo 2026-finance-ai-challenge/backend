@@ -33,6 +33,7 @@ dependencies {
 	implementation("org.springframework.boot:spring-boot-starter-flyway")
 	implementation("org.springframework.boot:spring-boot-starter-security")
 	implementation("org.springframework.boot:spring-boot-starter-restclient")
+	implementation("org.springframework.boot:spring-boot-starter-data-redis")
 	implementation("org.springframework.boot:spring-boot-starter-validation")
 	implementation("org.springframework.boot:spring-boot-starter-webmvc")
 	implementation("org.flywaydb:flyway-database-postgresql")
@@ -40,6 +41,8 @@ dependencies {
 	implementation("net.javacrumbs.shedlock:shedlock-spring:7.1.0")
 	implementation("org.jsoup:jsoup:1.23.1")
 	implementation("com.github.luben:zstd-jni:1.5.7-12")
+	implementation("org.bouncycastle:bcprov-jdk18on:1.84")
+	implementation("org.springframework.security:spring-security-oauth2-jose")
 	annotationProcessor("org.springframework.boot:spring-boot-configuration-processor")
 	runtimeOnly("org.postgresql:postgresql")
 
