@@ -9,6 +9,7 @@ import com.kmarket.navigator.backend.disclosure.domain.DisclosureDetail;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureDocument;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureSection;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureType;
+import com.kmarket.navigator.backend.disclosure.domain.DisclosureVersion;
 import com.kmarket.navigator.backend.disclosure.domain.DocumentStatus;
 import com.kmarket.navigator.backend.disclosure.domain.IndexStatus;
 import com.kmarket.navigator.backend.disclosure.domain.Market;
@@ -35,7 +36,8 @@ record DisclosureDetailResponse(
 	DocumentStatus documentStatus,
 	IndexStatus indexStatus,
 	String officialUrl,
-	List<Document> documents
+	List<Document> documents,
+	List<Version> versions
 ) {
 	static DisclosureDetailResponse from(DisclosureDetail detail, ObjectMapper objectMapper) {
 		return new DisclosureDetailResponse(
@@ -56,8 +58,29 @@ record DisclosureDetailResponse(
 			detail.documentStatus(),
 			detail.indexStatus(),
 			detail.officialUrl(),
-			detail.documents().stream().map(document -> Document.from(document, objectMapper)).toList()
+			detail.documents().stream().map(document -> Document.from(document, objectMapper)).toList(),
+			detail.versions().stream().map(Version::from).toList()
 		);
+	}
+
+	record Version(
+		String receiptNumber,
+		String titleKo,
+		LocalDate filedDate,
+		boolean correction,
+		String correctionOfReceiptNumber,
+		boolean current
+	) {
+		private static Version from(DisclosureVersion version) {
+			return new Version(
+				version.receiptNumber(),
+				version.titleKo(),
+				version.filedDate(),
+				version.correction(),
+				version.correctionOfReceiptNumber(),
+				version.current()
+			);
+		}
 	}
 
 	record Document(UUID id, String sourceFilename, int version, String contentHash, List<Section> sections) {

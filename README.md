@@ -1,12 +1,22 @@
 # K-Market-Navigator Backend
 
-외국인 투자자가 한국 상장기업 공시를 탐색할 수 있도록 OpenDART 공시를 수집·저장·조회하는 Spring Boot 서비스다.
+외국인 투자자가 한국 주식시장의 시세·뉴스·공시를 영어로 탐색할 수 있도록 수집·정규화·조회하는 Spring Boot 서비스다.
 
-현재 구현 범위는 실시간·과거 공시 수집, 공시 목록·상세, 공시 RAG 질의응답이다.
+기능정의서 v2.0 기준 회원·개인화, 시장 스크리너·외국인 한도, 뉴스·공시 인텔리전스, 근거 기반 범용 AI Agent와 공시 RAG, 글로벌 피어, 조세조약 안내와 암호화 세무 문서 검증을 구현했다. 실제 Backend API에 연결된 React 프로토타입도 같은 저장소에서 실행한다.
 
 ## 프로젝트 문서
 
 - [제품 범위](docs/PRODUCT_SCOPE.md)
+- [Redis JWT 회원 인증 API](docs/AUTH_API.md)
+- [관심종목·최근 조회·알림 API](docs/PERSONALIZATION_API.md)
+- [시장·스크리너·외국인 한도 API](docs/MARKET_API.md)
+- [뉴스 인텔리전스 API](docs/NEWS_API.md)
+- [공시 인텔리전스 API](docs/DISCLOSURE_API.md)
+- [AI Agent 채팅방 API](docs/CHAT_API.md)
+- [세무 자격·문서 검증 API](docs/TAX_API.md)
+- [글로벌 피어 API](docs/GLOBAL_PEER_API.md)
+- [프론트 프로토타입 인계 가이드](docs/FRONTEND_PROTOTYPE.md)
+- [기능정의서 v2.0 구현 현황](docs/IMPLEMENTATION_STATUS.md)
 - [Git 및 전달 워크플로](docs/GIT_WORKFLOW.md)
 - [Codex 저장소 지침](AGENTS.md)
 - [Codex 작업 스킬](.agents/skills/k-market-delivery/SKILL.md)
@@ -100,23 +110,24 @@ MSCI 참고군은 서비스 범위를 정하기 위한 참고 스냅샷이며 MS
 | 373220 | LG에너지솔루션 | MSCI 참고군, 시총 상위 50 | 469 |
 | 402340 | SK스퀘어 | MSCI 참고군, 시총 상위 50 | 463 |
 
-누적 공시는 현재 로컬 DB의 1999년 3월 29일부터 2026년 8월 19일까지 233,993건이다. 선정 기준별 공시는 MSCI 참고군 232,248건, 시가총액 상위 50개 162,884건, 외국인 한도 종목 10,705건이며 서로 중복된다.
+선정 기준과 표의 누적 공시는 2026년 8월 19일 범위 확정 당시의 스냅샷이다. 선정 기준별 공시는 서로 중복된다.
 
-2026년 8월 21일 현재 로컬 DB에는 지원 종목 공시 234,018건이 있으며 기간은 1999년 3월 29일부터 2026년 8월 20일까지다. 전문 수집은 공시 작업을 종목 코드·종목명 폴더 순서로 처리한다.
+2026년 8월 23일 기준 로컬 DB에는 지원 종목 공시 234,070건이 있으며 기간은 1999년 3월 29일부터 2026년 8월 21일까지다. 모든 공시의 원문 처리 작업은 완료됐고, 원문은 종목 코드·종목명 폴더 순서로 저장됐다.
 
-OpenDART API 응답 ZIP은 `data/opendart-archives/<종목코드>_<종목명>/<접수번호>.api.zip`에 원본 바이트 그대로 저장한다. API가 원문을 제공하지 않아 DART 뷰어로 대체한 경우에는 `<접수번호>.viewer.zip`으로 저장하고, ZIP 내부에 뷰어 HTML을 넣는다. `disclosure_archive`가 파일 경로·종류·상태·SHA-256·바이트 수를 관리하므로 파일 저장과 DB 적재를 대조할 수 있다. 이 원문 파일은 용량 때문에 Git에 포함하지 않는다.
+OpenDART API 응답 ZIP은 `data/opendart-archives/<종목코드>_<종목명>/<접수번호>.api.zip`에 원본 바이트 그대로 저장한다. API가 원문을 제공하지 않아 DART 뷰어로 대체한 경우에는 `<접수번호>.viewer.zip`으로 저장하고, ZIP 내부에 뷰어 HTML을 넣는다. `disclosure_archive`가 파일 경로·종류·상태·SHA-256·바이트 수를 관리하므로 파일 저장과 DB 적재를 대조할 수 있다. 검증 완료 원문은 OpenDART ZIP 224,455건과 DART 뷰어 대체 ZIP 9,615건이다. 작업 디렉터리의 개별 ZIP은 Git에서 제외하고, 복원용 원문 tar와 PostgreSQL 백업은 `data/dataset`에서 Git LFS로 관리한다.
 
 카탈로그에 검증된 파일이 없는 기존 공시는 자동으로 원문 수집 큐에 다시 등록하며, 이미 검증된 파일은 재수집하지 않는다.
 
-DB에는 섹션 구조를 보존한 Zstandard payload를 공시별 한 벌만 저장한다. 전체 공시는 HALFVEC 메타데이터 임베딩을 사용하고, 청크 색인은 본문을 중복 저장하지 않고 HALFVEC·섹션 위치만 저장한다. 현재 공시의 이전 청크는 새 색인 완료 시 삭제하며, HNSW·GIN 인덱스 대신 공시별 범위 인덱스를 사용한다. 원문 텍스트는 검색 결과를 만들 때 payload에서 복원한다.
+DB에는 섹션 구조를 보존한 Zstandard payload를 공시별 한 벌만 저장한다. 전체 공시는 HALFVEC 메타데이터 임베딩 대상이며, 청크 색인은 최근 1년 전체 공시와 최근 5년 사업·반기·분기보고서를 우선 처리하고 나머지는 상세 조회 시 온디맨드로 처리한다. 청크 본문은 중복 저장하지 않고 HALFVEC·섹션 위치만 저장한다. 현재 공시의 이전 청크는 새 색인 완료 시 삭제하며, HNSW·GIN 인덱스 대신 공시별 범위 인덱스를 사용한다. 원문 텍스트는 검색 결과를 만들 때 payload에서 복원한다.
 
-2026년 8월 21일 표본을 공시 유형별로 가중 적용한 예상량은 API 원본 ZIP 약 15GB(변동을 포함한 계획 범위 15~25GB), DB 압축 payload 약 13GB다. 현재 DB 기본·메타데이터·작업 큐를 포함한 실측은 약 4.4GB이며, RAG 청크는 DB 52GiB에서 신규 색인을 멈추고 원문 수집은 DB 60GiB에서 멈춘다. 따라서 DB는 80GB 아래에 여유를 두고 운영하고, 원본 ZIP은 별도 디스크 또는 오브젝트 스토리지로 분리할 수 있다.
+2026년 8월 23일 실측 기준 지원 종목 문서 payload는 236,397개이며 원문 약 63.13GB를 약 7.72GB로 압축 저장한다. 계획된 사전 청크 색인 16,841건은 모두 완료됐고 온디맨드 55건을 포함해 16,896개 공시가 답변 가능한 상태다. 현재 청크는 577,918개, 지원 종목 메타데이터 임베딩은 216,535개다. PostgreSQL 전체 용량은 약 12.73GB이며, 원문 ZIP 작업 디렉터리는 약 9.86GiB다. RAG 청크는 DB 52GiB에서 신규 색인을 멈추고 원문 수집은 DB 60GiB에서 멈추므로 DB 80GB 상한 아래에 여유를 둔다.
 
 ## 개발 환경
 
 - Java 25 LTS
 - Spring Boot 4.1.0
 - PostgreSQL 18
+- Redis 8
 
 ## 실행
 
@@ -125,15 +136,36 @@ cp .env.example .env
 set -a
 source .env
 set +a
-docker compose up -d
-./gradlew bootRun
+docker compose up --build -d
 ```
 
 `.env`는 로컬에서만 사용하며 Git에 포함하지 않는다. 배포 환경의 설정은 실행 시점에 외부에서 주입한다.
 
+- 사용자 화면: `http://127.0.0.1:15101`
+- Backend 상태: `http://127.0.0.1:8080/actuator/health`
+- AI 상태: `http://127.0.0.1:8000/health`
+
 `OPENDART_API_KEYS`는 쉼표로 구분한 키 목록이며, 앞 키가 `STATUS_020`을 반환하면 다음 키로 자동 전환한다.
 
-상태 확인은 `GET /actuator/health`를 사용한다. 공시 조회는 `GET /api/v1/disclosures`와 `GET /api/v1/disclosures/{receiptNumber}`를 사용한다. 그 외 경로는 기본 차단한다.
+상태 확인은 `GET /actuator/health`를 사용한다. 공개 API는 다음과 같다.
+
+- `GET /api/v1/disclosures`: 공시 목록 조회
+- `GET /api/v1/disclosures/{receiptNumber}`: 공시 상세 조회
+- `GET /api/v1/disclosures/{receiptNumber}/insight`: 현재 원문 버전의 AI 요약 조회
+- `POST /api/v1/disclosures/{receiptNumber}/insight`: 현재 원문 버전의 AI 요약 생성 또는 재사용
+- `POST /api/v1/disclosures/{receiptNumber}/questions`: 선택 공시 기반 질의응답
+- `POST /api/v1/disclosures/{receiptNumber}/index`: 온디맨드 청크 색인 요청
+
+회원가입·로그인·토큰 회전·로그아웃·프로필 API는 [회원 인증 API 문서](docs/AUTH_API.md)를 따른다. 비밀번호는 Argon2id로 해시하고, 15분 Access JWT와 회전형 Refresh Token의 상태는 Redis에서 관리한다.
+관심종목·최근 조회·알림함 API는 [사용자 개인화 API 문서](docs/PERSONALIZATION_API.md)를 따르며 모든 조회·수정에서 JWT 사용자 소유권을 검증한다.
+뉴스 수집·중복 묶음·OpenAI 구조화 분석·선택 문맥 해설은 [뉴스 인텔리전스 API 문서](docs/NEWS_API.md)를 따른다.
+정정 버전 연결·구조화 원문·근거 고정 What/Why/Impact 요약은 [공시 인텔리전스 API 문서](docs/DISCLOSURE_API.md)를 따른다.
+채팅방 생성·목록·문맥 복원·낙관적 잠금 이름 변경·삭제 보존 정책은 [AI Agent 채팅방 API 문서](docs/CHAT_API.md)를 따른다.
+국가별 조세조약 세율 안내와 암호화 OCR 문서 검증은 [세무 자격·문서 검증 API 문서](docs/TAX_API.md)를 따른다.
+글로벌 피어 랭킹과 비교 인사이트는 [글로벌 피어 API 문서](docs/GLOBAL_PEER_API.md)를 따른다.
+화면별 API 연결과 별도 프론트 구현 시 재사용할 계약은 [프론트 프로토타입 인계 가이드](docs/FRONTEND_PROTOTYPE.md)를 따른다.
+
+질의응답을 사용하려면 AI API 서버가 `KMARKET_AI_BASE_URL`에서 실행 중이어야 하며 두 서비스의 `KMARKET_AI_SERVICE_TOKEN`이 같아야 한다. 그 외 경로는 기본 차단한다.
 
 과거 공시는 API 서버와 분리된 일회성 배치로 적재한다. 서비스 지원 종목 75개만 대상으로 하며, OpenDART 조회 제한에 맞춰 3개월 단위로 저장한다. 중단된 작업은 같은 기간으로 다시 실행하면 DB 체크포인트부터 재개한다.
 
@@ -147,5 +179,7 @@ set +a
 ## 검증
 
 ```shell
-./gradlew test
+./scripts/verify-local.sh
 ```
+
+검증 스크립트는 Backend·AI·PostgreSQL·Redis·Frontend를 별도 Compose 프로젝트로 빌드하고 테스트한 뒤 컨테이너와 검증용 볼륨을 삭제한다. 운영 데이터 볼륨에는 접근하지 않는다.

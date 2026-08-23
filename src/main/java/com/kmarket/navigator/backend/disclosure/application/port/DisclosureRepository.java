@@ -7,6 +7,7 @@ import java.util.Set;
 
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureDetail;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureListQuery;
+import com.kmarket.navigator.backend.disclosure.domain.DisclosureInsight;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureSummary;
 import com.kmarket.navigator.backend.disclosure.domain.IndexStatus;
 import com.kmarket.navigator.backend.disclosure.domain.ListedCommonStock;
@@ -46,6 +47,10 @@ public interface DisclosureRepository {
 	List<DisclosureSummary> findAll(DisclosureListQuery query, int fetchSize);
 
 	Optional<DisclosureDetail> findByReceiptNumber(String receiptNumber);
+
+	Optional<DisclosureInsight> findInsight(String receiptNumber, String contentVersionHash);
+
+	void saveInsight(DisclosureInsight insight);
 
 	Optional<IndexStatus> findIndexStatus(String receiptNumber);
 

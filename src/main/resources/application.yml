@@ -9,6 +9,17 @@ spring:
       ddl-auto: validate
   lifecycle:
     timeout-per-shutdown-phase: 20s
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:127.0.0.1}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+      password: ${SPRING_DATA_REDIS_PASSWORD:}
+      connect-timeout: 2s
+      timeout: 2s
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 11MB
 
 server:
   shutdown: graceful
@@ -34,3 +45,66 @@ management:
 opendart:
   api-keys: ${OPENDART_API_KEYS:${OPENDART_API_KEY}}
   archive-root: ${OPENDART_ARCHIVE_ROOT:./data/opendart-archives}
+
+kmarket:
+
+  global-peer:
+    data-version: ${KMARKET_GLOBAL_PEER_DATA_VERSION:hana-global-peer-2026-07-21-openai-v1}
+  tax:
+    documents:
+      root: ${KMARKET_TAX_DOCUMENT_ROOT:./data/tax-documents}
+      encryption-key-base64: ${KMARKET_TAX_DOCUMENT_KEY_BASE64}
+      max-file-size-bytes: ${KMARKET_TAX_DOCUMENT_MAX_FILE_SIZE:10485760}
+      retention-after-delete: ${KMARKET_TAX_DOCUMENT_RETENTION:30d}
+      verification-interval: ${KMARKET_TAX_VERIFICATION_INTERVAL:2s}
+      verification-initial-delay: ${KMARKET_TAX_VERIFICATION_INITIAL_DELAY:30s}
+      purge-cron: ${KMARKET_TAX_DOCUMENT_PURGE_CRON:0 40 4 * * *}
+  chat:
+    generation-interval: ${KMARKET_CHAT_GENERATION_INTERVAL:1s}
+    generation-initial-delay: ${KMARKET_CHAT_GENERATION_INITIAL_DELAY:30s}
+    purge-cron: ${KMARKET_CHAT_PURGE_CRON:0 20 4 * * *}
+  news:
+    collection-interval: ${KMARKET_NEWS_COLLECTION_INTERVAL:10m}
+    collection-initial-delay: ${KMARKET_NEWS_COLLECTION_INITIAL_DELAY:30s}
+    analysis-interval: ${KMARKET_NEWS_ANALYSIS_INTERVAL:5s}
+    naver:
+      enabled: ${KMARKET_NAVER_NEWS_ENABLED:false}
+      base-url: ${KMARKET_NAVER_NEWS_BASE_URL:https://openapi.naver.com}
+      client-id: ${KMARKET_NAVER_NEWS_CLIENT_ID:}
+      client-secret: ${KMARKET_NAVER_NEWS_CLIENT_SECRET:}
+      display: ${KMARKET_NAVER_NEWS_DISPLAY:20}
+      target-batch-size: ${KMARKET_NAVER_NEWS_TARGET_BATCH_SIZE:8}
+      connect-timeout: ${KMARKET_NAVER_NEWS_CONNECT_TIMEOUT:3s}
+      read-timeout: ${KMARKET_NAVER_NEWS_READ_TIMEOUT:10s}
+      request-delay: ${KMARKET_NAVER_NEWS_REQUEST_DELAY:125ms}
+      queries: ${KMARKET_NAVER_NEWS_QUERIES:코스피,코스닥,한국 증시}
+  market:
+    collection-interval: ${KMARKET_MARKET_COLLECTION_INTERVAL:60s}
+    collection-initial-delay: ${KMARKET_MARKET_COLLECTION_INITIAL_DELAY:15s}
+    kis:
+      enabled: ${KMARKET_KIS_ENABLED:false}
+      base-url: ${KMARKET_KIS_BASE_URL:https://openapi.koreainvestment.com:9443}
+      app-key: ${KMARKET_KIS_APP_KEY:}
+      app-secret: ${KMARKET_KIS_APP_SECRET:}
+      connect-timeout: ${KMARKET_KIS_CONNECT_TIMEOUT:3s}
+      read-timeout: ${KMARKET_KIS_READ_TIMEOUT:5s}
+      collection-delay: ${KMARKET_KIS_COLLECTION_DELAY:125ms}
+      redis-key-prefix: ${KMARKET_KIS_REDIS_KEY_PREFIX:kmarket:market:kis}
+    krx:
+      enabled: ${KMARKET_KRX_ENABLED:false}
+      base-url: ${KMARKET_KRX_BASE_URL:https://data.krx.co.kr}
+      login-path: ${KMARKET_KRX_LOGIN_PATH:/contents/MDC/COMS/client/MDCCOMS001D1.cmd}
+      member-id: ${KMARKET_KRX_MEMBER_ID:}
+      password: ${KMARKET_KRX_PASSWORD:}
+      history-bld: ${KMARKET_KRX_HISTORY_BLD:dbms/MDC/STAT/standard/MDCSTAT03702}
+      connect-timeout: ${KMARKET_KRX_CONNECT_TIMEOUT:3s}
+      read-timeout: ${KMARKET_KRX_READ_TIMEOUT:10s}
+      collection-cron: ${KMARKET_KRX_COLLECTION_CRON:0 30 18 * * MON-FRI}
+  identity:
+    access-token-ttl: ${KMARKET_ACCESS_TOKEN_TTL:15m}
+    refresh-token-ttl: ${KMARKET_REFRESH_TOKEN_TTL:14d}
+    context-pepper: ${KMARKET_CONTEXT_PEPPER}
+    jwt-issuer: ${KMARKET_JWT_ISSUER:k-market-navigator}
+    jwt-audience: ${KMARKET_JWT_AUDIENCE:k-market-navigator-api}
+    jwt-secret-base64: ${KMARKET_JWT_SECRET_BASE64}
+    redis-key-prefix: ${KMARKET_REDIS_KEY_PREFIX:kmarket:identity}
