@@ -151,7 +151,8 @@ class OpenDartClient implements OpenDartGateway {
 					archive,
 					exception.errorCode()
 				);
-			if (!exception.errorCode().equals("SOURCE_TEXT_CORRUPTED")) {
+			if (!exception.errorCode().equals("SOURCE_TEXT_CORRUPTED")
+				&& !exception.errorCode().equals("INVALID_ARCHIVE")) {
 				throw new OpenDartSourceException(exception.errorCode(), rejectedSource);
 			}
 			try {

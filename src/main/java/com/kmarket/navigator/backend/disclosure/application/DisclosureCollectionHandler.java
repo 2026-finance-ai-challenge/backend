@@ -43,6 +43,9 @@ public class DisclosureCollectionHandler {
 		if (from.isAfter(to) || to.isAfter(from.plusMonths(3).minusDays(1))) {
 			throw new IllegalArgumentException("Disclosure collection range must be within three months");
 		}
+		if (disclosureRepository.isOpenDartDocumentCollectionBlocked()) {
+			return 0;
+		}
 		Set<String> commonStockCodes = disclosureRepository.findActiveCommonStockCodes();
 		if (commonStockCodes.isEmpty()) {
 			throw new IllegalStateException("Common stock universe is empty");

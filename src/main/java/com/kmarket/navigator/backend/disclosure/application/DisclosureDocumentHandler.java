@@ -22,6 +22,8 @@ public class DisclosureDocumentHandler {
 	private static final int MAX_ATTEMPTS = 5;
 	private static final Duration DAILY_LIMIT_RETRY_DELAY = Duration.ofHours(24);
 	private static final Duration NETWORK_ERROR_RETRY_DELAY = Duration.ofMinutes(15);
+	private static final Duration VIEWER_NETWORK_ERROR_RETRY_DELAY = Duration.ofHours(1);
+	private static final Duration VIEWER_NETWORK_ERROR_LONG_RETRY_DELAY = Duration.ofHours(6);
 	private static final Duration PROVIDER_MAINTENANCE_RETRY_DELAY = Duration.ofHours(1);
 
 	private final OpenDartGateway openDartGateway;
@@ -96,16 +98,16 @@ public class DisclosureDocumentHandler {
 			);
 		}
 		else if (errorCode.equals("DART_VIEWER_NETWORK_ERROR")) {
-			if (job.attempts() >= MAX_ATTEMPTS) {
-				disclosureRepository.failDocumentJob(job.receiptNumber(), errorCode);
-			}
-			else {
-				disclosureRepository.retryDocumentJob(
-					job.receiptNumber(),
-					errorCode,
-					NETWORK_ERROR_RETRY_DELAY
-				);
-			}
+			Duration retryDelay = job.attempts() >= 3
+				? (job.attempts() >= MAX_ATTEMPTS
+					? VIEWER_NETWORK_ERROR_LONG_RETRY_DELAY
+					: VIEWER_NETWORK_ERROR_RETRY_DELAY)
+				: NETWORK_ERROR_RETRY_DELAY;
+			disclosureRepository.retryDocumentJob(
+				job.receiptNumber(),
+				errorCode,
+				retryDelay
+			);
 		}
 		else if (errorCode.equals("STATUS_800")) {
 			disclosureRepository.blockOpenDartDocumentCollection(

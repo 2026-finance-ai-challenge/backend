@@ -9,7 +9,9 @@
 
 .codex-log/
 
-data/
+data/*
+!data/dataset/
+!data/dataset/**
 
 .gradle/
 build/

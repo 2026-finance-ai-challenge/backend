@@ -25,6 +25,8 @@ public interface DisclosureRepository {
 
 	Optional<DocumentJob> claimDocumentJob(String workerId);
 
+	boolean isOpenDartDocumentCollectionBlocked();
+
 	void blockOpenDartDocumentCollection(Duration delay, String reason);
 
 	void completeDocumentJob(
