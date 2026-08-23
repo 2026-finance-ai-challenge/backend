@@ -6,6 +6,8 @@
 - 공시 상세는 현재 원문 문서의 목차·문단·표와 SHA-256을 제공한다.
 - 정정공시는 정규화된 공시명과 발행사를 기준으로 이전 버전과 연결한다.
 - AI 요약은 현재 문서 버전의 근거만 사용하며 근거가 없으면 생성을 거절한다.
+- 목록용 영어 제목은 정규화된 제목 번역 메모리에서 재사용하고 수집 직후 비동기 작업으로 채운다.
+- 본문은 전체 선번역하지 않고 사용자가 요청한 현재 문서 버전의 섹션·표·문단만 영어로 번역해 저장한다.
 
 ## API
 
@@ -17,6 +19,8 @@
 | `POST` | `/api/v1/disclosures/{receiptNumber}/insight` | 근거 고정 What/Why/Impact 요약 생성 또는 캐시 재사용 |
 | `POST` | `/api/v1/disclosures/{receiptNumber}/questions` | 현재 공시 또는 선택 문단 범위 RAG 질의응답 |
 | `POST` | `/api/v1/disclosures/{receiptNumber}/index` | 온디맨드 색인 요청 |
+| `GET` | `/api/v1/disclosures/{receiptNumber}/sections/{sectionId}/translation` | 현재 문서 버전의 저장된 영어 섹션 번역 또는 생성 상태 조회 |
+| `POST` | `/api/v1/disclosures/{receiptNumber}/sections/{sectionId}/translation` | 영어 섹션 번역 온디맨드 생성 요청 또는 캐시 재사용 |
 
 ## 정정 버전
 
@@ -33,3 +37,15 @@
 - 모델 ID, 프롬프트 버전, 생성 시각을 응답에 포함하고 OpenAI 응답 저장은 비활성화한다.
 
 원문 문서가 준비되지 않았으면 `409 DISCLOSURE_DOCUMENT_NOT_READY`, 현재 버전 요약이 아직 없으면 `404 DISCLOSURE_INSIGHT_NOT_READY`를 반환한다.
+
+## 다국어 검색과 번역 분리
+
+- 한글 원문 청크와 영어 질문을 고정된 다국어 임베딩 모델의 같은 벡터 공간에서 비교한다.
+- 검색 범위는 접수번호와 현재 문서 버전으로 고정하며 번역된 본문을 RAG 인덱스로 사용하지 않는다.
+- OpenAI에는 영어 질문과 검색된 한글 근거만 전달하고, 답변은 영어로 생성한다.
+- 번역 캐시가 없거나 실패해도 RAG 질문은 처리할 수 있다. 영어 인용문이 필요하면 답변과 별개로 해당 섹션 번역을 요청한다.
+- 섹션 번역은 `문서 버전 + sectionId + 원문 SHA-256 + targetLocale + 번역 정책 버전`으로 구분한다.
+
+번역 캐시가 있으면 `POST`도 `200 READY`, 최초 또는 동시 요청은 `202`와 동일 작업 ID·`Retry-After`를 반환한다. 원문 문서·섹션이 없으면 `409`, 사용량 제한은 `429`, 공급자 장애·회로 차단은 `503`으로 구분한다.
+
+현재 공시 RAG는 한글 원문 다국어 검색과 영어 답변을 이미 사용한다. 제목 번역과 섹션 온디맨드 번역 API는 다음 구현 단위의 확정 기준이며, [구현 현황](IMPLEMENTATION_STATUS.md)에서 완료 전까지 `개선 예정`으로 관리한다.
