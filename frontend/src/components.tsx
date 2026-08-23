@@ -125,12 +125,11 @@ function SearchBox() {
       aria-label="Search supported stocks" placeholder="Search name or 6-digit code" autoComplete="off" />
     {loading && <span className="mini-loader" aria-label="Searching" />}
     {open && <div className="search-popover">
-      {items.map((stock) => <a key={stock.stockCode} href={appHash('stock-detail', stock.stockCode)}>
+      {items.map((stock) => <div className="search-result-row" key={stock.stockCode}><a href={appHash('stock-detail', stock.stockCode)}>
         <span className="stock-avatar">{stock.nameEn?.slice(0, 1) || stock.nameKo.slice(0, 1)}</span>
         <span><b>{stock.nameEn || stock.nameKo}</b><small>{stock.nameKo} · {stock.stockCode} · {stock.market}</small></span>
-        <button type="button" className="heart" aria-label={`${stock.watchlisted ? 'Remove from' : 'Add to'} watchlist`}
-          onClick={(event) => void toggleWatchlist(event, stock)}>{stock.watchlisted ? '♥' : '♡'}</button>
-      </a>)}
+      </a><button type="button" className="heart" aria-label={`${stock.watchlisted ? 'Remove from' : 'Add to'} watchlist`}
+        onClick={(event) => void toggleWatchlist(event, stock)}>{stock.watchlisted ? '♥' : '♡'}</button></div>)}
       {!loading && items.length === 0 && <div className="search-empty">No supported stock found in the 75-stock universe.</div>}
       <button type="submit" className="view-all">View all results for “{query}” →</button>
     </div>}

@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { api, queryString, session } from '../api'
 import {
   formatDate, formatNumber, InsightCards, NewsCard, openAgent, RemoteBoundary, StatusPanel, useProfile, useRemote,
@@ -13,8 +13,34 @@ type NewsPage = { items: NewsArticle[]; nextCursor: string | null }
 
 function HeroSearch() {
   const [value, setValue] = useState('')
+  const [items, setItems] = useState<Stock[]>([])
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const profile = useProfile()
+  const timer = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(timer.current), [])
+  const search = (input: string) => {
+    setValue(input)
+    window.clearTimeout(timer.current)
+    if (!input.trim()) { setItems([]); setOpen(false); return }
+    timer.current = window.setTimeout(() => {
+      setLoading(true)
+      api<{ items: Stock[] }>(`/api/v1/market/stocks/search${queryString({ query: input.trim(), limit: 6 })}`)
+        .then((result) => { setItems(result.items); setOpen(true) })
+        .catch(() => { setItems([]); setOpen(true) })
+        .finally(() => setLoading(false))
+    }, 180)
+  }
+  const toggle = async (event: React.MouseEvent, stock: Stock) => {
+    event.preventDefault(); event.stopPropagation()
+    if (!profile) { navigate('auth', undefined, { returnTo: appHash('home') }); return }
+    const next = !stock.watchlisted
+    setItems((current) => current.map((item) => item.stockCode === stock.stockCode ? { ...item, watchlisted: next } : item))
+    try { await api(`/api/v1/me/watchlist/${stock.stockCode}`, { method: next ? 'PUT' : 'DELETE' }) }
+    catch { setItems((current) => current.map((item) => item.stockCode === stock.stockCode ? { ...item, watchlisted: !next } : item)) }
+  }
   const submit = (event: FormEvent) => { event.preventDefault(); if (value.trim()) navigate('search', undefined, { q: value.trim() }) }
-  return <form className="hero-search" onSubmit={submit}><span>⌕</span><input value={value} onChange={(event) => setValue(event.target.value)} placeholder="Search Samsung, NAVER, 005930…" aria-label="Search Korean stocks" /><button>Explore</button></form>
+  return <form className="hero-search" onSubmit={submit} onBlur={() => window.setTimeout(() => setOpen(false), 150)}><span>⌕</span><input value={value} onChange={(event) => search(event.target.value)} onFocus={() => value && setOpen(true)} placeholder="Search Samsung, NAVER, 005930…" aria-label="Search Korean stocks" autoComplete="off" />{loading && <span className="mini-loader" aria-label="Searching" />}<button>Explore</button>{open && <div className="hero-search-results">{items.map((stock) => <div className="search-result-row" key={stock.stockCode}><a href={appHash('stock-detail', stock.stockCode)}><span className="stock-avatar">{stock.nameEn?.slice(0, 1) || stock.nameKo.slice(0, 1)}</span><span><b>{stock.nameEn || stock.nameKo}</b><small>{stock.nameKo} · {stock.stockCode} · {stock.market}</small></span></a><button type="button" className="heart" aria-label={`${stock.watchlisted ? 'Remove from' : 'Add to'} watchlist`} onClick={(event) => void toggle(event, stock)}>{stock.watchlisted ? '♥' : '♡'}</button></div>)}{!loading && !items.length && <p>No supported stock found in the 75-stock universe.</p>}<button className="view-all">View all results for “{value}” →</button></div>}</form>
 }
 
 export function HomePage() {
@@ -46,7 +72,15 @@ function DataLegend() { return <div className="data-legend"><span><i className="
 
 function StockMiniCard({ stock }: { stock: Stock }) {
   const quote = stock.quote
-  return <a className="stock-mini" href={appHash('stock-detail', stock.stockCode)}><div><span className="stock-avatar">{stock.nameEn?.slice(0, 1) || 'K'}</span><span><b>{stock.nameEn}</b><small>{stock.stockCode} · {stock.market}</small></span></div><strong>{formatNumber(quote?.currentPriceKrw, { style: 'currency', currency: 'KRW', maximumFractionDigits: 0 })}</strong><em className={(quote?.changeRate || 0) >= 0 ? 'up' : 'down'}>{quote?.changeRate === null || quote?.changeRate === undefined ? quote?.status || 'UNAVAILABLE' : `${quote.changeRate >= 0 ? '+' : ''}${quote.changeRate.toFixed(2)}%`}</em></a>
+  const profile = useProfile()
+  const [watchlisted, setWatchlisted] = useState(stock.watchlisted)
+  const toggle = async () => {
+    if (!profile) { navigate('auth', undefined, { returnTo: appHash('stock-detail', stock.stockCode) }); return }
+    const next = !watchlisted; setWatchlisted(next)
+    try { await api(`/api/v1/me/watchlist/${stock.stockCode}`, { method: next ? 'PUT' : 'DELETE' }) }
+    catch { setWatchlisted(!next) }
+  }
+  return <article className="stock-mini"><a href={appHash('stock-detail', stock.stockCode)}><div><span className="stock-avatar">{stock.nameEn?.slice(0, 1) || 'K'}</span><span><b>{stock.nameEn}</b><small>{stock.stockCode} · {stock.market}</small></span></div><strong>{formatNumber(quote?.currentPriceKrw, { style: 'currency', currency: 'KRW', maximumFractionDigits: 0 })}</strong><em className={(quote?.changeRate || 0) >= 0 ? 'up' : 'down'}>{quote?.changeRate === null || quote?.changeRate === undefined ? quote?.status || 'UNAVAILABLE' : `${quote.changeRate >= 0 ? '+' : ''}${quote.changeRate.toFixed(2)}%`}</em></a><button className="heart" aria-label={`${watchlisted ? 'Remove from' : 'Add to'} watchlist`} onClick={() => void toggle()}>{watchlisted ? '♥' : '♡'}</button></article>
 }
 
 export function FilingRow({ filing }: { filing: Filing }) {
@@ -82,11 +116,18 @@ function StockTableRow({ stock }: { stock: Stock }) {
 export function SearchPage({ query }: { query: string }) {
   const [tab, setTab] = useState<'all' | 'stocks' | 'filings' | 'news'>('all')
   const [sort, setSort] = useState<'RELEVANCE' | 'LATEST'>('RELEVANCE')
+  const [stockCode, setStockCode] = useState('')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [filingType, setFilingType] = useState('')
+  const [sentiment, setSentiment] = useState('')
+  const [importance, setImportance] = useState('')
   const stocks = useRemote(() => query ? api<{ items: Stock[] }>(`/api/v1/market/stocks/search${queryString({ query, limit: 20 })}`) : Promise.resolve({ items: [] }), [query])
-  const filings = useRemote(() => query ? api<FilingPage>(`/api/v1/disclosures${queryString({ query, limit: 20 })}`) : Promise.resolve({ items: [], nextCursor: null }), [query])
-  const news = useRemote(() => query ? api<NewsPage>(`/api/v1/news${queryString({ query, sort: sort === 'LATEST' ? 'LATEST' : 'IMPORTANCE', limit: 20 })}`) : Promise.resolve({ items: [], nextCursor: null }), [query, sort])
+  const filings = useRemote(() => query ? api<FilingPage>(`/api/v1/disclosures${queryString({ query, stockCode, from, to, types: filingType, limit: 20 })}`) : Promise.resolve({ items: [], nextCursor: null }), [query, stockCode, from, to, filingType])
+  const news = useRemote(() => query ? api<NewsPage>(`/api/v1/news${queryString({ query, stockCode, sentiment, importance, from: from ? `${from}T00:00:00Z` : null, to: to ? `${to}T23:59:59Z` : null, sort: sort === 'LATEST' ? 'LATEST' : 'IMPORTANCE', limit: 20 })}`) : Promise.resolve({ items: [], nextCursor: null }), [query, stockCode, sentiment, importance, from, to, sort])
   const filingItems = useMemo(() => [...(filings.data?.items || [])].sort((a, b) => sort === 'LATEST' ? b.filedDate.localeCompare(a.filedDate) : 0), [filings.data, sort])
   return <div className="content-page"><PageTitle eyebrow="INTEGRATED SEARCH" title={`Search results for “${query}”`} copy="Stocks, filings and news are searched across the full supported dataset." /><div className="search-toolbar"><div className="tabs" role="tablist">{(['all', 'stocks', 'filings', 'news'] as const).map((item) => <button role="tab" aria-selected={tab === item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)} key={item}>{item[0].toUpperCase() + item.slice(1)}</button>)}</div><label>Sort<select value={sort} onChange={(event) => setSort(event.target.value as 'RELEVANCE' | 'LATEST')}><option value="RELEVANCE">Relevance</option><option value="LATEST">Latest</option></select></label></div>
+    <div className="filter-bar"><label>Stock code<input value={stockCode} maxLength={6} pattern="[0-9A-Za-z]{6}" onChange={(event) => setStockCode(event.target.value.toUpperCase())} placeholder="All stocks" /></label><label>From<input type="date" value={from} max={to || undefined} onChange={(event) => setFrom(event.target.value)} /></label><label>To<input type="date" value={to} min={from || undefined} onChange={(event) => setTo(event.target.value)} /></label><label>Filing type<select value={filingType} onChange={(event) => setFilingType(event.target.value)}><option value="">All types</option><option>PERIODIC</option><option>MATERIAL_EVENT</option><option>ISSUANCE</option><option>OWNERSHIP</option><option>OTHER</option></select></label><label>News sentiment<select value={sentiment} onChange={(event) => setSentiment(event.target.value)}><option value="">All</option><option>POSITIVE</option><option>NEUTRAL</option><option>NEGATIVE</option><option>MIXED</option></select></label><label>News importance<select value={importance} onChange={(event) => setImportance(event.target.value)}><option value="">All</option><option>CRITICAL</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option></select></label></div>
     {(tab === 'all' || tab === 'stocks') && <section className="result-section"><div className="split-heading"><h2>Stocks</h2><span>{stocks.data?.items.length || 0} matches</span></div><RemoteBoundary state={stocks} empty={(value) => !value.items.length}>{(value) => <div className="stock-strip">{value.items.map((stock) => <StockMiniCard stock={stock} key={stock.stockCode} />)}</div>}</RemoteBoundary></section>}
     {(tab === 'all' || tab === 'filings') && <section className="result-section"><div className="split-heading"><h2>Filings</h2><span>{filingItems.length} matches</span></div><RemoteBoundary state={filings} empty={(value) => !value.items.length}>{() => <div className="filing-list">{filingItems.map((filing) => <FilingRow filing={filing} key={filing.receiptNumber} />)}</div>}</RemoteBoundary></section>}
     {(tab === 'all' || tab === 'news') && <section className="result-section"><div className="split-heading"><h2>News</h2><span>{news.data?.items.length || 0} matches</span></div><RemoteBoundary state={news} empty={(value) => !value.items.length}>{(value) => <div className="news-grid light">{value.items.map((article) => <NewsCard article={article} key={article.id} />)}</div>}</RemoteBoundary></section>}
