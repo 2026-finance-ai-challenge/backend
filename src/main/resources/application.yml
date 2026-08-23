@@ -43,6 +43,21 @@ opendart:
   archive-root: ${OPENDART_ARCHIVE_ROOT:./data/opendart-archives}
 
 kmarket:
+  news:
+    collection-interval: ${KMARKET_NEWS_COLLECTION_INTERVAL:10m}
+    collection-initial-delay: ${KMARKET_NEWS_COLLECTION_INITIAL_DELAY:30s}
+    analysis-interval: ${KMARKET_NEWS_ANALYSIS_INTERVAL:5s}
+    naver:
+      enabled: ${KMARKET_NAVER_NEWS_ENABLED:false}
+      base-url: ${KMARKET_NAVER_NEWS_BASE_URL:https://openapi.naver.com}
+      client-id: ${KMARKET_NAVER_NEWS_CLIENT_ID:}
+      client-secret: ${KMARKET_NAVER_NEWS_CLIENT_SECRET:}
+      display: ${KMARKET_NAVER_NEWS_DISPLAY:20}
+      target-batch-size: ${KMARKET_NAVER_NEWS_TARGET_BATCH_SIZE:8}
+      connect-timeout: ${KMARKET_NAVER_NEWS_CONNECT_TIMEOUT:3s}
+      read-timeout: ${KMARKET_NAVER_NEWS_READ_TIMEOUT:10s}
+      request-delay: ${KMARKET_NAVER_NEWS_REQUEST_DELAY:125ms}
+      queries: ${KMARKET_NAVER_NEWS_QUERIES:코스피,코스닥,한국 증시}
   market:
     collection-interval: ${KMARKET_MARKET_COLLECTION_INTERVAL:60s}
     collection-initial-delay: ${KMARKET_MARKET_COLLECTION_INITIAL_DELAY:15s}

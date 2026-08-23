@@ -59,7 +59,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 		Exception exception,
 		HttpServletRequest request
 	) {
-		log.error("처리하지 못한 서버 오류: {}", exception.getClass().getName());
+		log.error("처리하지 못한 서버 오류", exception);
 		return problem(ErrorCode.INTERNAL_SERVER_ERROR, request, null);
 	}
 

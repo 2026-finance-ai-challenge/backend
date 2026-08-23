@@ -52,6 +52,11 @@ public class SecurityConfig {
 				).authenticated()
 				.requestMatchers(HttpMethod.GET, "/api/v1/disclosures").permitAll()
 				.requestMatchers(HttpMethod.GET, "/api/v1/market/**").permitAll()
+				.requestMatchers(HttpMethod.GET, "/api/v1/news", "/api/v1/news/**").permitAll()
+				.requestMatchers(
+					HttpMethod.POST,
+					"/api/v1/news/{articleId}/term-explanations"
+				).permitAll()
 				.requestMatchers(
 					HttpMethod.GET,
 					"/api/v1/disclosures/{receiptNumber:[0-9]{14}}"

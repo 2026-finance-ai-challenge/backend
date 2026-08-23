@@ -12,6 +12,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.time.LocalDate;
+import java.time.Instant;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -52,6 +54,9 @@ import com.kmarket.navigator.backend.disclosure.domain.DisclosureType;
 import com.kmarket.navigator.backend.disclosure.domain.ListedCommonStock;
 import com.kmarket.navigator.backend.disclosure.domain.Market;
 import com.kmarket.navigator.backend.disclosure.domain.SectionKind;
+import com.kmarket.navigator.backend.news.application.port.NewsAiGateway;
+import com.kmarket.navigator.backend.news.domain.TermExplanation;
+import com.kmarket.navigator.backend.news.domain.TermReference;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -99,6 +104,9 @@ class BackendApplicationTests {
 
 	@MockitoBean
 	DisclosureDocumentHandler disclosureDocumentHandler;
+
+	@MockitoBean
+	NewsAiGateway newsAiGateway;
 
 	@Test
 	void contextLoads() {
@@ -535,6 +543,82 @@ class BackendApplicationTests {
 	}
 
 	@Test
+	void servesFilteredNewsCursorDetailsAndEvidenceBoundTermExplanation() throws Exception {
+		disclosureRepository.saveFiling(filing("20260823800001"));
+		UUID firstArticleId = insertReadyNews(
+			"Samsung Electronics announces rights offering",
+			"The rights offering will finance a new semiconductor facility.",
+			Instant.parse("2026-08-23T10:00:00Z"),
+			"HIGH"
+		);
+		UUID secondArticleId = insertReadyNews(
+			"Samsung Electronics expands production",
+			"The company will expand memory production.",
+			Instant.parse("2026-08-23T09:00:00Z"),
+			"MEDIUM"
+		);
+		when(newsAiGateway.explainTerm(eq("rights offering"), any(), any(), any()))
+			.thenReturn(new TermExplanation(
+				"rights offering",
+				"rights offering",
+				"An issue of new shares offered to eligible holders.",
+				"The company plans to raise funds for a semiconductor facility.",
+				List.of(new TermReference("A1", "", "", "", null)),
+				new BigDecimal("0.92"),
+				false,
+				true,
+				null,
+				"gpt-5-mini",
+				"news-term-v1"
+			));
+
+		JsonNode firstPage = response(get("/api/v1/news")
+			.param("stockCode", "005930")
+			.param("sentiment", "POSITIVE")
+			.param("limit", "1"));
+		assertThat(firstPage.get("items")).hasSize(1);
+		assertThat(firstPage.get("items").get(0).get("id").stringValue())
+			.isEqualTo(firstArticleId.toString());
+		assertThat(firstPage.get("nextCursor").stringValue()).isNotBlank();
+
+		mockMvc.perform(get("/api/v1/news")
+				.param("stockCode", "005930")
+				.param("sentiment", "POSITIVE")
+				.param("limit", "1")
+				.param("cursor", firstPage.get("nextCursor").stringValue()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.items[0].id").value(secondArticleId.toString()))
+			.andExpect(jsonPath("$.nextCursor").doesNotExist());
+
+		mockMvc.perform(get("/api/v1/news/{articleId}", firstArticleId))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.analysisStatus").value("READY"))
+			.andExpect(jsonPath("$.contentAvailability").value("SOURCE_EXCERPT"))
+			.andExpect(jsonPath("$.relatedStocks[0].stockCode").value("005930"));
+
+		mockMvc.perform(post("/api/v1/news/{articleId}/term-explanations", firstArticleId)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"selectedText\":\"rights offering\"}"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.definition").value(
+				"An issue of new shares offered to eligible holders."))
+			.andExpect(jsonPath("$.sources[0].id").value("A1"))
+			.andExpect(jsonPath("$.sufficientEvidence").value(true));
+		assertThat(jdbcClient.sql("""
+			SELECT COUNT(*) FROM financial_term_explanation_click WHERE article_id = :articleId
+			""")
+			.param("articleId", firstArticleId)
+			.query(Long.class)
+			.single()).isEqualTo(1);
+
+		mockMvc.perform(post("/api/v1/news/{articleId}/term-explanations", firstArticleId)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"selectedText\":\"text absent from the article\"}"))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.code").value("INVALID_NEWS_SELECTION"));
+	}
+
+	@Test
 	void rejectsInvalidListParameters() throws Exception {
 		mockMvc.perform(get("/api/v1/disclosures").param("stockCode", "123"))
 			.andExpect(status().isBadRequest())
@@ -863,5 +947,77 @@ class BackendApplicationTests {
 			.param("stockCode", stockCode)
 			.query(UUID.class)
 			.single();
+	}
+
+	private UUID insertReadyNews(
+		String title,
+		String excerpt,
+		Instant publishedAt,
+		String importance
+	) {
+		UUID clusterId = UUID.randomUUID();
+		UUID articleId = UUID.randomUUID();
+		String clusterHash = clusterId.toString().replace("-", "").repeat(2);
+		String articleHash = articleId.toString().replace("-", "").repeat(2);
+		var publishedAtUtc = java.time.OffsetDateTime.ofInstant(
+			publishedAt,
+			java.time.ZoneOffset.UTC
+		);
+		jdbcClient.sql("""
+			INSERT INTO news_cluster (
+			    id, signature_hash, normalized_title, created_at, updated_at
+			)
+			VALUES (:id, :hash, :title, :publishedAt, :publishedAt)
+			""")
+			.param("id", clusterId)
+			.param("hash", clusterHash)
+			.param("title", title.toLowerCase(java.util.Locale.ROOT))
+			.param("publishedAt", publishedAtUtc)
+			.update();
+		jdbcClient.sql("""
+			INSERT INTO news_article (
+			    id, cluster_id, provider, provider_article_id, original_title,
+			    original_excerpt, english_title, english_body, what_summary,
+			    why_summary, impact_summary, event_type, sentiment, importance,
+			    market_impact, event_confidence, sentiment_confidence,
+			    importance_confidence, market_impact_confidence, original_url,
+			    canonical_url, canonical_url_hash, publisher, content_availability,
+			    analysis_status, model_id, prompt_version, published_at, collected_at,
+			    analyzed_at
+			)
+			VALUES (
+			    :id, :clusterId, 'NAVER_NEWS', :providerId, :title,
+			    :excerpt, :title, :excerpt, 'A market event occurred.',
+			    'The article states the reason.', 'The event may affect future operations.',
+			    'CORPORATE_ACTION', 'POSITIVE', :importance, 'POSITIVE',
+			    0.90, 0.85, 0.80, 0.75, :url, :url, :hash, 'news.example.com',
+			    'SOURCE_EXCERPT', 'READY', 'gpt-5-mini', 'news-analysis-v1',
+			    :publishedAt, :publishedAt, :publishedAt
+			)
+			""")
+			.param("id", articleId)
+			.param("clusterId", clusterId)
+			.param("providerId", articleId.toString())
+			.param("title", title)
+			.param("excerpt", excerpt)
+			.param("importance", importance)
+			.param("url", "https://news.example.com/" + articleId)
+			.param("hash", articleHash)
+			.param("publishedAt", publishedAtUtc)
+			.update();
+		jdbcClient.sql("""
+			UPDATE news_cluster SET representative_article_id = :articleId WHERE id = :clusterId
+			""")
+			.param("articleId", articleId)
+			.param("clusterId", clusterId)
+			.update();
+		jdbcClient.sql("""
+			INSERT INTO news_article_security (article_id, security_id, match_confidence)
+			VALUES (:articleId, :securityId, 0.99)
+			""")
+			.param("articleId", articleId)
+			.param("securityId", securityId("005930"))
+			.update();
+		return articleId;
 	}
 }

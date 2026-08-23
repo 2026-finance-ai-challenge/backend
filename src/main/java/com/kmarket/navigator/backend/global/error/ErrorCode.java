@@ -47,6 +47,17 @@ public enum ErrorCode {
 		"NOTIFICATION_NOT_FOUND",
 		"The notification was not found."
 	),
+	NEWS_NOT_FOUND(HttpStatus.NOT_FOUND, "NEWS_NOT_FOUND", "The news article was not found."),
+	INVALID_NEWS_SELECTION(
+		HttpStatus.BAD_REQUEST,
+		"INVALID_NEWS_SELECTION",
+		"The selected text does not belong to this article."
+	),
+	AI_RATE_LIMITED(
+		HttpStatus.TOO_MANY_REQUESTS,
+		"AI_RATE_LIMITED",
+		"The AI request limit was reached. Try again later."
+	),
 	DISCLOSURE_NOT_FOUND(HttpStatus.NOT_FOUND, "DISCLOSURE_NOT_FOUND", "The disclosure was not found."),
 	DISCLOSURE_INDEX_NOT_READY(
 		HttpStatus.CONFLICT,
