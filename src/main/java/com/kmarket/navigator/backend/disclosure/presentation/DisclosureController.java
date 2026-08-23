@@ -73,6 +73,7 @@ class DisclosureController {
 
 	@GetMapping
 	DisclosurePageResponse findAll(
+		@RequestParam(required = false) @Size(max = 120) String query,
 		@RequestParam(required = false)
 		@Pattern(regexp = "^[0-9A-Z]{6}$")
 		String stockCode,
@@ -84,6 +85,8 @@ class DisclosureController {
 		LocalDate to,
 		@RequestParam(required = false)
 		Set<DisclosureType> types,
+		@RequestParam(required = false)
+		Boolean correction,
 		@RequestParam(required = false)
 		@Size(max = 100)
 		String cursor,
@@ -97,8 +100,17 @@ class DisclosureController {
 		DisclosureCursor decodedCursor = cursor == null || cursor.isBlank()
 			? null
 			: DisclosureCursor.decode(cursor);
-		var query = new DisclosureListQuery(stockCode, from, to, types, decodedCursor, limit);
-		return DisclosurePageResponse.from(queryHandler.findAll(query));
+		var listQuery = new DisclosureListQuery(
+			query == null || query.isBlank() ? null : query.strip(),
+			stockCode,
+			from,
+			to,
+			types,
+			correction,
+			decodedCursor,
+			limit
+		);
+		return DisclosurePageResponse.from(queryHandler.findAll(listQuery));
 	}
 
 	@GetMapping("/{receiptNumber}")

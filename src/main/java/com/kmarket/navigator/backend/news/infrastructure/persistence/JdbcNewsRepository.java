@@ -53,7 +53,12 @@ class JdbcNewsRepository implements NewsRepository {
 			       (SELECT COUNT(*) FROM news_article related
 			        WHERE related.cluster_id = article.cluster_id) AS related_coverage_count
 			FROM news_article article
-			WHERE (CAST(:stockCode AS varchar) IS NULL OR EXISTS (
+			WHERE (CAST(:query AS varchar) IS NULL
+			       OR article.original_title ILIKE '%%' || :query || '%%' ESCAPE '\\'
+			       OR article.original_excerpt ILIKE '%%' || :query || '%%' ESCAPE '\\'
+			       OR COALESCE(article.english_title, '') ILIKE '%%' || :query || '%%' ESCAPE '\\'
+			       OR COALESCE(article.english_body, '') ILIKE '%%' || :query || '%%' ESCAPE '\\')
+			  AND (CAST(:stockCode AS varchar) IS NULL OR EXISTS (
 			    SELECT 1
 			    FROM news_article_security article_security
 			    JOIN security security_filter ON security_filter.id = article_security.security_id
@@ -74,6 +79,7 @@ class JdbcNewsRepository implements NewsRepository {
 			ORDER BY %s DESC, article.published_at DESC, article.id DESC
 			LIMIT :limit
 			""".formatted(rank, rank, rank, rank));
+		statement = nullable(statement, "query", escapeLike(query.query()), Types.VARCHAR);
 		statement = nullable(statement, "stockCode", query.stockCode(), Types.VARCHAR);
 		statement = nullable(
 			statement,
@@ -130,6 +136,10 @@ class JdbcNewsRepository implements NewsRepository {
 			).encode()
 			: null;
 		return new NewsPage(items, nextCursor);
+	}
+
+	private String escapeLike(String value) {
+		return value == null ? null : value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
 	}
 
 	@Override

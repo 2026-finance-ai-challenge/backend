@@ -49,6 +49,7 @@ class NewsController {
 
 	@GetMapping
 	NewsPageResponse findAll(
+		@RequestParam(required = false) @Size(max = 120) String query,
 		@RequestParam(required = false)
 		@Pattern(regexp = "^[0-9A-Z]{6}$")
 		String stockCode,
@@ -70,6 +71,7 @@ class NewsController {
 		}
 		NewsCursor decoded = cursor == null || cursor.isBlank() ? null : NewsCursor.decode(cursor);
 		return NewsPageResponse.from(service.findAll(new NewsQuery(
+			query == null || query.isBlank() ? null : query.strip(),
 			stockCode,
 			sentiment,
 			importance,
