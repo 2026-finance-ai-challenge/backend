@@ -497,6 +497,32 @@ class BackendApplicationTests {
 			.andExpect(jsonPath("$.count").value(1))
 			.andExpect(jsonPath("$.items[0].nameKo").value("삼성전자"));
 
+		OpenDartFiling watchedDisclosure = filing("20260818800680");
+		disclosureRepository.saveFiling(watchedDisclosure);
+		UUID watchedNewsId = insertReadyNews(
+			"Samsung Electronics watchlist event",
+			"A new event was detected for the watched company.",
+			Instant.parse("2026-08-23T11:00:00Z"),
+			"HIGH"
+		);
+		assertThat(jdbcClient.sql("""
+			SELECT COUNT(*) FROM user_notification
+			WHERE user_id = :userId AND reference_id IN (:filingId, :newsId)
+			""")
+			.param("userId", userId)
+			.param("filingId", watchedDisclosure.receiptNumber())
+			.param("newsId", watchedNewsId.toString())
+			.query(Long.class)
+			.single()).isEqualTo(2L);
+		jdbcClient.sql("""
+			DELETE FROM user_notification
+			WHERE user_id = :userId AND reference_id IN (:filingId, :newsId)
+			""")
+			.param("userId", userId)
+			.param("filingId", watchedDisclosure.receiptNumber())
+			.param("newsId", watchedNewsId.toString())
+			.update();
+
 		mockMvc.perform(post("/api/v1/me/recently-viewed")
 				.header("Authorization", "Bearer " + accessToken)
 				.contentType(MediaType.APPLICATION_JSON)
