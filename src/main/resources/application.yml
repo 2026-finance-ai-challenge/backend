@@ -43,6 +43,10 @@ opendart:
   archive-root: ${OPENDART_ARCHIVE_ROOT:./data/opendart-archives}
 
 kmarket:
+  chat:
+    generation-interval: ${KMARKET_CHAT_GENERATION_INTERVAL:1s}
+    generation-initial-delay: ${KMARKET_CHAT_GENERATION_INITIAL_DELAY:30s}
+    purge-cron: ${KMARKET_CHAT_PURGE_CRON:0 20 4 * * *}
   news:
     collection-interval: ${KMARKET_NEWS_COLLECTION_INTERVAL:10m}
     collection-initial-delay: ${KMARKET_NEWS_COLLECTION_INITIAL_DELAY:30s}

@@ -64,6 +64,46 @@ public enum ErrorCode {
 		"CHAT_ROOM_VERSION_CONFLICT",
 		"The chat room was changed by another request. Reload and try again."
 	),
+	CHAT_MESSAGE_NOT_FOUND(
+		HttpStatus.NOT_FOUND,
+		"CHAT_MESSAGE_NOT_FOUND",
+		"The chat message was not found."
+	),
+	CHAT_GENERATION_NOT_FOUND(
+		HttpStatus.NOT_FOUND,
+		"CHAT_GENERATION_NOT_FOUND",
+		"The chat generation was not found."
+	),
+	INVALID_CHAT_MESSAGE(
+		HttpStatus.BAD_REQUEST,
+		"INVALID_CHAT_MESSAGE",
+		"The chat message is invalid."
+	),
+	INVALID_CHAT_SELECTION(
+		HttpStatus.BAD_REQUEST,
+		"INVALID_CHAT_SELECTION",
+		"The selected filing context is invalid."
+	),
+	CHAT_IDEMPOTENCY_CONFLICT(
+		HttpStatus.CONFLICT,
+		"CHAT_IDEMPOTENCY_CONFLICT",
+		"The request key was already used with different content."
+	),
+	CHAT_GENERATION_NOT_STOPPABLE(
+		HttpStatus.CONFLICT,
+		"CHAT_GENERATION_NOT_STOPPABLE",
+		"The generation is no longer running."
+	),
+	CHAT_GENERATION_NOT_RETRYABLE(
+		HttpStatus.CONFLICT,
+		"CHAT_GENERATION_NOT_RETRYABLE",
+		"Only a failed generation can be retried."
+	),
+	CHAT_CONTEXT_STALE(
+		HttpStatus.CONFLICT,
+		"CHAT_CONTEXT_STALE",
+		"The bound filing version is no longer current. Start a new filing chat."
+	),
 	INVALID_NEWS_SELECTION(
 		HttpStatus.BAD_REQUEST,
 		"INVALID_NEWS_SELECTION",

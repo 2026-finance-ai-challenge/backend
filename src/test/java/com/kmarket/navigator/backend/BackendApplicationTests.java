@@ -61,6 +61,9 @@ import com.kmarket.navigator.backend.disclosure.domain.SectionKind;
 import com.kmarket.navigator.backend.news.application.port.NewsAiGateway;
 import com.kmarket.navigator.backend.news.domain.TermExplanation;
 import com.kmarket.navigator.backend.news.domain.TermReference;
+import com.kmarket.navigator.backend.chat.application.ChatGenerationWorker;
+import com.kmarket.navigator.backend.chat.application.port.AgentGateway;
+import com.kmarket.navigator.backend.chat.domain.AgentAnswer;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -114,6 +117,12 @@ class BackendApplicationTests {
 
 	@MockitoBean
 	NewsAiGateway newsAiGateway;
+
+	@MockitoBean
+	AgentGateway agentGateway;
+
+	@Autowired
+	ChatGenerationWorker chatGenerationWorker;
 
 	@Test
 	void contextLoads() {
@@ -464,6 +473,240 @@ class BackendApplicationTests {
 			.param("roomId", generalId)
 			.query(Boolean.class)
 			.single()).isTrue();
+	}
+
+	@Test
+	void generatesStopsAndRegeneratesOwnedAgentMessagesWithVerifiedCitations() throws Exception {
+		AuthFixture owner = signupAndLogin("agent_owner");
+		AuthFixture other = signupAndLogin("agent_other");
+		JsonNode room = createdResponse(post("/api/v1/me/chats")
+			.header("Authorization", "Bearer " + owner.accessToken())
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("{\"contextType\":\"GENERAL\"}"));
+		UUID roomId = UUID.fromString(room.get("id").stringValue());
+		UUID clientMessageId = UUID.randomUUID();
+		when(agentGateway.answer(any(), eq("What is the KOSPI snapshot?"), any(), any(), any()))
+			.thenReturn(new AgentAnswer(
+				"The supplied KOSPI snapshot is currently unavailable. [E1]",
+				List.of("E1"),
+				false,
+				null,
+				"KOSPI snapshot",
+				"For information only.",
+				new BigDecimal("0.85"),
+				"test-agent",
+				"market-agent-test-v1"
+			));
+
+		JsonNode submitted = acceptedResponse(post("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken())
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("""
+				{"clientMessageId":"%s","content":"What is the KOSPI snapshot?"}
+				""".formatted(clientMessageId)));
+		UUID generationId = UUID.fromString(submitted.get("generation").get("id").stringValue());
+		assertThat(submitted.get("generation").get("status").stringValue()).isEqualTo("PENDING");
+
+		JsonNode duplicate = acceptedResponse(post("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken())
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("""
+				{"clientMessageId":"%s","content":"What is the KOSPI snapshot?"}
+				""".formatted(clientMessageId)));
+		assertThat(duplicate.get("generation").get("id").stringValue())
+			.isEqualTo(generationId.toString());
+
+		chatGenerationWorker.process();
+		JsonNode messages = response(get("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()));
+		assertThat(messages).hasSize(2);
+		assertThat(messages.get(1).get("role").stringValue()).isEqualTo("ASSISTANT");
+		assertThat(messages.get(1).get("citations").get(0).get("id").stringValue()).isEqualTo("E1");
+		UUID assistantId = UUID.fromString(messages.get(1).get("id").stringValue());
+		mockMvc.perform(get("/api/v1/me/chats/{roomId}", roomId)
+				.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.name").value("KOSPI snapshot"));
+
+		when(agentGateway.answer(any(), eq("What is the KOSPI snapshot?"), any(), any(), any()))
+			.thenReturn(new AgentAnswer(
+				"The current server snapshot is unavailable. [E1]",
+				List.of("E1"), false, null, "KOSPI snapshot", "For information only.",
+				new BigDecimal("0.80"), "test-agent", "market-agent-test-v1"
+			));
+		acceptedResponse(post(
+				"/api/v1/me/chats/{roomId}/messages/{assistantMessageId}/regenerate",
+				roomId,
+				assistantId
+			)
+			.header("Authorization", "Bearer " + owner.accessToken())
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("{\"requestKey\":\"%s\"}".formatted(UUID.randomUUID())));
+		chatGenerationWorker.process();
+		mockMvc.perform(get("/api/v1/me/chats/{roomId}/messages", roomId)
+				.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.length()").value(3));
+
+		JsonNode stoppedSubmission = acceptedResponse(post("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken())
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("""
+				{"clientMessageId":"%s","content":"Stop this request."}
+				""".formatted(UUID.randomUUID())));
+		UUID stoppedGenerationId = UUID.fromString(
+			stoppedSubmission.get("generation").get("id").stringValue()
+		);
+		mockMvc.perform(post(
+				"/api/v1/me/chats/{roomId}/generations/{generationId}/stop",
+				roomId,
+				stoppedGenerationId
+			)
+			.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.status").value("STOPPED"));
+		mockMvc.perform(get(
+				"/api/v1/me/chats/{roomId}/generations/{generationId}",
+				roomId,
+				generationId
+			)
+			.header("Authorization", "Bearer " + other.accessToken()))
+			.andExpect(status().isNotFound())
+			.andExpect(jsonPath("$.code").value("CHAT_GENERATION_NOT_FOUND"));
+	}
+
+	@Test
+	void boundsAgentRetriesAndAllowsExplicitRetryAfterFailure() throws Exception {
+		AuthFixture owner = signupAndLogin("agent_retry");
+		JsonNode room = createdResponse(post("/api/v1/me/chats")
+			.header("Authorization", "Bearer " + owner.accessToken())
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("{\"contextType\":\"GENERAL\"}"));
+		UUID roomId = UUID.fromString(room.get("id").stringValue());
+		when(agentGateway.answer(any(), any(), any(), any(), any()))
+			.thenThrow(new com.kmarket.navigator.backend.global.error.BusinessException(
+				com.kmarket.navigator.backend.global.error.ErrorCode.AI_SERVICE_UNAVAILABLE
+			));
+		JsonNode submitted = acceptedResponse(post("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken())
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("""
+				{"clientMessageId":"%s","content":"Give me the latest market view."}
+				""".formatted(UUID.randomUUID())));
+		UUID generationId = UUID.fromString(submitted.get("generation").get("id").stringValue());
+
+		for (int attempt = 0; attempt < 3; attempt++) {
+			chatGenerationWorker.process();
+			jdbcClient.sql("""
+				UPDATE chat_generation
+				SET available_at = CURRENT_TIMESTAMP
+				WHERE id = :generationId AND status = 'PENDING'
+				""")
+				.param("generationId", generationId)
+				.update();
+		}
+		mockMvc.perform(get(
+				"/api/v1/me/chats/{roomId}/generations/{generationId}",
+				roomId,
+				generationId
+			)
+			.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.status").value("FAILED"))
+			.andExpect(jsonPath("$.attempts").value(3))
+			.andExpect(jsonPath("$.errorCode").value("AI_SERVICE_UNAVAILABLE"));
+		mockMvc.perform(post(
+				"/api/v1/me/chats/{roomId}/generations/{generationId}/retry",
+				roomId,
+				generationId
+			)
+			.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.status").value("PENDING"))
+			.andExpect(jsonPath("$.attempts").value(0));
+	}
+
+	@Test
+	void isolatesFilingAgentToBoundDocumentVersionAndSelectedSection() throws Exception {
+		OpenDartFiling filing = filing("20260821800677");
+		disclosureRepository.saveFiling(filing);
+		activateCommonStocks("005930");
+		disclosureRepository.completeDocumentJob(
+			filing.receiptNumber(),
+			List.of(document("d", "Revenue increased due to overseas demand.")),
+			List.of()
+		);
+		jdbcClient.sql("UPDATE disclosure SET index_status = 'READY' WHERE receipt_number = :receiptNumber")
+			.param("receiptNumber", filing.receiptNumber())
+			.update();
+		var detail = disclosureRepository.findByReceiptNumber(filing.receiptNumber()).orElseThrow();
+		UUID sectionId = detail.documents().getFirst().sections().getFirst().id();
+		when(disclosureRagGateway.ask(eq(filing.receiptNumber()), any()))
+			.thenReturn(new DisclosureAnswer(
+				"Revenue increased due to overseas demand. [C1]",
+				false,
+				null,
+				List.of(new DisclosureAnswer.Citation(
+					"C1",
+					UUID.randomUUID(),
+					detail.documents().getFirst().id(),
+					1,
+					List.of(sectionId),
+					0,
+					0,
+					"Revenue",
+					"Revenue increased due to overseas demand."
+				)),
+				"test-rag",
+				"filing-rag-test-v1"
+			));
+		AuthFixture owner = signupAndLogin("filing_agent");
+		JsonNode room = createdResponse(post("/api/v1/me/chats")
+			.header("Authorization", "Bearer " + owner.accessToken())
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("""
+				{"contextType":"FILING","referenceId":"%s"}
+				""".formatted(filing.receiptNumber())));
+		UUID roomId = UUID.fromString(room.get("id").stringValue());
+
+		JsonNode submitted = acceptedResponse(post("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken())
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("""
+				{"clientMessageId":"%s","content":"Why did revenue increase?",
+				 "selectedSectionId":"%s","selectedText":"overseas demand"}
+				""".formatted(UUID.randomUUID(), sectionId)));
+		chatGenerationWorker.process();
+		mockMvc.perform(get("/api/v1/me/chats/{roomId}/messages", roomId)
+				.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$[1].citations[0].sourceType").value("FILING"))
+			.andExpect(jsonPath("$[1].citations[0].referenceId").value(filing.receiptNumber()))
+			.andExpect(jsonPath("$[1].citations[0].sectionIds[0]").value(sectionId.toString()));
+
+		disclosureRepository.completeDocumentJob(
+			filing.receiptNumber(),
+			List.of(document("e", "A corrected disclosure version.")),
+			List.of()
+		);
+		JsonNode stale = acceptedResponse(post("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken())
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("""
+				{"clientMessageId":"%s","content":"What changed?"}
+				""".formatted(UUID.randomUUID())));
+		UUID staleGenerationId = UUID.fromString(stale.get("generation").get("id").stringValue());
+		chatGenerationWorker.process();
+		mockMvc.perform(get(
+				"/api/v1/me/chats/{roomId}/generations/{generationId}",
+				roomId,
+				staleGenerationId
+			)
+			.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.status").value("FAILED"))
+			.andExpect(jsonPath("$.errorCode").value("CHAT_CONTEXT_STALE"));
+		assertThat(submitted.get("generation").get("status").stringValue()).isEqualTo("PENDING");
 	}
 
 	@Test
@@ -1110,6 +1353,17 @@ class BackendApplicationTests {
 	) throws Exception {
 		String body = mockMvc.perform(request)
 			.andExpect(status().isCreated())
+			.andReturn()
+			.getResponse()
+			.getContentAsString();
+		return objectMapper.readTree(body);
+	}
+
+	private JsonNode acceptedResponse(
+		org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder request
+	) throws Exception {
+		String body = mockMvc.perform(request)
+			.andExpect(status().isAccepted())
 			.andReturn()
 			.getResponse()
 			.getContentAsString();
