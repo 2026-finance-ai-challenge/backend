@@ -304,7 +304,7 @@ class BackendApplicationTests {
 	}
 
 	@Test
-	void serviceStockUniverseContainsMvpStocks() {
+	void serviceStockUniverseContainsMvpStocks() throws Exception {
 		assertThat(jdbcClient.sql("SELECT stock_code FROM service_stock_universe ORDER BY stock_code")
 			.query(String.class)
 			.list())
@@ -316,6 +316,17 @@ class BackendApplicationTests {
 				"039290", "039340", "040300", "053210", "058400", "065530",
 				"066790", "089590", "091810", "122450", "126560", "127710",
 				"272450", "298690");
+		assertThat(jdbcClient.sql("SELECT COUNT(*) FROM service_stock_catalog")
+			.query(Long.class)
+			.single()).isEqualTo(75);
+		assertThat(jdbcClient.sql("SELECT COUNT(*) FROM security WHERE active AND common_stock")
+			.query(Long.class)
+			.single()).isEqualTo(75);
+		mockMvc.perform(get("/api/v1/market/stocks/search")
+				.param("query", "Samsung"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.count").value(10))
+			.andExpect(jsonPath("$.items[0].nameEn").value(org.hamcrest.Matchers.containsStringIgnoringCase("Samsung")));
 	}
 
 	@Test
@@ -1000,7 +1011,8 @@ class BackendApplicationTests {
 
 		mockMvc.perform(get("/api/v1/market/stocks/search")
 				.header("Authorization", "Bearer " + accessToken)
-				.param("query", "Samsung"))
+				.param("query", "005930")
+				.param("limit", "1"))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.count").value(1))
 			.andExpect(jsonPath("$.items[0].stockCode").value("005930"))
@@ -1015,6 +1027,11 @@ class BackendApplicationTests {
 		mockMvc.perform(get("/api/v1/market/stocks").param("watchlist", "true"))
 			.andExpect(status().isUnauthorized())
 			.andExpect(jsonPath("$.code").value("AUTHENTICATION_REQUIRED"));
+		mockMvc.perform(get("/api/v1/market/stocks")
+				.param("sort", "CHANGE_ASC")
+				.param("limit", "1"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.count").value(1));
 
 		mockMvc.perform(get("/api/v1/market/stocks/{stockCode}", "005930"))
 			.andExpect(status().isOk())

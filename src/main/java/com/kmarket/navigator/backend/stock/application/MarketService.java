@@ -214,6 +214,10 @@ public class MarketService {
 				(StockMarketView view) -> view.quote() == null ? null : view.quote().changeRate(),
 				Comparator.nullsLast(Comparator.reverseOrder())
 			).thenComparing(view -> view.stock().stockCode());
+			case CHANGE_ASC -> Comparator.comparing(
+				(StockMarketView view) -> view.quote() == null ? null : view.quote().changeRate(),
+				Comparator.nullsLast(Comparator.naturalOrder())
+			).thenComparing(view -> view.stock().stockCode());
 			case VOLUME_DESC -> Comparator.comparing(
 				(StockMarketView view) -> view.quote() == null ? null : view.quote().volume(),
 				Comparator.nullsLast(Comparator.reverseOrder())

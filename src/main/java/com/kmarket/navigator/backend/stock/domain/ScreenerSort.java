@@ -4,5 +4,6 @@ public enum ScreenerSort {
 	STOCK_CODE,
 	NAME,
 	CHANGE_DESC,
+	CHANGE_ASC,
 	VOLUME_DESC
 }
