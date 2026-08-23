@@ -392,6 +392,81 @@ class BackendApplicationTests {
 	}
 
 	@Test
+	void managesOwnedContextBoundChatRoomsWithOptimisticRenames() throws Exception {
+		OpenDartFiling filing = filing("20260820800676");
+		disclosureRepository.saveFiling(filing);
+		activateCommonStocks("005930");
+		disclosureRepository.completeDocumentJob(
+			filing.receiptNumber(),
+			List.of(document("c", "Semiconductor facility investment details")),
+			List.of()
+		);
+		AuthFixture owner = signupAndLogin("chat_owner");
+		AuthFixture other = signupAndLogin("chat_other");
+
+		mockMvc.perform(get("/api/v1/me/chats"))
+			.andExpect(status().isUnauthorized());
+		JsonNode general = createdResponse(post("/api/v1/me/chats")
+			.header("Authorization", "Bearer " + owner.accessToken())
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("{\"contextType\":\"GENERAL\"}"));
+		UUID generalId = UUID.fromString(general.get("id").stringValue());
+		assertThat(general.get("context").get("type").stringValue()).isEqualTo("GENERAL");
+
+		JsonNode filingRoom = objectMapper.readTree(mockMvc.perform(post("/api/v1/me/chats")
+				.header("Authorization", "Bearer " + owner.accessToken())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{"contextType":"FILING","referenceId":"%s"}
+					""".formatted(filing.receiptNumber())))
+			.andExpect(status().isCreated())
+			.andExpect(jsonPath("$.context.referenceId").value(filing.receiptNumber()))
+			.andExpect(jsonPath("$.context.version").isString())
+			.andReturn().getResponse().getContentAsString());
+		assertThat(filingRoom.get("context").get("version").stringValue()).hasSize(64);
+
+		mockMvc.perform(put("/api/v1/me/chats/{roomId}/name", generalId)
+				.header("Authorization", "Bearer " + owner.accessToken())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"name\":\"Korea market basics\",\"expectedVersion\":0}"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.name").value("Korea market basics"))
+			.andExpect(jsonPath("$.version").value(1));
+		mockMvc.perform(put("/api/v1/me/chats/{roomId}/name", generalId)
+				.header("Authorization", "Bearer " + owner.accessToken())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"name\":\"Stale edit\",\"expectedVersion\":0}"))
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.code").value("CHAT_ROOM_VERSION_CONFLICT"));
+
+		mockMvc.perform(get("/api/v1/me/chats")
+				.header("Authorization", "Bearer " + owner.accessToken())
+				.param("query", "market"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.length()").value(1))
+			.andExpect(jsonPath("$[0].id").value(generalId.toString()));
+		mockMvc.perform(get("/api/v1/me/chats/{roomId}", generalId)
+				.header("Authorization", "Bearer " + other.accessToken()))
+			.andExpect(status().isNotFound())
+			.andExpect(jsonPath("$.code").value("CHAT_ROOM_NOT_FOUND"));
+
+		mockMvc.perform(delete("/api/v1/me/chats/{roomId}", generalId)
+				.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isNoContent());
+		mockMvc.perform(get("/api/v1/me/chats/{roomId}", generalId)
+				.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isNotFound());
+		assertThat(jdbcClient.sql("""
+			SELECT purge_after > deleted_at
+			FROM chat_room
+			WHERE id = :roomId
+			""")
+			.param("roomId", generalId)
+			.query(Boolean.class)
+			.single()).isTrue();
+	}
+
+	@Test
 	void servesSupportedMarketSearchScreenerQuotesAndForeignLimitSignals() throws Exception {
 		disclosureRepository.saveFiling(filing("20260818800680"));
 		disclosureRepository.saveFiling(new OpenDartFiling(
@@ -997,10 +1072,44 @@ class BackendApplicationTests {
 		return filingAt(receiptNumber, LocalDate.of(2026, 8, 18));
 	}
 
+	private AuthFixture signupAndLogin(String prefix) throws Exception {
+		String loginId = prefix + "_" + UUID.randomUUID().toString().substring(0, 8);
+		String password = "Secure!Pass123";
+		mockMvc.perform(post("/api/v1/auth/signup")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{"loginId":"%s","password":"%s","passwordConfirm":"%s",
+					 "nationality":"US","investorType":"INDIVIDUAL",
+					 "termsAccepted":true,"privacyAccepted":true}
+					""".formatted(loginId, password, password)))
+			.andExpect(status().isCreated());
+		JsonNode login = response(post("/api/v1/auth/login")
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("{\"loginId\":\"%s\",\"password\":\"%s\"}".formatted(loginId, password)));
+		return new AuthFixture(
+			login.get("accessToken").stringValue(),
+			UUID.fromString(login.get("user").get("id").stringValue())
+		);
+	}
+
+	private record AuthFixture(String accessToken, UUID userId) {
+	}
+
 	private JsonNode response(org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder request)
 		throws Exception {
 		String body = mockMvc.perform(request)
 			.andExpect(status().isOk())
+			.andReturn()
+			.getResponse()
+			.getContentAsString();
+		return objectMapper.readTree(body);
+	}
+
+	private JsonNode createdResponse(
+		org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder request
+	) throws Exception {
+		String body = mockMvc.perform(request)
+			.andExpect(status().isCreated())
 			.andReturn()
 			.getResponse()
 			.getContentAsString();

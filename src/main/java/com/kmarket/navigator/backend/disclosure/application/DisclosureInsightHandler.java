@@ -1,12 +1,7 @@
 package com.kmarket.navigator.backend.disclosure.application;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -55,13 +50,13 @@ public class DisclosureInsightHandler {
 
 	public DisclosureInsight find(String receiptNumber) {
 		DisclosureDetail detail = detail(receiptNumber);
-		return repository.findInsight(receiptNumber, contentVersion(detail))
+		return repository.findInsight(receiptNumber, DisclosureContentVersion.calculate(detail))
 			.orElseThrow(() -> new BusinessException(ErrorCode.DISCLOSURE_INSIGHT_NOT_READY));
 	}
 
 	public DisclosureInsight generate(String receiptNumber) {
 		DisclosureDetail detail = detail(receiptNumber);
-		String contentVersion = contentVersion(detail);
+		String contentVersion = DisclosureContentVersion.calculate(detail);
 		var existing = repository.findInsight(receiptNumber, contentVersion);
 		if (existing.isPresent()) {
 			return existing.get();
@@ -147,16 +142,6 @@ public class DisclosureInsightHandler {
 		return value.substring(0, Math.min(value.length(), MAX_ITEM_CHARACTERS));
 	}
 
-	private String contentVersion(DisclosureDetail detail) {
-		List<String> versions = new ArrayList<>();
-		detail.documents().stream()
-			.sorted(java.util.Comparator.comparing(document -> document.id().toString()))
-			.forEach(document -> versions.add(
-				document.id() + ":" + document.version() + ":" + document.contentHash()
-			));
-		return sha256(String.join("|", versions));
-	}
-
 	private String refusalReason(DisclosureInsightGeneration generated, List<UUID> sources) {
 		if (generated.sufficientEvidence() && sources.isEmpty()) {
 			return "The generated summary did not contain a verifiable filing source.";
@@ -166,13 +151,4 @@ public class DisclosureInsightHandler {
 			: generated.refusalReason();
 	}
 
-	private String sha256(String value) {
-		try {
-			return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-				.digest(value.getBytes(StandardCharsets.UTF_8)));
-		}
-		catch (NoSuchAlgorithmException exception) {
-			throw new IllegalStateException("SHA-256 algorithm is unavailable", exception);
-		}
-	}
 }

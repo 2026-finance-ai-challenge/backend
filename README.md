@@ -12,6 +12,7 @@
 - [시장·스크리너·외국인 한도 API](docs/MARKET_API.md)
 - [뉴스 인텔리전스 API](docs/NEWS_API.md)
 - [공시 인텔리전스 API](docs/DISCLOSURE_API.md)
+- [AI Agent 채팅방 API](docs/CHAT_API.md)
 - [Git 및 전달 워크플로](docs/GIT_WORKFLOW.md)
 - [Codex 저장소 지침](AGENTS.md)
 - [Codex 작업 스킬](.agents/skills/k-market-delivery/SKILL.md)
@@ -152,6 +153,7 @@ docker compose up -d
 관심종목·최근 조회·알림함 API는 [사용자 개인화 API 문서](docs/PERSONALIZATION_API.md)를 따르며 모든 조회·수정에서 JWT 사용자 소유권을 검증한다.
 뉴스 수집·중복 묶음·OpenAI 구조화 분석·선택 문맥 해설은 [뉴스 인텔리전스 API 문서](docs/NEWS_API.md)를 따른다.
 정정 버전 연결·구조화 원문·근거 고정 What/Why/Impact 요약은 [공시 인텔리전스 API 문서](docs/DISCLOSURE_API.md)를 따른다.
+채팅방 생성·목록·문맥 복원·낙관적 잠금 이름 변경·삭제 보존 정책은 [AI Agent 채팅방 API 문서](docs/CHAT_API.md)를 따른다.
 
 질의응답을 사용하려면 AI API 서버가 `KMARKET_AI_BASE_URL`에서 실행 중이어야 하며 두 서비스의 `KMARKET_AI_SERVICE_TOKEN`이 같아야 한다. 그 외 경로는 기본 차단한다.
 

@@ -48,6 +48,22 @@ public enum ErrorCode {
 		"The notification was not found."
 	),
 	NEWS_NOT_FOUND(HttpStatus.NOT_FOUND, "NEWS_NOT_FOUND", "The news article was not found."),
+	CHAT_ROOM_NOT_FOUND(HttpStatus.NOT_FOUND, "CHAT_ROOM_NOT_FOUND", "The chat room was not found."),
+	INVALID_CHAT_CONTEXT(
+		HttpStatus.BAD_REQUEST,
+		"INVALID_CHAT_CONTEXT",
+		"The requested chat context is invalid or unavailable."
+	),
+	INVALID_CHAT_ROOM_NAME(
+		HttpStatus.BAD_REQUEST,
+		"INVALID_CHAT_ROOM_NAME",
+		"The chat room name is invalid."
+	),
+	CHAT_ROOM_VERSION_CONFLICT(
+		HttpStatus.CONFLICT,
+		"CHAT_ROOM_VERSION_CONFLICT",
+		"The chat room was changed by another request. Reload and try again."
+	),
 	INVALID_NEWS_SELECTION(
 		HttpStatus.BAD_REQUEST,
 		"INVALID_NEWS_SELECTION",
