@@ -1,10 +1,12 @@
 export type ApiProblem = { code?: string; message?: string; status?: number; retryAfter?: string }
 
+export type InvestorType = 'INDIVIDUAL' | 'CORPORATE'
+
 export type Profile = {
   id: string
   loginId: string
   nationality: string
-  investorType: 'INDIVIDUAL' | 'CORPORATION'
+  investorType: InvestorType
   taxVerificationStatus: string
   createdAt: string
 }

@@ -423,6 +423,12 @@ h1, h2, h3, p { overflow-wrap: anywhere; }
 .auth-form input, .auth-form select { min-height: 45px; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .form-hint { color: var(--muted); font-size: 8px; line-height: 1.5; }
+.availability { display: block; min-height: 16px; margin-top: 5px; color: var(--muted); font-size: 9px; }
+.availability.available { color: var(--success); }
+.availability.unavailable { color: var(--danger); }
+.auth-form label.consent { flex-direction: row; align-items: center; gap: 8px; }
+.auth-form label.consent input { min-height: auto; width: 16px; height: 16px; margin: 0; }
+.auth-form label.consent span { color: var(--ink); font-size: 9px; }
 .form-error, .agent-error { padding: 10px; border-radius: 7px; background: #fff0f1; color: #a63f4a; font-size: 9px; }
 .primary.full, .text-button.full { width: 100%; margin-top: 20px; }
 .text-button { border: 0; background: transparent; color: var(--teal-dark); font-size: 9px; font-weight: 700; }

@@ -2,7 +2,7 @@ import { FormEvent, useState } from 'react'
 import { api, login, session, signup } from '../api'
 import { formatDate, formatNumber, RemoteBoundary, StatusPanel, useProfile, useRemote } from '../components'
 import { appHash, navigate } from '../routing'
-import type { Profile } from '../types'
+import type { InvestorType, Profile } from '../types'
 import { PageTitle } from './market'
 
 type Country = { countryCode: string; countryName: string }
@@ -48,7 +48,7 @@ export function TaxPage() {
   const profile = useProfile()
   const countries = useRemote(() => api<Country[]>('/api/v1/tax/countries'), [])
   const [country, setCountry] = useState(profile?.nationality || 'US')
-  const [investorType, setInvestorType] = useState<string>(profile?.investorType || 'INDIVIDUAL')
+  const [investorType, setInvestorType] = useState<InvestorType>(profile?.investorType || 'INDIVIDUAL')
   const [result, setResult] = useState<Eligibility | null>(null)
   const [checking, setChecking] = useState(false)
   const [error, setError] = useState('')
@@ -68,7 +68,7 @@ export function TaxPage() {
   }
   return <div className="content-page tax-page"><PageTitle eyebrow="TAX GUIDE" title="Treaty information, without false certainty" copy="Compare published rates, prepare required documents and verify file completeness before broker or partner submission." />
     <div className="tax-steps"><span className="active">1 Eligibility</span><span>2 Documents</span><span>3 AI verification</span><span>4 Broker submission</span></div>
-    <section className="eligibility-card"><form onSubmit={check}><div><p className="eyebrow">STEP 1</p><h2>Tax Eligibility Checker</h2><p>This result is general treaty information, not a binding eligibility decision.</p></div><label>Tax residency<select value={country} onChange={(event) => setCountry(event.target.value)}>{countries.data?.map((item) => <option value={item.countryCode} key={item.countryCode}>{item.countryName} ({item.countryCode})</option>)}</select></label><label>Investor type<select value={investorType} onChange={(event) => setInvestorType(event.target.value)}><option value="INDIVIDUAL">Individual</option><option value="CORPORATION">Corporation</option></select></label><button className="primary" disabled={checking}>{checking ? 'Checking published data…' : 'Compare rates'}</button></form>{error && <StatusPanel title="Tax guide request failed" message={error} tone="error" />}{result && <TaxResult result={result} />}</section>
+    <section className="eligibility-card"><form onSubmit={check}><div><p className="eyebrow">STEP 1</p><h2>Tax Eligibility Checker</h2><p>This result is general treaty information, not a binding eligibility decision.</p></div><label>Tax residency<select value={country} onChange={(event) => setCountry(event.target.value)}>{countries.data?.map((item) => <option value={item.countryCode} key={item.countryCode}>{item.countryName} ({item.countryCode})</option>)}</select></label><label>Investor type<select value={investorType} onChange={(event) => setInvestorType(event.target.value as InvestorType)}><option value="INDIVIDUAL">Individual</option><option value="CORPORATE">Corporation</option></select></label><button className="primary" disabled={checking}>{checking ? 'Checking published data…' : 'Compare rates'}</button></form>{error && <StatusPanel title="Tax guide request failed" message={error} tone="error" />}{result && <TaxResult result={result} />}</section>
     <section className="document-section"><div className="section-head"><div><p className="eyebrow">REQUIRED DOCUMENTS</p><h2>Prepare and verify</h2></div>{!profile && <a href={appHash('auth', undefined, { returnTo: appHash('tax') })}>Sign in to upload securely →</a>}</div><div className="document-grid"><DocumentCard title="Certificate of Tax Residence" type="RESIDENCY_CERTIFICATE" copy="Confirms tax residency for the relevant period." upload={upload} /><DocumentCard title="Apostille" type="APOSTILLE" copy="Authenticates the issuing authority where required." upload={upload} /><DocumentCard title="Reduced Withholding Application" type="REDUCED_TAX_APPLICATION" copy="Application data for broker or partner submission." upload={upload} /></div>
       {profile && <RemoteBoundary state={documents}>{(items) => items.length ? <div className="document-status-list">{items.map((document) => <TaxDocumentRow key={document.id} document={document} refresh={documents.retry} />)}</div> : <StatusPanel title="No tax documents uploaded" message="Choose a PDF or permitted image above. Files are validated and encrypted before storage." />}</RemoteBoundary>}
     </section>
@@ -97,19 +97,35 @@ export function AuthPage({ returnTo }: { returnTo?: string }) {
   const [password, setPassword] = useState('')
   const [passwordConfirm, setPasswordConfirm] = useState('')
   const [nationality, setNationality] = useState('US')
-  const [investorType, setInvestorType] = useState('INDIVIDUAL')
+  const [investorType, setInvestorType] = useState<InvestorType>('INDIVIDUAL')
+  const [termsAccepted, setTermsAccepted] = useState(false)
+  const [privacyAccepted, setPrivacyAccepted] = useState(false)
+  const [idAvailability, setIdAvailability] = useState<'idle' | 'checking' | 'available' | 'unavailable'>('idle')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true); setError('')
     try {
-      if (mode === 'signup') { await signup({ loginId, password, passwordConfirm, nationality, investorType }); setMode('login'); setPassword(''); setPasswordConfirm(''); return }
+      if (mode === 'signup') {
+        const availability = await api<{ available: boolean }>(`/api/v1/auth/login-id-availability?loginId=${encodeURIComponent(loginId)}`, {}, false)
+        if (!availability.available) { setIdAvailability('unavailable'); setError('This login ID is already in use.'); return }
+        await signup({ loginId, password, passwordConfirm, nationality, investorType, termsAccepted, privacyAccepted })
+        setMode('login'); setPassword(''); setPasswordConfirm(''); setTermsAccepted(false); setPrivacyAccepted(false); return
+      }
       await login(loginId, password)
       window.location.hash = returnTo?.startsWith('#/') ? returnTo : appHash('account')
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Authentication failed.') }
     finally { setBusy(false) }
   }
-  return <div className="auth-screen"><section className="auth-brand"><a className="brand" href={appHash('home')}><span>K</span><b>K-Market<small>Navigator</small></b></a><div><p className="eyebrow">GLOBAL MARKET ACCESS</p><h1>Research Korea<br />with grounded<br />intelligence.</h1><p>Your watchlist, documents and chats are protected by server-side ownership checks.</p></div><small>Redis-backed JWT sessions · rotating refresh tokens · Argon2id passwords</small></section><section className="auth-form"><form onSubmit={submit}><p className="eyebrow">{mode === 'login' ? 'WELCOME BACK' : 'CREATE ACCOUNT'}</p><h2>{mode === 'login' ? 'Sign in to continue' : 'Join K-Market Navigator'}</h2><label>Login ID<input required minLength={4} maxLength={30} pattern="[A-Za-z0-9][A-Za-z0-9._-]{3,29}" autoComplete="username" value={loginId} onChange={(event) => setLoginId(event.target.value)} /></label><label>Password<input required type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={password} onChange={(event) => setPassword(event.target.value)} /></label>{mode === 'signup' && <><label>Confirm password<input required type="password" autoComplete="new-password" value={passwordConfirm} onChange={(event) => setPasswordConfirm(event.target.value)} /></label><div className="form-grid"><label>Nationality<input value={nationality} pattern="[A-Za-z]{2}" maxLength={2} onChange={(event) => setNationality(event.target.value.toUpperCase())} /></label><label>Investor type<select value={investorType} onChange={(event) => setInvestorType(event.target.value)}><option value="INDIVIDUAL">Individual</option><option value="CORPORATION">Corporation</option></select></label></div><p className="form-hint">Password: 12+ characters with upper/lowercase, number and symbol. By creating an account, you agree to the terms and privacy policy.</p></>}{error && <p className="form-error" role="alert">{error}</p>}<button className="primary full" disabled={busy}>{busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}</button><button type="button" className="text-button full" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError('') }}>{mode === 'login' ? 'Need an account? Sign up' : 'Already have an account? Sign in'}</button></form></section></div>
+  const checkLoginId = async () => {
+    if (mode !== 'signup' || !/^[A-Za-z0-9][A-Za-z0-9._-]{3,29}$/.test(loginId)) { setIdAvailability('idle'); return }
+    setIdAvailability('checking')
+    try {
+      const result = await api<{ available: boolean }>(`/api/v1/auth/login-id-availability?loginId=${encodeURIComponent(loginId)}`, {}, false)
+      setIdAvailability(result.available ? 'available' : 'unavailable')
+    } catch { setIdAvailability('idle') }
+  }
+  return <div className="auth-screen"><section className="auth-brand"><a className="brand" href={appHash('home')}><span>K</span><b>K-Market<small>Navigator</small></b></a><div><p className="eyebrow">GLOBAL MARKET ACCESS</p><h1>Research Korea<br />with grounded<br />intelligence.</h1><p>Your watchlist, documents and chats are protected by server-side ownership checks.</p></div><small>Redis-backed JWT sessions · rotating refresh tokens · Argon2id passwords</small></section><section className="auth-form"><form onSubmit={submit}><p className="eyebrow">{mode === 'login' ? 'WELCOME BACK' : 'CREATE ACCOUNT'}</p><h2>{mode === 'login' ? 'Sign in to continue' : 'Join K-Market Navigator'}</h2><label>Login ID<input required minLength={4} maxLength={30} pattern="[A-Za-z0-9][A-Za-z0-9._-]{3,29}" autoComplete="username" value={loginId} onChange={(event) => { setLoginId(event.target.value); setIdAvailability('idle') }} onBlur={() => void checkLoginId()} aria-describedby={mode === 'signup' ? 'login-id-status' : undefined} /></label>{mode === 'signup' && <small id="login-id-status" className={`availability ${idAvailability}`} aria-live="polite">{idAvailability === 'checking' ? 'Checking availability…' : idAvailability === 'available' ? '✓ Login ID is available.' : idAvailability === 'unavailable' ? 'This login ID is already in use.' : '4–30 letters, numbers, dots, underscores or hyphens.'}</small>}<label>Password<input required type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={password} onChange={(event) => setPassword(event.target.value)} /></label>{mode === 'signup' && <><label>Confirm password<input required type="password" autoComplete="new-password" value={passwordConfirm} onChange={(event) => setPasswordConfirm(event.target.value)} /></label><div className="form-grid"><label>Nationality<input required value={nationality} pattern="[A-Za-z]{2}" maxLength={2} onChange={(event) => setNationality(event.target.value.toUpperCase())} /></label><label>Investor type<select value={investorType} onChange={(event) => setInvestorType(event.target.value as InvestorType)}><option value="INDIVIDUAL">Individual</option><option value="CORPORATE">Corporation</option></select></label></div><p className="form-hint">Password: 12+ characters with upper/lowercase, number and symbol.</p><label className="consent"><input type="checkbox" required checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} /><span>I agree to the Terms of Service.</span></label><label className="consent"><input type="checkbox" required checked={privacyAccepted} onChange={(event) => setPrivacyAccepted(event.target.checked)} /><span>I agree to the Privacy Policy.</span></label></>}{error && <p className="form-error" role="alert">{error}</p>}<button className="primary full" disabled={busy || (mode === 'signup' && idAvailability === 'unavailable')}>{busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}</button><button type="button" className="text-button full" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError(''); setIdAvailability('idle') }}>{mode === 'login' ? 'Need an account? Sign up' : 'Already have an account? Sign in'}</button></form></section></div>
 }
 
 type WatchItem = { stockCode: string; nameKo: string; nameEn: string; market: string; addedAt: string }

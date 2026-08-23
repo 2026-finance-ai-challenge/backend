@@ -1,4 +1,4 @@
-import type { ApiProblem, Profile, TokenPair } from './types'
+import type { ApiProblem, InvestorType, Profile, TokenPair } from './types'
 
 const configuredBase = (import.meta as ImportMeta & { env?: Record<string, string | undefined> })
   .env?.VITE_API_BASE_URL?.trim()
@@ -137,10 +137,12 @@ export async function signup(input: {
   password: string
   passwordConfirm: string
   nationality: string
-  investorType: string
+  investorType: InvestorType
+  termsAccepted: boolean
+  privacyAccepted: boolean
 }): Promise<Profile> {
   return api<Profile>('/api/v1/auth/signup', {
     method: 'POST',
-    body: JSON.stringify({ ...input, termsAccepted: true, privacyAccepted: true }),
+    body: JSON.stringify(input),
   }, false)
 }
