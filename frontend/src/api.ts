@@ -1,4 +1,4 @@
-import type { ApiProblem, Profile, TokenPair } from './types'
+import type { ApiProblem, InvestorType, Profile, TokenPair } from './types'
 
 const configuredBase = (import.meta as ImportMeta & { env?: Record<string, string | undefined> })
   .env?.VITE_API_BASE_URL?.trim()
@@ -112,8 +112,8 @@ export async function api<T>(path: string, init: RequestInit = {}, allowRefresh 
     return api<T>(path, init, false)
   }
   if (!response.ok) throw new ApiError(await problemFrom(response))
-  if (response.status === 204) return undefined as T
-  return response.json() as Promise<T>
+  const text = await response.text()
+  return (text ? JSON.parse(text) : undefined) as T
 }
 
 export function queryString(values: Record<string, string | number | boolean | null | undefined>): string {
@@ -137,10 +137,12 @@ export async function signup(input: {
   password: string
   passwordConfirm: string
   nationality: string
-  investorType: string
+  investorType: InvestorType
+  termsAccepted: boolean
+  privacyAccepted: boolean
 }): Promise<Profile> {
   return api<Profile>('/api/v1/auth/signup', {
     method: 'POST',
-    body: JSON.stringify({ ...input, termsAccepted: true, privacyAccepted: true }),
+    body: JSON.stringify(input),
   }, false)
 }

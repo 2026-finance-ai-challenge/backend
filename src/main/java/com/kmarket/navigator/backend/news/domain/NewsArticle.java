@@ -20,6 +20,8 @@ public record NewsArticle(
 	NewsSentiment sentiment,
 	NewsImportance importance,
 	MarketImpact marketImpact,
+	NewsImportance marketImpactImportance,
+	BigDecimal marketImpactScore,
 	BigDecimal eventConfidence,
 	BigDecimal sentimentConfidence,
 	BigDecimal importanceConfidence,

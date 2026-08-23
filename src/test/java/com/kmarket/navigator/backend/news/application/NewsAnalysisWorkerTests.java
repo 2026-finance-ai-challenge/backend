@@ -87,6 +87,8 @@ class NewsAnalysisWorkerTests {
 			NewsSentiment.POSITIVE,
 			NewsImportance.HIGH,
 			MarketImpact.POSITIVE,
+			NewsImportance.MEDIUM,
+			new BigDecimal("0.55"),
 			new BigDecimal("0.90"),
 			new BigDecimal("0.80"),
 			new BigDecimal("0.85"),

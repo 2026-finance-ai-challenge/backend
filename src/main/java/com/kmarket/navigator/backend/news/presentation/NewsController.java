@@ -49,12 +49,15 @@ class NewsController {
 
 	@GetMapping
 	NewsPageResponse findAll(
+		@RequestParam(required = false) @Size(max = 120) String query,
 		@RequestParam(required = false)
 		@Pattern(regexp = "^[0-9A-Z]{6}$")
 		String stockCode,
 		@RequestParam(required = false) NewsSentiment sentiment,
 		@RequestParam(required = false) NewsImportance importance,
 		@RequestParam(required = false) MarketImpact marketImpact,
+		@RequestParam(required = false) NewsImportance marketImpactImportance,
+		@RequestParam(required = false) Boolean watchlist,
 		@RequestParam(required = false)
 		@DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
 		Instant from,
@@ -63,17 +66,25 @@ class NewsController {
 		Instant to,
 		@RequestParam(defaultValue = "LATEST") NewsSort sort,
 		@RequestParam(required = false) @Size(max = 160) String cursor,
-		@RequestParam(defaultValue = "20") @Min(1) @Max(50) int limit
+		@RequestParam(defaultValue = "20") @Min(1) @Max(50) int limit,
+		@AuthenticationPrincipal AuthenticatedUser user
 	) {
 		if (from != null && to != null && from.isAfter(to)) {
 			throw new BusinessException(ErrorCode.INVALID_DATE_RANGE);
 		}
+		if (Boolean.TRUE.equals(watchlist) && user == null) {
+			throw new BusinessException(ErrorCode.AUTHENTICATION_REQUIRED);
+		}
 		NewsCursor decoded = cursor == null || cursor.isBlank() ? null : NewsCursor.decode(cursor);
 		return NewsPageResponse.from(service.findAll(new NewsQuery(
+			query == null || query.isBlank() ? null : query.strip(),
 			stockCode,
 			sentiment,
 			importance,
 			marketImpact,
+			marketImpactImportance,
+			Boolean.TRUE.equals(watchlist),
+			user == null ? null : user.id(),
 			from,
 			to,
 			sort,

@@ -18,9 +18,9 @@ public final class NewsRanks {
 					case MEDIUM -> 2;
 					case LOW -> 1;
 				});
-			case MARKET_IMPACT -> article.marketImpactConfidence() == null
+			case MARKET_IMPACT -> article.marketImpactScore() == null
 				? BigDecimal.ZERO
-				: article.marketImpactConfidence();
+				: article.marketImpactScore();
 		};
 	}
 }

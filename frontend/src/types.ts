@@ -1,10 +1,12 @@
 export type ApiProblem = { code?: string; message?: string; status?: number; retryAfter?: string }
 
+export type InvestorType = 'INDIVIDUAL' | 'CORPORATE'
+
 export type Profile = {
   id: string
   loginId: string
   nationality: string
-  investorType: 'INDIVIDUAL' | 'CORPORATION'
+  investorType: InvestorType
   taxVerificationStatus: string
   createdAt: string
 }
@@ -98,6 +100,8 @@ export type NewsArticle = {
   sentiment: string | null
   importance: string | null
   marketImpact: string | null
+  marketImpactImportance: string | null
+  marketImpactScore: number | null
   confidence: Record<string, number | null>
   originalUrl: string
   publisher: string

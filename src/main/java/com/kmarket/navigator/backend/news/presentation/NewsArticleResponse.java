@@ -28,6 +28,8 @@ record NewsArticleResponse(
 	NewsSentiment sentiment,
 	NewsImportance importance,
 	MarketImpact marketImpact,
+	NewsImportance marketImpactImportance,
+	BigDecimal marketImpactScore,
 	Confidence confidence,
 	String originalUrl,
 	String publisher,
@@ -47,7 +49,8 @@ record NewsArticleResponse(
 			article.id(), article.clusterId(), article.originalTitle(), article.originalExcerpt(),
 			article.originalBody(), article.englishTitle(), article.englishBody(), article.what(),
 			article.why(), article.impact(), article.eventType(), article.sentiment(),
-			article.importance(), article.marketImpact(), new Confidence(
+			article.importance(), article.marketImpact(), article.marketImpactImportance(),
+			article.marketImpactScore(), new Confidence(
 				article.eventConfidence(), article.sentimentConfidence(),
 				article.importanceConfidence(), article.marketImpactConfidence()
 			), article.originalUrl(), article.publisher(), article.thumbnailUrl(),

@@ -16,6 +16,7 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
 import com.kmarket.navigator.backend.disclosure.infrastructure.ai.AiServiceProperties;
+import com.kmarket.navigator.backend.news.domain.NewsImportance;
 import com.kmarket.navigator.backend.news.domain.TermReference;
 
 class AiNewsClientTests {
@@ -48,6 +49,8 @@ class AiNewsClientTests {
 				  "sentiment": "POSITIVE",
 				  "importance": "HIGH",
 				  "market_impact": "POSITIVE",
+				  "market_impact_importance": "MEDIUM",
+				  "market_impact_score": 0.55,
 				  "event_confidence": 0.9,
 				  "sentiment_confidence": 0.8,
 				  "importance_confidence": 0.85,
@@ -63,6 +66,8 @@ class AiNewsClientTests {
 			List.of("삼성전자")
 		);
 		assertThat(analysis.englishTitle()).isEqualTo("Samsung Electronics expands investment");
+		assertThat(analysis.marketImpactImportance()).isEqualTo(NewsImportance.MEDIUM);
+		assertThat(analysis.marketImpactScore()).isEqualByComparingTo("0.55");
 		assertThat(analysis.promptVersion()).isEqualTo("news-analysis-v1");
 		server.verify();
 		server.reset();

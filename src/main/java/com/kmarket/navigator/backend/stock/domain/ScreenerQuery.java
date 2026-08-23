@@ -7,6 +7,8 @@ public record ScreenerQuery(
 	String sector,
 	BigDecimal minChangeRate,
 	BigDecimal maxChangeRate,
+	Long minVolume,
+	Long maxVolume,
 	Boolean tradingCaution,
 	Boolean watchlistOnly,
 	ScreenerSort sort,

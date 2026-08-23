@@ -90,6 +90,8 @@ public class AgentEvidenceProvider {
 		packet.put("sentiment", article.sentiment());
 		packet.put("importance", article.importance());
 		packet.put("marketImpact", article.marketImpact());
+		packet.put("marketImpactImportance", article.marketImpactImportance());
+		packet.put("marketImpactScore", article.marketImpactScore());
 		packet.put("analysisStatus", article.analysisStatus());
 		return List.of(new AgentEvidence(
 			"E1",

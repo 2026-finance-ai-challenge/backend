@@ -53,7 +53,12 @@ class JdbcNewsRepository implements NewsRepository {
 			       (SELECT COUNT(*) FROM news_article related
 			        WHERE related.cluster_id = article.cluster_id) AS related_coverage_count
 			FROM news_article article
-			WHERE (CAST(:stockCode AS varchar) IS NULL OR EXISTS (
+			WHERE (CAST(:query AS varchar) IS NULL
+			       OR article.original_title ILIKE '%%' || :query || '%%' ESCAPE '\\'
+			       OR article.original_excerpt ILIKE '%%' || :query || '%%' ESCAPE '\\'
+			       OR COALESCE(article.english_title, '') ILIKE '%%' || :query || '%%' ESCAPE '\\'
+			       OR COALESCE(article.english_body, '') ILIKE '%%' || :query || '%%' ESCAPE '\\')
+			  AND (CAST(:stockCode AS varchar) IS NULL OR EXISTS (
 			    SELECT 1
 			    FROM news_article_security article_security
 			    JOIN security security_filter ON security_filter.id = article_security.security_id
@@ -63,6 +68,16 @@ class JdbcNewsRepository implements NewsRepository {
 			  AND (CAST(:sentiment AS varchar) IS NULL OR article.sentiment = :sentiment)
 			  AND (CAST(:importance AS varchar) IS NULL OR article.importance = :importance)
 			  AND (CAST(:marketImpact AS varchar) IS NULL OR article.market_impact = :marketImpact)
+			  AND (CAST(:marketImpactImportance AS varchar) IS NULL
+			       OR article.market_impact_importance = :marketImpactImportance)
+			  AND (CAST(:watchlistOnly AS boolean) = FALSE OR EXISTS (
+			    SELECT 1
+			    FROM news_article_security watched_article
+			    JOIN watchlist_item watched
+			      ON watched.security_id = watched_article.security_id
+			    WHERE watched_article.article_id = article.id
+			      AND watched.user_id = :watchlistUserId
+			  ))
 			  AND (CAST(:fromTime AS timestamptz) IS NULL OR article.published_at >= :fromTime)
 			  AND (CAST(:toTime AS timestamptz) IS NULL OR article.published_at <= :toTime)
 			  AND (
@@ -74,6 +89,7 @@ class JdbcNewsRepository implements NewsRepository {
 			ORDER BY %s DESC, article.published_at DESC, article.id DESC
 			LIMIT :limit
 			""".formatted(rank, rank, rank, rank));
+		statement = nullable(statement, "query", escapeLike(query.query()), Types.VARCHAR);
 		statement = nullable(statement, "stockCode", query.stockCode(), Types.VARCHAR);
 		statement = nullable(
 			statement,
@@ -93,6 +109,14 @@ class JdbcNewsRepository implements NewsRepository {
 			query.marketImpact() == null ? null : query.marketImpact().name(),
 			Types.VARCHAR
 		);
+		statement = nullable(
+			statement,
+			"marketImpactImportance",
+			query.marketImpactImportance() == null ? null : query.marketImpactImportance().name(),
+			Types.VARCHAR
+		);
+		statement = statement.param("watchlistOnly", query.watchlistOnly());
+		statement = nullable(statement, "watchlistUserId", query.userId(), Types.OTHER);
 		statement = nullable(statement, "fromTime", atUtc(query.from()), Types.TIMESTAMP_WITH_TIMEZONE);
 		statement = nullable(statement, "toTime", atUtc(query.to()), Types.TIMESTAMP_WITH_TIMEZONE);
 		statement = nullable(
@@ -130,6 +154,10 @@ class JdbcNewsRepository implements NewsRepository {
 			).encode()
 			: null;
 		return new NewsPage(items, nextCursor);
+	}
+
+	private String escapeLike(String value) {
+		return value == null ? null : value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
 	}
 
 	@Override
@@ -385,7 +413,10 @@ class JdbcNewsRepository implements NewsRepository {
 			    what_summary = :whatSummary, why_summary = :whySummary,
 			    impact_summary = :impactSummary, event_type = :eventType,
 			    sentiment = :sentiment, importance = :importance,
-			    market_impact = :marketImpact, event_confidence = :eventConfidence,
+			    market_impact = :marketImpact,
+			    market_impact_importance = :marketImpactImportance,
+			    market_impact_score = :marketImpactScore,
+			    event_confidence = :eventConfidence,
 			    sentiment_confidence = :sentimentConfidence,
 			    importance_confidence = :importanceConfidence,
 			    market_impact_confidence = :marketImpactConfidence,
@@ -403,6 +434,8 @@ class JdbcNewsRepository implements NewsRepository {
 			.param("sentiment", analysis.sentiment().name())
 			.param("importance", analysis.importance().name())
 			.param("marketImpact", analysis.marketImpact().name())
+			.param("marketImpactImportance", analysis.marketImpactImportance().name())
+			.param("marketImpactScore", analysis.marketImpactScore())
 			.param("eventConfidence", analysis.eventConfidence())
 			.param("sentimentConfidence", analysis.sentimentConfidence())
 			.param("importanceConfidence", analysis.importanceConfidence())
@@ -537,7 +570,8 @@ class JdbcNewsRepository implements NewsRepository {
 			article.id(), article.clusterId(), article.originalTitle(), article.originalExcerpt(),
 			article.originalBody(), article.englishTitle(), article.englishBody(), article.what(),
 			article.why(), article.impact(), article.eventType(), article.sentiment(),
-			article.importance(), article.marketImpact(), article.eventConfidence(),
+			article.importance(), article.marketImpact(), article.marketImpactImportance(),
+			article.marketImpactScore(), article.eventConfidence(),
 			article.sentimentConfidence(), article.importanceConfidence(),
 			article.marketImpactConfidence(), article.originalUrl(), article.canonicalUrl(),
 			article.publisher(), article.thumbnailUrl(), article.contentAvailability(),
@@ -584,6 +618,11 @@ class JdbcNewsRepository implements NewsRepository {
 			enumValue(NewsSentiment.class, resultSet.getString("sentiment")),
 			enumValue(NewsImportance.class, resultSet.getString("importance")),
 			enumValue(MarketImpact.class, resultSet.getString("market_impact")),
+			enumValue(
+				NewsImportance.class,
+				resultSet.getString("market_impact_importance")
+			),
+			resultSet.getBigDecimal("market_impact_score"),
 			resultSet.getBigDecimal("event_confidence"),
 			resultSet.getBigDecimal("sentiment_confidence"),
 			resultSet.getBigDecimal("importance_confidence"),
@@ -612,7 +651,7 @@ class JdbcNewsRepository implements NewsRepository {
 				  WHEN 'CRITICAL' THEN 4 WHEN 'HIGH' THEN 3
 				  WHEN 'MEDIUM' THEN 2 WHEN 'LOW' THEN 1 ELSE 0 END
 				""";
-			case MARKET_IMPACT -> "COALESCE(article.market_impact_confidence, 0)";
+			case MARKET_IMPACT -> "COALESCE(article.market_impact_score, 0)";
 		};
 	}
 

@@ -76,6 +76,10 @@ public class MarketService {
 			&& query.minChangeRate().compareTo(query.maxChangeRate()) > 0) {
 			throw new BusinessException(ErrorCode.INVALID_REQUEST);
 		}
+		if (query.minVolume() != null && query.maxVolume() != null
+			&& query.minVolume() > query.maxVolume()) {
+			throw new BusinessException(ErrorCode.INVALID_REQUEST);
+		}
 		return repository.findStocks(userId(user)).stream()
 			.map(this::normalizeView)
 			.filter(view -> matches(query, view))
@@ -199,9 +203,17 @@ public class MarketService {
 				|| view.quote().changeRate().compareTo(query.minChangeRate()) < 0)) {
 			return false;
 		}
-		return query.maxChangeRate() == null
-			|| (view.quote() != null
-				&& view.quote().changeRate().compareTo(query.maxChangeRate()) <= 0);
+		if (query.maxChangeRate() != null
+			&& (view.quote() == null
+				|| view.quote().changeRate().compareTo(query.maxChangeRate()) > 0)) {
+			return false;
+		}
+		if (query.minVolume() != null
+			&& (view.quote() == null || view.quote().volume() < query.minVolume())) {
+			return false;
+		}
+		return query.maxVolume() == null
+			|| (view.quote() != null && view.quote().volume() <= query.maxVolume());
 	}
 
 	private Comparator<StockMarketView> comparator(ScreenerSort sort) {

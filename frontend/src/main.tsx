@@ -33,7 +33,12 @@ function contextFor(location: AppLocation): AgentContext {
   if (location.route === 'stock-detail') return { type: 'STOCK', referenceId: location.id, title: `Stock ${location.id}` }
   if (location.route === 'news-detail') return { type: 'NEWS', referenceId: location.id, title: 'Current news article' }
   if (location.route === 'filing-detail') return { type: 'FILING', referenceId: location.id, title: `DART filing ${location.id}` }
-  if (location.route === 'tax') return { type: 'TAX_GUIDE', title: 'Tax guide' }
+  if (location.route === 'tax') {
+    const country = (location.query.get('country') || '').toUpperCase()
+    const investorType = (location.query.get('investorType') || '').toUpperCase()
+    const referenceId = /^[A-Z]{2}$/.test(country) && /^(INDIVIDUAL|CORPORATE)$/.test(investorType) ? `${country}:${investorType}` : undefined
+    return { type: 'TAX_GUIDE', referenceId, title: referenceId ? `Tax guide · ${referenceId}` : 'Tax guide' }
+  }
   return { type: 'GENERAL', title: 'Korean market' }
 }
 
@@ -47,7 +52,11 @@ function RouteView({ location }: { location: AppLocation }) {
     case 'dart': return <DartPage />
     case 'filing-detail': return <FilingDetailPage receiptNumber={location.id!} />
     case 'stock-detail': return <StockPage stockCode={location.id!} />
-    case 'tax': return <TaxPage />
+    case 'tax': {
+      const country = (location.query.get('country') || '').toUpperCase()
+      const investorType = (location.query.get('investorType') || '').toUpperCase()
+      return <TaxPage initialCountry={/^[A-Z]{2}$/.test(country) ? country : undefined} initialInvestorType={/^(INDIVIDUAL|CORPORATE)$/.test(investorType) ? investorType as 'INDIVIDUAL' | 'CORPORATE' : undefined} />
+    }
     case 'account': return <AccountPage />
     case 'auth': return <AuthPage returnTo={location.query.get('returnTo') || undefined} />
   }

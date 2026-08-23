@@ -67,10 +67,26 @@ export function RemoteBoundary<T>({ state, children, empty, className }: {
   if (state.loading && state.data === null) return <div className={`skeleton-stack ${className || ''}`} aria-label="Loading"><i /><i /><i /></div>
   if (state.error) {
     const rateLimited = state.error.status === 429
+    const unauthorized = state.error.status === 401
+    const forbidden = state.error.status === 403
+    const unsupported = state.error.code === 'UNSUPPORTED_STOCK'
+    const aiFailure = state.error.code.startsWith('AI_') || state.error.code.includes('PROVIDER')
+    const title = rateLimited ? 'Usage limit reached'
+      : unauthorized ? 'Sign in required'
+        : forbidden ? 'You do not have access to this resource'
+          : unsupported ? 'Unsupported stock'
+            : aiFailure ? 'AI analysis is temporarily unavailable'
+              : 'This section is temporarily unavailable'
+    const message = rateLimited && state.error.retryAfter ? `Try again after ${state.error.retryAfter}.`
+      : unsupported ? 'K-Market Navigator supports the published 75-stock universe only.'
+        : state.error.message
+    const action = unauthorized
+      ? { label: 'Sign in', run: () => navigate('auth', undefined, { returnTo: window.location.hash }) }
+      : forbidden || unsupported ? undefined : { label: 'Retry', run: state.retry }
     return <StatusPanel
-      title={rateLimited ? 'Usage limit reached' : 'This section is temporarily unavailable'}
-      message={rateLimited && state.error.retryAfter ? `Try again after ${state.error.retryAfter}.` : state.error.message}
-      action={{ label: 'Retry', run: state.retry }} tone={rateLimited ? 'warning' : 'error'}
+      title={title}
+      message={message}
+      action={action} tone={rateLimited || unsupported ? 'warning' : 'error'}
     />
   }
   if (state.data === null) return null
@@ -125,25 +141,28 @@ function SearchBox() {
       aria-label="Search supported stocks" placeholder="Search name or 6-digit code" autoComplete="off" />
     {loading && <span className="mini-loader" aria-label="Searching" />}
     {open && <div className="search-popover">
-      {items.map((stock) => <a key={stock.stockCode} href={appHash('stock-detail', stock.stockCode)}>
+      {items.map((stock) => <div className="search-result-row" key={stock.stockCode}><a href={appHash('stock-detail', stock.stockCode)}>
         <span className="stock-avatar">{stock.nameEn?.slice(0, 1) || stock.nameKo.slice(0, 1)}</span>
         <span><b>{stock.nameEn || stock.nameKo}</b><small>{stock.nameKo} · {stock.stockCode} · {stock.market}</small></span>
-        <button type="button" className="heart" aria-label={`${stock.watchlisted ? 'Remove from' : 'Add to'} watchlist`}
-          onClick={(event) => void toggleWatchlist(event, stock)}>{stock.watchlisted ? '♥' : '♡'}</button>
-      </a>)}
+      </a><button type="button" className="heart" aria-label={`${stock.watchlisted ? 'Remove from' : 'Add to'} watchlist`}
+        onClick={(event) => void toggleWatchlist(event, stock)}>{stock.watchlisted ? '♥' : '♡'}</button></div>)}
       {!loading && items.length === 0 && <div className="search-empty">No supported stock found in the 75-stock universe.</div>}
       <button type="submit" className="view-all">View all results for “{query}” →</button>
     </div>}
   </form>
 }
 
-type NotificationItem = { id: string; title: string; body: string; read: boolean; createdAt: string }
+type NotificationItem = { id: string; title: string; body: string; referenceType: string | null; referenceId: string | null; read: boolean; createdAt: string }
 
 function NotificationMenu() {
   const profile = useProfile()
   const [open, setOpen] = useState(false)
   const [items, setItems] = useState<NotificationItem[]>([])
   const unread = items.filter((item) => !item.read).length
+  useEffect(() => {
+    if (!profile) { setItems([]); return }
+    void api<{ items: NotificationItem[] }>('/api/v1/me/notifications?limit=20').then((result) => setItems(result.items)).catch(() => setItems([]))
+  }, [profile])
   const toggle = async () => {
     if (!profile) { navigate('auth'); return }
     setOpen((value) => !value)
@@ -151,11 +170,22 @@ function NotificationMenu() {
       try { setItems((await api<{ items: NotificationItem[] }>('/api/v1/me/notifications?limit=20')).items) } catch { setItems([]) }
     }
   }
+  const openItem = async (item: NotificationItem) => {
+    if (!item.read) {
+      await api(`/api/v1/me/notifications/${item.id}/read`, { method: 'PUT' })
+      setItems((all) => all.map((current) => current.id === item.id ? { ...current, read: true } : current))
+    }
+    setOpen(false)
+    if (item.referenceType === 'STOCK' && item.referenceId) navigate('stock-detail', item.referenceId)
+    if (item.referenceType === 'NEWS' && item.referenceId) navigate('news-detail', item.referenceId)
+    if (item.referenceType === 'FILING' && item.referenceId) navigate('filing-detail', item.referenceId)
+    if (item.referenceType === 'TAX') navigate('tax')
+  }
   return <div className="popover-anchor">
     <button className="icon-button" onClick={() => void toggle()} aria-label="Notifications">♧{unread > 0 && <b>{unread}</b>}</button>
     {open && <div className="notification-popover">
       <div className="popover-title"><b>Notifications</b><button onClick={() => void api('/api/v1/me/notifications/read-all', { method: 'PUT' }).then(() => setItems((all) => all.map((item) => ({ ...item, read: true }))))}>Mark all read</button></div>
-      {items.map((item) => <article className={item.read ? '' : 'unread'} key={item.id}><b>{item.title}</b><p>{item.body}</p><small>{formatDate(item.createdAt)}</small></article>)}
+      {items.map((item) => <button className={`notification-item ${item.read ? '' : 'unread'}`} key={item.id} onClick={() => void openItem(item)}><b>{item.title}</b><p>{item.body}</p><small>{formatDate(item.createdAt)}</small></button>)}
       {!items.length && <p className="empty-copy">No notifications yet.</p>}
     </div>}
   </div>
@@ -167,7 +197,11 @@ type RawGeneration = { id: string; status: string; errorCode: string | null }
 
 export type AgentContext = { type: 'GENERAL' | 'STOCK' | 'NEWS' | 'FILING' | 'TAX_GUIDE'; referenceId?: string; title?: string }
 
-function AgentPanel({ context, close }: { context: AgentContext; close: () => void }) {
+export function openAgent(prompt = ''): void {
+  window.dispatchEvent(new CustomEvent('kmarket:open-agent', { detail: { prompt } }))
+}
+
+function AgentPanel({ context, close, initialPrompt, promptNonce }: { context: AgentContext; close: () => void; initialPrompt: string; promptNonce: number }) {
   const profile = useProfile()
   const [rooms, setRooms] = useState<RawRoom[]>([])
   const [room, setRoom] = useState<RawRoom | null>(null)
@@ -175,15 +209,22 @@ function AgentPanel({ context, close }: { context: AgentContext; close: () => vo
   const [input, setInput] = useState('')
   const [generation, setGeneration] = useState<RawGeneration | null>(null)
   const [drawer, setDrawer] = useState(false)
+  const [roomQuery, setRoomQuery] = useState('')
   const [error, setError] = useState('')
 
   const reloadRooms = async () => {
     if (!profile) return
     const result = await api<RawRoom[]>('/api/v1/me/chats')
     setRooms(result)
-    if (!room && result[0]) setRoom(result[0])
+    if (!room) {
+      const contextual = context.referenceId
+        ? result.find((item) => item.context.type === context.type && item.context.referenceId === context.referenceId)
+        : result[0]
+      setRoom(contextual || null)
+    }
   }
   useEffect(() => { void reloadRooms().catch(() => setError('Chat rooms could not be loaded.')) }, [profile]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (initialPrompt) setInput(initialPrompt) }, [initialPrompt, promptNonce])
   useEffect(() => {
     if (!room) { setMessages([]); return }
     api<RawMessage[]>(`/api/v1/me/chats/${room.id}/messages`).then(setMessages).catch(() => setError('Messages could not be loaded.'))
@@ -240,16 +281,26 @@ function AgentPanel({ context, close }: { context: AgentContext; close: () => vo
     const rest = rooms.filter((item) => item.id !== target.id); setRooms(rest); if (room?.id === target.id) setRoom(rest[0] || null)
   }
 
+  const regenerate = async (message: RawMessage) => {
+    if (!room) return
+    setError('')
+    try {
+      setGeneration(await api<RawGeneration>(`/api/v1/me/chats/${room.id}/messages/${message.id}/regenerate`, { method: 'POST', body: JSON.stringify({ requestKey: crypto.randomUUID() }) }))
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'The answer could not be regenerated.') }
+  }
+
+  const visibleRooms = rooms.filter((item) => item.name.toLowerCase().includes(roomQuery.trim().toLowerCase()))
+
   if (!profile) return <aside className="agent-panel" aria-label="AI Agent"><div className="agent-head"><b>K-Market AI</b><button onClick={close}>×</button></div><StatusPanel title="Sign in to start a chat" message="Your rooms and conversation history are protected by account ownership checks." action={{ label: 'Sign in', run: () => navigate('auth') }} /></aside>
 
   return <aside className="agent-panel" aria-label="AI Agent">
     <div className="agent-head"><button onClick={() => setDrawer((value) => !value)} aria-label="Chat rooms">☰</button><div><small>{room?.context.type || context.type}</small><b>{room?.name || 'New market chat'}</b></div><button onClick={close} aria-label="Close AI Agent">×</button></div>
-    {drawer && <div className="chat-drawer"><button className="primary compact" onClick={() => void createRoom()}>＋ New chat</button>{rooms.map((item) => <div className={room?.id === item.id ? 'active' : ''} key={item.id}><button onClick={() => { setRoom(item); setDrawer(false) }}><b>{item.name}</b><small>{item.context.type} · {formatDate(item.lastMessageAt)}</small></button><button onClick={() => void rename(item)}>✎</button><button onClick={() => void remove(item)}>×</button></div>)}</div>}
+    {drawer && <div className="chat-drawer"><button className="primary compact" onClick={() => void createRoom()}>＋ New chat</button><input className="chat-search" value={roomQuery} onChange={(event) => setRoomQuery(event.target.value)} placeholder="Search chats" aria-label="Search chat rooms" />{visibleRooms.map((item) => <div className={room?.id === item.id ? 'active' : ''} key={item.id}><button onClick={() => { setRoom(item); setDrawer(false) }}><b>{item.name}</b><small>{item.context.type} · {formatDate(item.lastMessageAt)}</small></button><button onClick={() => void rename(item)}>✎</button><button onClick={() => void remove(item)}>×</button></div>)}{!visibleRooms.length && <p className="empty-copy">No matching chats.</p>}</div>}
     <div className="context-chip"><b>{room?.context.type || context.type}</b><span>{room?.context.title || context.title || 'Korean market information'}</span></div>
     <div className="messages">
       {!room && <div className="agent-welcome"><span>AI</span><h3>Ask with a verified context</h3><p>Live price, filing and news claims are retrieved by the server. The model does not invent current market values.</p><button className="primary" onClick={() => void createRoom()}>Start this chat</button></div>}
       {room && !messages.length && <div className="quick-prompts"><p>Try asking:</p>{['Summarize the current context', 'What risks should a global investor verify?', 'Show me the supporting sources'].map((text) => <button key={text} onClick={() => setInput(text)}>{text}</button>)}</div>}
-      {messages.map((message) => <article className={`message ${message.role.toLowerCase()}`} key={message.id}><b>{message.role === 'USER' ? 'You' : 'K-Market AI'}</b><p>{message.content}</p>{message.insufficientEvidence && <span className="evidence-warning">Insufficient filing evidence</span>}{message.citations?.map((citation) => <a key={citation.id} href={citation.url || '#'} target={citation.url ? '_blank' : undefined} rel="noreferrer">↗ {citation.title}</a>)}{message.disclaimer && <small>{message.disclaimer}</small>}<button className="copy-action" onClick={() => void navigator.clipboard.writeText(message.content)}>Copy</button></article>)}
+      {messages.map((message) => <article className={`message ${message.role.toLowerCase()}`} key={message.id}><b>{message.role === 'USER' ? 'You' : 'K-Market AI'}</b><p>{message.content}</p>{message.insufficientEvidence && <span className="evidence-warning">Insufficient filing evidence</span>}{message.citations?.map((citation) => <a key={citation.id} href={citation.url || '#'} target={citation.url ? '_blank' : undefined} rel="noreferrer">↗ {citation.title}</a>)}{message.disclaimer && <small>{message.disclaimer}</small>}<div className="message-actions"><button onClick={() => void navigator.clipboard.writeText(message.content)}>Copy</button>{message.role === 'ASSISTANT' && <button onClick={() => void regenerate(message)}>Regenerate</button>}</div></article>)}
       {generation && ['PENDING', 'PROCESSING'].includes(generation.status) && <div className="generating"><span /><p>Checking server sources and composing an answer…</p><button onClick={() => room && void api<RawGeneration>(`/api/v1/me/chats/${room.id}/generations/${generation.id}/stop`, { method: 'POST' }).then(setGeneration)}>Stop</button></div>}
       {generation?.status === 'FAILED' && <StatusPanel title="AI answer failed" message={generation.errorCode || 'The provider could not complete this answer.'} action={{ label: 'Retry', run: () => room && void api<RawGeneration>(`/api/v1/me/chats/${room.id}/generations/${generation.id}/retry`, { method: 'POST' }).then(setGeneration) }} tone="error" />}
       {error && <p className="agent-error" role="alert">{error}</p>}
@@ -258,28 +309,40 @@ function AgentPanel({ context, close }: { context: AgentContext; close: () => vo
   </aside>
 }
 
-const nav: Array<{ route: RouteName; label: string }> = [
-  { route: 'home', label: 'Market' }, { route: 'screener', label: 'Screener' },
-  { route: 'news', label: 'News' }, { route: 'dart', label: 'DART Intelligence' }, { route: 'tax', label: 'Tax Guide' },
+const nav: Array<{ route: RouteName; label: string; labelKo: string }> = [
+  { route: 'home', label: 'Market', labelKo: '시장' }, { route: 'screener', label: 'Screener', labelKo: '종목 탐색' },
+  { route: 'news', label: 'News', labelKo: '뉴스' }, { route: 'dart', label: 'DART Intelligence', labelKo: '공시 인텔리전스' }, { route: 'tax', label: 'Tax Guide', labelKo: '세무 가이드' },
 ]
 
 export function AppShell({ location, context, children }: { location: AppLocation; context: AgentContext; children: ReactNode }) {
   const profile = useProfile()
   const [agent, setAgent] = useState(false)
+  const [agentPrompt, setAgentPrompt] = useState({ value: '', nonce: 0 })
   const [mobileMenu, setMobileMenu] = useState(false)
   const [locale, setLocale] = useState<Locale>('en')
   useEffect(() => setMobileMenu(false), [location.route, location.id])
+  useEffect(() => { document.documentElement.lang = locale === 'ko' ? 'ko' : 'en' }, [locale])
+  useEffect(() => {
+    const open = (event: Event) => {
+      const prompt = event instanceof CustomEvent && typeof event.detail?.prompt === 'string' ? event.detail.prompt : ''
+      setAgentPrompt((current) => ({ value: prompt, nonce: current.nonce + 1 }))
+      setAgent(true)
+    }
+    window.addEventListener('kmarket:open-agent', open)
+    return () => window.removeEventListener('kmarket:open-agent', open)
+  }, [])
   const active = location.route === 'stock-detail' ? 'screener' : location.route === 'filing-detail' ? 'dart' : location.route === 'news-detail' ? 'news' : location.route
   return <div className={`app-shell ${agent ? 'agent-open' : ''}`}>
     <header className="gnb">
       <a className="brand" href={appHash('home')} aria-label="K-Market Navigator home"><span>K</span><b>K-Market<small>Navigator</small></b></a>
       <button className="mobile-menu" onClick={() => setMobileMenu((value) => !value)} aria-label="Toggle navigation">☰</button>
-      <nav className={mobileMenu ? 'open' : ''}>{nav.map((item) => <a className={active === item.route ? 'active' : ''} key={item.route} href={appHash(item.route)}>{item.label}</a>)}</nav>
+      <nav className={mobileMenu ? 'open' : ''}>{nav.map((item) => <a className={active === item.route ? 'active' : ''} key={item.route} href={appHash(item.route)}>{item.label}{locale === 'ko' && <small>{item.labelKo}</small>}</a>)}</nav>
       <SearchBox />
       <div className="gnb-actions"><button className="language" onClick={() => setLocale(locale === 'en' ? 'ko' : 'en')} aria-label="Change language">{locale.toUpperCase()}</button><NotificationMenu /><button className="agent-trigger" onClick={() => setAgent(true)}>✦ <span>AI Agent</span></button>{profile ? <a className="profile-link" href={appHash('account')}><span>{profile.loginId.slice(0, 1).toUpperCase()}</span><b>{profile.loginId}</b></a> : <a className="login-link" href={appHash('auth')}>Log in</a>}</div>
     </header>
+    {locale === 'ko' && <div className="locale-note" role="status">English primary · 주요 탐색 레이블을 한국어로 함께 표시합니다.</div>}
     <main>{children}</main>
-    {agent && <AgentPanel context={context} close={() => setAgent(false)} />}
+    {agent && <AgentPanel context={context} close={() => setAgent(false)} initialPrompt={agentPrompt.value} promptNonce={agentPrompt.nonce} />}
     {agent && <button className="agent-backdrop" onClick={() => setAgent(false)} aria-label="Close AI Agent overlay" />}
   </div>
 }
@@ -296,6 +359,7 @@ export function NewsCard({ article }: { article: NewsArticle }) {
     <div className="news-image">{article.thumbnailUrl ? <img src={article.thumbnailUrl} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span>KM</span>}</div>
     <div className="news-tags"><span className={`sentiment ${(article.sentiment || '').toLowerCase()}`}>{article.sentiment || 'Pending'}</span><span>{article.importance || 'Unrated'}</span>{article.relatedCoverageCount > 1 && <span>＋{article.relatedCoverageCount - 1} related</span>}</div>
     <h3>{article.englishTitle || article.originalTitle}</h3><p>{article.what || article.originalExcerpt || 'AI analysis is pending.'}</p>
+    <div className="news-card-insight"><span>AI INSIGHT</span><dl><div><dt>What</dt><dd>{article.what || 'Unavailable'}</dd></div><div><dt>Why</dt><dd>{article.why || 'Unavailable'}</dd></div><div><dt>Impact</dt><dd>{article.impact || 'Unavailable'}</dd></div></dl></div>
     <footer><span>{article.publisher}</span><time>{formatDate(article.publishedAt)}</time></footer>
   </a>
 }

@@ -965,6 +965,17 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 		Map<String, Object> parameters,
 		DisclosureListQuery query
 	) {
+		if (query.query() != null) {
+			sql.append("""
+				 AND (
+				     d.title_ko ILIKE '%' || :query || '%' ESCAPE '\\'
+				     OR i.name_ko ILIKE '%' || :query || '%' ESCAPE '\\'
+				     OR COALESCE(i.name_en, '') ILIKE '%' || :query || '%' ESCAPE '\\'
+				     OR s.stock_code ILIKE '%' || :query || '%' ESCAPE '\\'
+				 )
+				""");
+			parameters.put("query", escapeLike(query.query()));
+		}
 		if (query.stockCode() != null) {
 			sql.append(" AND s.stock_code = :stockCode");
 			parameters.put("stockCode", query.stockCode());
@@ -987,6 +998,10 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			}
 			sql.append(" AND d.disclosure_type IN (").append(String.join(", ", names)).append(')');
 		}
+		if (query.correction() != null) {
+			sql.append(" AND d.correction = :correction");
+			parameters.put("correction", query.correction());
+		}
 		if (query.cursor() != null) {
 			sql.append("""
 				 AND (
@@ -997,6 +1012,10 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			parameters.put("cursorDate", query.cursor().filedDate());
 			parameters.put("cursorReceiptNumber", query.cursor().receiptNumber());
 		}
+	}
+
+	private String escapeLike(String value) {
+		return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
 	}
 
 	private DisclosureSummary mapSummary(ResultSet resultSet, int rowNumber) throws SQLException {
