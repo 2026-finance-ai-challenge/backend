@@ -114,6 +114,21 @@ public enum ErrorCode {
 		"AI_RATE_LIMITED",
 		"The AI request limit was reached. Try again later."
 	),
+	TRANSLATION_NOT_FOUND(
+		HttpStatus.NOT_FOUND,
+		"TRANSLATION_NOT_FOUND",
+		"A translation has not been requested for the current source version."
+	),
+	SOURCE_CONTENT_UNAVAILABLE(
+		HttpStatus.CONFLICT,
+		"SOURCE_CONTENT_UNAVAILABLE",
+		"The source content is unavailable for translation."
+	),
+	TRANSLATION_GENERATION_IN_PROGRESS(
+		HttpStatus.CONFLICT,
+		"TRANSLATION_GENERATION_IN_PROGRESS",
+		"The same source translation is already being generated."
+	),
 	GLOBAL_PEER_DATA_UNAVAILABLE(
 		HttpStatus.NOT_FOUND,
 		"GLOBAL_PEER_DATA_UNAVAILABLE",
@@ -150,6 +165,11 @@ public enum ErrorCode {
 		"Secure tax document storage is temporarily unavailable."
 	),
 	DISCLOSURE_NOT_FOUND(HttpStatus.NOT_FOUND, "DISCLOSURE_NOT_FOUND", "The disclosure was not found."),
+	DISCLOSURE_SECTION_NOT_FOUND(
+		HttpStatus.NOT_FOUND,
+		"DISCLOSURE_SECTION_NOT_FOUND",
+		"The section does not belong to the current disclosure document version."
+	),
 	DISCLOSURE_INDEX_NOT_READY(
 		HttpStatus.CONFLICT,
 		"DISCLOSURE_INDEX_NOT_READY",

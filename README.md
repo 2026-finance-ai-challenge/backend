@@ -161,7 +161,7 @@ docker compose up --build -d
 관심종목·최근 조회·알림함 API는 [사용자 개인화 API 문서](docs/PERSONALIZATION_API.md)를 따르며 모든 조회·수정에서 JWT 사용자 소유권을 검증한다.
 뉴스 수집·중복 묶음·OpenAI 구조화 분석·선택 문맥 해설은 [뉴스 인텔리전스 API 문서](docs/NEWS_API.md)를 따른다.
 정정 버전 연결·구조화 원문·근거 고정 What/Why/Impact 요약은 [공시 인텔리전스 API 문서](docs/DISCLOSURE_API.md)를 따른다.
-목록 제목 비동기 선번역, 뉴스·공시 본문 온디맨드 공유 캐시와 한글 원문 기반 영어 RAG 원칙은 [번역·RAG 설계 문서](docs/TRANSLATION_AND_RAG.md)를 따른다. 이 개선은 구현 현황에서 완료로 전환되기 전까지 설계 기준으로 취급한다.
+목록 제목 비동기 선번역, 뉴스·공시 본문 온디맨드 공유 캐시와 한글 원문 기반 영어 RAG 원칙은 [번역·RAG 설계 문서](docs/TRANSLATION_AND_RAG.md)를 따른다. 제목은 중복 원문 해시별 배치 작업으로 처리하며 본문·요약·공시 섹션은 최초 요청 후 전 사용자에게 재사용한다.
 채팅방 생성·목록·문맥 복원·낙관적 잠금 이름 변경·삭제 보존 정책은 [AI Agent 채팅방 API 문서](docs/CHAT_API.md)를 따른다.
 국가별 조세조약 세율 안내와 암호화 OCR 문서 검증은 [세무 자격·문서 검증 API 문서](docs/TAX_API.md)를 따른다.
 글로벌 피어 랭킹과 비교 인사이트는 [글로벌 피어 API 문서](docs/GLOBAL_PEER_API.md)를 따른다.

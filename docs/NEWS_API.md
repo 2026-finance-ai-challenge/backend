@@ -36,7 +36,7 @@
 | `PENDING` | 분류·제목 번역 또는 사용자가 요청한 본문 생성 작업 대기 |
 | `PROCESSING` | 임대 기반으로 워커가 점유한 작업 |
 | `READY` | 해당 작업의 구조화 응답 검증과 저장 완료 |
-| `FAILED` | 최대 5회 실패해 자동 재시도가 종료됨 |
+| `FAILED` | 제목·온디맨드 번역은 최대 10회, 분류는 최대 5회 실패해 자동 재시도가 종료됨 |
 
 분류, 제목 번역, 본문·Insight 생성 상태는 서로 독립적으로 관리한다. 분류 또는 제목 번역 실패가 원문 저장을 취소하지 않는다. 작업은 PostgreSQL의 `FOR UPDATE SKIP LOCKED`와 임대 만료 회수를 사용하고, 온디맨드 생성은 Redis 분산 잠금과 PostgreSQL 유일 제약으로 중복을 막는다.
 
@@ -62,4 +62,4 @@
 
 OpenAI 모델과 프롬프트 버전은 AI 서비스의 `KMARKET_AI_NEWS_MODEL`, `KMARKET_AI_NEWS_PROMPT_VERSION`, `KMARKET_AI_TERM_PROMPT_VERSION`으로 관리한다. 분류 런타임은 Hana 프로젝트 경로, 허용 commit과 모델 SHA-256으로 고정한다. KF-DeBERTa v6 후보는 공식 gate가 `KEEP_CURRENT_MODEL`이므로 활성 모델로 표기하지 않는다. API 키는 AI 서비스에만 주입하며 브라우저나 Backend 응답에 포함하지 않는다.
 
-현재 코드는 뉴스 수집 후 제목·검색 요약·What/Why/Impact를 한 작업에서 생성한다. 위 온디맨드 계약은 다음 구현 단위의 확정 기준이며, [구현 현황](IMPLEMENTATION_STATUS.md)에서 완료 전까지 `개선 예정`으로 관리한다.
+뉴스 수집은 원문과 제목 번역 작업만 저장하며 생성 응답을 기다리지 않는다. 분류 워커는 로컬 금융 모델 신호만 저장하고, 제목 워커는 최대 25개를 구조화 번역한다. 본문·What/Why/Impact는 상세 화면의 명시적 요청이 있을 때만 별도 작업으로 생성한다.

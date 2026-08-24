@@ -2,6 +2,9 @@ package com.kmarket.navigator.backend.disclosure.presentation;
 
 import java.time.LocalDate;
 import java.util.Set;
+import java.util.UUID;
+
+import jakarta.servlet.http.HttpServletRequest;
 
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -19,6 +22,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpHeaders;
 
 import com.kmarket.navigator.backend.disclosure.application.DisclosureQueryHandler;
 import com.kmarket.navigator.backend.disclosure.application.DisclosureInsightHandler;
@@ -28,6 +32,10 @@ import com.kmarket.navigator.backend.disclosure.domain.DisclosureListQuery;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureType;
 import com.kmarket.navigator.backend.global.error.BusinessException;
 import com.kmarket.navigator.backend.global.error.ErrorCode;
+import com.kmarket.navigator.backend.identity.infrastructure.ClientContextResolver;
+import com.kmarket.navigator.backend.translation.application.OnDemandTranslationService;
+import com.kmarket.navigator.backend.translation.domain.TranslationStatus;
+import com.kmarket.navigator.backend.translation.presentation.TranslationResponse;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -39,17 +47,23 @@ class DisclosureController {
 	private final DisclosureQueryHandler queryHandler;
 	private final DisclosureQuestionHandler questionHandler;
 	private final DisclosureInsightHandler insightHandler;
+	private final OnDemandTranslationService translationService;
+	private final ClientContextResolver clientContextResolver;
 	private final ObjectMapper objectMapper;
 
 	DisclosureController(
 		DisclosureQueryHandler queryHandler,
 		DisclosureQuestionHandler questionHandler,
 		DisclosureInsightHandler insightHandler,
+		OnDemandTranslationService translationService,
+		ClientContextResolver clientContextResolver,
 		ObjectMapper objectMapper
 	) {
 		this.queryHandler = queryHandler;
 		this.questionHandler = questionHandler;
 		this.insightHandler = insightHandler;
+		this.translationService = translationService;
+		this.clientContextResolver = clientContextResolver;
 		this.objectMapper = objectMapper;
 	}
 
@@ -120,6 +134,33 @@ class DisclosureController {
 		String receiptNumber
 	) {
 		return DisclosureDetailResponse.from(queryHandler.findOne(receiptNumber), objectMapper);
+	}
+
+	@GetMapping("/{receiptNumber}/sections/{sectionId}/translation")
+	TranslationResponse findSectionTranslation(
+		@PathVariable @Pattern(regexp = "^[0-9]{14}$") String receiptNumber,
+		@PathVariable UUID sectionId
+	) {
+		return TranslationResponse.from(
+			translationService.findDisclosureSection(receiptNumber, sectionId)
+		);
+	}
+
+	@PostMapping("/{receiptNumber}/sections/{sectionId}/translation")
+	ResponseEntity<TranslationResponse> requestSectionTranslation(
+		@PathVariable @Pattern(regexp = "^[0-9]{14}$") String receiptNumber,
+		@PathVariable UUID sectionId,
+		HttpServletRequest request
+	) {
+		var result = translationService.requestDisclosureSection(
+			receiptNumber,
+			sectionId,
+			clientContextResolver.resolve(request).ipHash()
+		);
+		var builder = result.status() == TranslationStatus.READY
+			? ResponseEntity.ok()
+			: ResponseEntity.accepted().header(HttpHeaders.RETRY_AFTER, "2");
+		return builder.body(TranslationResponse.from(result));
 	}
 
 	@PostMapping("/{receiptNumber}/questions")

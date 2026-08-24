@@ -383,6 +383,11 @@ h1, h2, h3, p { overflow-wrap: anywhere; }
 .filing-body h2 { font-size: 20px; }
 .filing-body p { white-space: pre-wrap; font-family: Georgia, serif; font-size: 13px; line-height: 1.8; }
 .filing-body section > button { padding: 7px 10px; border: 1px solid #add4ca; border-radius: 6px; background: #fff; color: var(--teal-dark); font-size: 8px; font-weight: 700; }
+.section-language-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.section-language-row span { color: var(--muted); font-size: 8px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.section-language-row button { padding: 7px 10px; border: 1px solid #add4ca; border-radius: 6px; background: var(--pale); color: var(--teal-dark); font-size: 8px; font-weight: 800; }
+.section-language-row button:disabled { cursor: wait; opacity: .65; }
+.translation-progress { display: block; margin: 10px 0; color: var(--teal-dark); font-size: 8px; }
 .structured-table { overflow-x: auto; }
 .structured-table table { width: 100%; min-width: 650px; border-collapse: collapse; font-size: 9px; }
 .structured-table th, .structured-table td { padding: 8px; border: 1px solid var(--line); text-align: left; }

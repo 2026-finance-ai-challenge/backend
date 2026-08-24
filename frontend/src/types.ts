@@ -115,6 +115,28 @@ export type NewsArticle = {
   relatedStocks: Array<{ stockCode: string; nameKo: string; nameEn: string }>
 }
 
+export type TranslationResult = {
+  jobId: string | null
+  sourceHash: string
+  targetLocale: 'en'
+  translationVersion: string
+  status: 'NOT_REQUESTED' | 'PENDING' | 'PROCESSING' | 'READY' | 'FAILED'
+  result: {
+    translatedParagraphs?: string[]
+    what?: string
+    why?: string
+    impact?: string
+    contentAvailability?: string
+    translatedHeading?: string | null
+    translatedText?: string | null
+    translatedTableData?: unknown
+  } | null
+  modelId: string | null
+  promptVersion: string | null
+  generatedAt: string | null
+  errorCode: string | null
+}
+
 export type Filing = {
   receiptNumber: string
   issuerNameKo: string

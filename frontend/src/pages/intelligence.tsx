@@ -1,8 +1,8 @@
-import { FormEvent, useMemo, useRef, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { api, queryString } from '../api'
 import { formatDate, InsightCards, NewsCard, openAgent, RemoteBoundary, StatusPanel, useProfile, useRemote } from '../components'
 import { appHash } from '../routing'
-import type { Filing, FilingDetail, NewsArticle } from '../types'
+import type { Filing, FilingDetail, NewsArticle, TranslationResult } from '../types'
 import { FilingRow, PageTitle } from './market'
 
 type NewsPage = { items: NewsArticle[]; nextCursor: string | null }
@@ -42,11 +42,29 @@ export function NewsPageView() {
 
 export function NewsDetailPage({ articleId }: { articleId: string }) {
   const state = useRemote(() => api<NewsArticle>(`/api/v1/news/${articleId}`), [articleId])
+  const translation = useRemote(() => api<TranslationResult>(`/api/v1/news/${articleId}/translation`), [articleId])
+  const [translationBusy, setTranslationBusy] = useState(false)
+  const [translationError, setTranslationError] = useState('')
   const [selection, setSelection] = useState<{ text: string; x: number; y: number } | null>(null)
   const [explanation, setExplanation] = useState<TermExplanation | null>(null)
   const [explaining, setExplaining] = useState(false)
   const [explainError, setExplainError] = useState('')
   const articleRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!translation.data || !['PENDING', 'PROCESSING'].includes(translation.data.status)) return
+    const timer = window.setTimeout(() => translation.retry(), 2000)
+    return () => window.clearTimeout(timer)
+  }, [translation.data?.status, translation.data?.jobId])
+
+  const requestTranslation = async () => {
+    setTranslationBusy(true); setTranslationError('')
+    try {
+      translation.setData(await api<TranslationResult>(`/api/v1/news/${articleId}/translation`, { method: 'POST' }))
+    } catch (reason) {
+      setTranslationError(reason instanceof Error ? reason.message : 'Translation could not be requested.')
+    } finally { setTranslationBusy(false) }
+  }
 
   const captureSelection = () => {
     const selected = window.getSelection()?.toString().trim() || ''
@@ -61,14 +79,19 @@ export function NewsDetailPage({ articleId }: { articleId: string }) {
     catch (reason) { setExplainError(reason instanceof Error ? reason.message : 'The selected term could not be explained.') }
     finally { setExplaining(false) }
   }
-  return <div className="content-page article-page"><RemoteBoundary state={state}>{(article) => <>
+  return <div className="content-page article-page"><RemoteBoundary state={state}>{(article) => {
+    const generated = translation.data?.status === 'READY' ? translation.data.result : null
+    const translatedParagraphs = generated?.translatedParagraphs || []
+    const sourceParagraphs = (article.originalBody || article.originalExcerpt || '').split(/\n{2,}/)
+    const translationPending = ['PENDING', 'PROCESSING'].includes(translation.data?.status || '')
+    return <>
     <a className="back-link" href={appHash('news')}>← Back to News</a><header className="article-head"><div className="news-tags"><span>{article.publisher}</span><span>{formatDate(article.publishedAt)}</span><span className={`sentiment ${(article.sentiment || '').toLowerCase()}`}>{article.sentiment || 'Pending'}</span><span>{article.importance || 'Unrated'} importance</span></div><h1>{article.englishTitle || article.originalTitle}</h1><div className="article-actions"><div className="stock-chips">{article.relatedStocks.map((stock) => <a key={stock.stockCode} href={appHash('stock-detail', stock.stockCode)}>{stock.nameEn || stock.nameKo} · {stock.stockCode}</a>)}</div><button className="primary" onClick={() => openAgent('Summarize this article and show the supporting sources.')}>✦ Ask AI about this article</button></div></header>
-    <section className="article-insight"><div className="split-heading"><div><p className="eyebrow">AI INSIGHT</p><h2>What · Why · Impact</h2></div><span>{article.modelId || 'Analysis pending'} · {article.promptVersion || '—'}</span></div><InsightCards what={article.what} why={article.why} impact={article.impact} /></section>
-    <div className="article-layout"><article className="article-body" ref={articleRef} onMouseUp={captureSelection} onTouchEnd={captureSelection}><div className="translation-label"><b>English translation</b><span>{article.analysisStatus} · paragraph structure preserved when available</span></div>{(article.englishBody || article.originalBody || article.originalExcerpt || '').split(/\n{2,}/).map((paragraph, index) => <p key={index}>{paragraph}</p>)}{!article.englishBody && <StatusPanel title="English translation unavailable" message="The original Korean text is shown. No synthetic translation was inserted." tone="warning" />}<a className="source-button" href={article.originalUrl} target="_blank" rel="noreferrer">Open original article ↗</a></article>
+    <section className="article-insight"><div className="split-heading"><div><p className="eyebrow">AI INSIGHT</p><h2>What · Why · Impact</h2></div><span>{translation.data?.modelId || 'On demand'} · {translation.data?.promptVersion || '—'}</span></div>{generated ? <InsightCards what={generated.what} why={generated.why} impact={generated.impact} /> : <StatusPanel title={translationPending ? 'English insight is being prepared' : 'Generate an English insight on demand'} message={translationError || (translationPending ? 'The shared result will appear automatically. Other users can reuse it once ready.' : 'Translation and What/Why/Impact are generated only when requested, then cached for reuse.')} tone={translationError || translation.data?.status === 'FAILED' ? 'error' : 'warning'} action={{ label: translationBusy ? 'Requesting…' : translationPending ? 'Refresh status' : 'Translate & generate', run: () => { if (translationPending) translation.retry(); else if (!translationBusy) void requestTranslation() } }} />}</section>
+    <div className="article-layout"><article className="article-body" ref={articleRef} onMouseUp={captureSelection} onTouchEnd={captureSelection}><div className="translation-label"><b>{generated ? 'English translation' : 'Original Korean source'}</b><span>{translation.data?.status || 'Checking cache'} · {article.contentAvailability === 'SOURCE_EXCERPT' ? 'Search excerpt, not full article' : 'Paragraph structure preserved'}</span></div>{(generated ? translatedParagraphs : sourceParagraphs).map((paragraph, index) => <p key={index}>{paragraph}</p>)}{!generated && <StatusPanel title="English translation not generated yet" message="The Korean source is shown until a shared English translation is ready. No placeholder translation is displayed." tone="warning" />}<a className="source-button" href={article.originalUrl} target="_blank" rel="noreferrer">Open original article ↗</a></article>
       <aside className="analysis-rail"><h3>Analysis signals</h3><dl><div><dt>Event</dt><dd>{article.eventType || 'Pending'}</dd></div><div><dt>Sentiment</dt><dd>{article.sentiment || 'Pending'}</dd></div><div><dt>Importance</dt><dd>{article.importance || 'Pending'}</dd></div><div><dt>Impact direction</dt><dd>{article.marketImpact || 'Pending'}</dd></div><div><dt>Impact level</dt><dd>{article.marketImpactImportance || 'Pending'}{article.marketImpactScore == null ? '' : ` · ${Math.round(article.marketImpactScore * 100)}%`}</dd></div></dl><p>Confidence values describe model certainty, not expected return.</p></aside></div>
     {selection && <div className="selection-popup" style={{ left: selection.x, top: selection.y }}><span>“{selection.text.slice(0, 48)}{selection.text.length > 48 ? '…' : ''}”</span><button onClick={() => void explain()} disabled={explaining}>✦ {explaining ? 'Explaining…' : 'Explain this term'}</button><button onClick={() => { openAgent(`Explain this selected article context without using facts outside the source: “${selection.text}”`); setSelection(null) }}>Ask about this context</button></div>}
     {(explanation || explainError) && <aside className="term-panel"><button className="panel-close" onClick={() => { setExplanation(null); setExplainError('') }}>×</button>{explainError ? <StatusPanel title="Explanation failed" message={explainError} tone="error" /> : explanation && <><p className="eyebrow">FINANCIAL TERM</p><h2>{explanation.normalizedTerm}</h2><small>Selected: {explanation.selectedText}</small>{explanation.sufficientEvidence ? <><section><b>Definition</b><p>{explanation.definition}</p></section><section><b>Meaning in this article</b><p>{explanation.contextualMeaning}</p></section><div className="confidence-row"><span>Confidence</span><b>{Math.round(explanation.confidence * 100)}%</b>{explanation.reviewRequired && <em>Review recommended</em>}</div><section><b>Evidence</b>{explanation.sources.map((source) => <a key={source.id} href={source.sourceUrl} target="_blank" rel="noreferrer">{source.title} · {source.sourceName} ↗</a>)}</section><button className="primary" onClick={() => openAgent(`Continue explaining “${explanation.selectedText}” using this article and the verified term evidence.`)}>Ask a follow-up</button></> : <StatusPanel title="Insufficient evidence" message={explanation.refusalReason || 'The verified glossary and context did not support an explanation.'} />}</>}</aside>}
-  </>}</RemoteBoundary></div>
+  </>}}</RemoteBoundary></div>
 }
 
 export function DartPage() {
@@ -102,6 +125,42 @@ export function FilingDetailPage({ receiptNumber }: { receiptNumber: string }) {
   const [askError, setAskError] = useState('')
   const [indexBusy, setIndexBusy] = useState(false)
   const [indexError, setIndexError] = useState('')
+  const [sectionTranslations, setSectionTranslations] = useState<Record<string, TranslationResult>>({})
+  const [sectionTranslationBusy, setSectionTranslationBusy] = useState<string | null>(null)
+  const [sectionTranslationError, setSectionTranslationError] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    const pending = Object.values(sectionTranslations)
+      .filter((value) => ['PENDING', 'PROCESSING'].includes(value.status))
+    if (!pending.length) return
+    const timer = window.setTimeout(() => {
+      void Promise.all(pending.map((value) => {
+        const sectionId = Object.entries(sectionTranslations).find(([, item]) => item.jobId === value.jobId)?.[0]
+        if (!sectionId) return Promise.resolve()
+        return api<TranslationResult>(`/api/v1/disclosures/${receiptNumber}/sections/${sectionId}/translation`)
+          .then((next) => setSectionTranslations((current) => ({ ...current, [sectionId]: next })))
+          .catch(() => undefined)
+      }))
+    }, 2000)
+    return () => window.clearTimeout(timer)
+  }, [receiptNumber, sectionTranslations])
+
+  const translateSection = async (sectionId: string) => {
+    setSectionTranslationBusy(sectionId)
+    setSectionTranslationError((current) => ({ ...current, [sectionId]: '' }))
+    try {
+      const cached = await api<TranslationResult>(`/api/v1/disclosures/${receiptNumber}/sections/${sectionId}/translation`)
+      const result = cached.status === 'READY'
+        ? cached
+        : await api<TranslationResult>(`/api/v1/disclosures/${receiptNumber}/sections/${sectionId}/translation`, { method: 'POST' })
+      setSectionTranslations((current) => ({ ...current, [sectionId]: result }))
+    } catch (reason) {
+      setSectionTranslationError((current) => ({
+        ...current,
+        [sectionId]: reason instanceof Error ? reason.message : 'Section translation could not be requested.',
+      }))
+    } finally { setSectionTranslationBusy(null) }
+  }
   const requestIndexing = async (filing: FilingDetail) => {
     if (['PENDING', 'PROCESSING'].includes(filing.indexStatus)) { state.retry(); return }
     setIndexBusy(true); setIndexError('')
@@ -124,9 +183,38 @@ export function FilingDetailPage({ receiptNumber }: { receiptNumber: string }) {
     return <><header className="filing-detail-head"><a href={appHash('dart')}>← DART Intelligence</a><div className="news-tags"><span>{filing.type}</span>{filing.correction && <span>Correction</span>}<span>{filing.documentStatus}</span><span>{filing.indexStatus}</span></div><h1>{filing.titleEn || filing.titleKo}</h1><p>{filing.issuerNameEn || filing.issuerNameKo} · {filing.stockCode} · {filing.market}</p><dl><div><dt>Receipt no.</dt><dd>{filing.receiptNumber}</dd></div><div><dt>Submitted by</dt><dd>{filing.submitter || 'Unavailable'}</dd></div><div><dt>Filed</dt><dd>{filing.filedDate}</dd></div><div><dt>Integrity</dt><dd>{filing.documents[0]?.contentHash ? 'SHA-256 verified' : 'Not available'}</dd></div></dl><a className="source-button" href={filing.officialUrl} target="_blank" rel="noreferrer">Open original DART filing ↗</a></header>
       {filing.indexStatus !== 'READY' && <section className="filing-index-state"><StatusPanel title={['PENDING', 'PROCESSING'].includes(filing.indexStatus) ? 'Filing indexing in progress' : 'Filing is not indexed'} message={indexError || (['PENDING', 'PROCESSING'].includes(filing.indexStatus) ? 'The source is being prepared for citation-grounded questions. Refresh to check progress.' : 'Request on-demand indexing to enable filing-scoped AI answers.')} tone={indexError ? 'error' : 'warning'} action={{ label: indexBusy ? 'Requesting…' : ['PENDING', 'PROCESSING'].includes(filing.indexStatus) ? 'Refresh status' : 'Request indexing', run: () => { if (!indexBusy) void requestIndexing(filing) } }} /></section>}
       <section className="filing-ai"><div className="split-heading"><div><p className="eyebrow">AI FILING INSIGHT</p><h2>Source-grounded summary</h2></div>{filing.indexStatus === 'READY' && insight.error && <button onClick={() => void api<FilingInsight>(`/api/v1/disclosures/${receiptNumber}/insight`, { method: 'POST' }).then(insight.setData)}>Generate insight</button>}</div>{filing.indexStatus !== 'READY' ? <StatusPanel title="Insight waits for indexing" message="No summary is generated until the filing source is ready." /> : insight.loading ? <InsightCards loading /> : insight.data?.sufficientEvidence ? <><InsightCards what={insight.data.what} why={insight.data.why} impact={insight.data.impact} /><small>Sources: {insight.data.sourceSectionIds.length} sections · {insight.data.modelId} · {formatDate(insight.data.generatedAt)}</small></> : <StatusPanel title="AI insight unavailable" message={insight.data?.refusalReason || insight.error?.message || 'No grounded summary has been generated.'} action={{ label: 'Generate', run: () => void api<FilingInsight>(`/api/v1/disclosures/${receiptNumber}/insight`, { method: 'POST' }).then(insight.setData) }} />}</section>
-      <div className="filing-reader"><aside className="toc"><b>Table of contents</b>{sections.filter((section) => section.heading).map((section) => <a href={`#section-${section.id}`} key={section.id}>{section.heading}</a>)}<div className="version-box"><b>Document versions</b>{filing.versions.map((version) => <a className={version.current ? 'active' : ''} href={appHash('filing-detail', version.receiptNumber)} key={version.receiptNumber}>{version.filedDate}{version.correction && ' · Correction'}</a>)}</div></aside><article className="filing-body">{sections.map((section) => <section id={`section-${section.id}`} className={selected?.id === section.id ? 'selected' : ''} key={section.id}>{section.heading && <h2>{section.heading}</h2>}{section.kind === 'TABLE' ? <StructuredTable data={section.tableData} /> : <p>{section.text || 'Section text unavailable.'}</p>}<button disabled={filing.indexStatus !== 'READY'} onClick={() => setSelected({ id: section.id, text: section.text || JSON.stringify(section.tableData) })}>✦ Ask AI about this section</button></section>)}</article><aside className="filing-chat"><div className="context-chip"><b>FILING</b><span>{receiptNumber} · {selected ? 'Selected section' : 'Full filing'}</span></div>{selected && <div className="selected-context"><b>Search scope fixed</b><p>{selected.text.slice(0, 180)}…</p><button onClick={() => setSelected(null)}>Use full filing</button></div>}<form onSubmit={ask}><textarea value={question} onChange={(event) => setQuestion(event.target.value)} rows={4} maxLength={2000} disabled={filing.indexStatus !== 'READY'} placeholder={filing.indexStatus === 'READY' ? 'Ask a question using this filing only…' : 'Questions unlock after indexing completes.'} /><button disabled={asking || filing.indexStatus !== 'READY'}>{asking ? 'Checking evidence…' : 'Ask this filing'}</button></form>{askError && <StatusPanel title="Question failed" message={askError} tone="error" />}{answer && <article className="filing-answer">{answer.refused ? <StatusPanel title="Insufficient evidence" message={answer.refusalReason || 'The filing does not support this answer.'} /> : <><b>Answer</b><p>{answer.answer}</p>{answer.citations.map((citation) => <a href={`#section-${citation.sectionIds[0]}`} key={citation.id}>[{citation.id}] {citation.heading || 'Filing section'}<small>{citation.excerpt}</small></a>)}<small>{answer.model} · {answer.promptVersion}</small></>}</article>}<small>Answers are limited to retrieved filing evidence.</small></aside></div>
+      <div className="filing-reader"><aside className="toc"><b>Table of contents</b>{sections.filter((section) => section.heading).map((section) => <a href={`#section-${section.id}`} key={section.id}>{section.heading}</a>)}<div className="version-box"><b>Document versions</b>{filing.versions.map((version) => <a className={version.current ? 'active' : ''} href={appHash('filing-detail', version.receiptNumber)} key={version.receiptNumber}>{version.filedDate}{version.correction && ' · Correction'}</a>)}</div></aside><article className="filing-body">{sections.map((section) => <FilingSection key={section.id} section={section} selected={selected?.id === section.id} translation={sectionTranslations[section.id]} translationBusy={sectionTranslationBusy === section.id} translationError={sectionTranslationError[section.id]} onTranslate={() => void translateSection(section.id)} onAsk={() => setSelected({ id: section.id, text: section.text || JSON.stringify(section.tableData) })} filingReady={filing.indexStatus === 'READY'} />)}</article><aside className="filing-chat"><div className="context-chip"><b>FILING</b><span>{receiptNumber} · {selected ? 'Selected section' : 'Full filing'}</span></div>{selected && <div className="selected-context"><b>Search scope fixed</b><p>{selected.text.slice(0, 180)}…</p><button onClick={() => setSelected(null)}>Use full filing</button></div>}<form onSubmit={ask}><textarea value={question} onChange={(event) => setQuestion(event.target.value)} rows={4} maxLength={2000} disabled={filing.indexStatus !== 'READY'} placeholder={filing.indexStatus === 'READY' ? 'Ask a question using this filing only…' : 'Questions unlock after indexing completes.'} /><button disabled={asking || filing.indexStatus !== 'READY'}>{asking ? 'Checking evidence…' : 'Ask this filing'}</button></form>{askError && <StatusPanel title="Question failed" message={askError} tone="error" />}{answer && <article className="filing-answer">{answer.refused ? <StatusPanel title="Insufficient evidence" message={answer.refusalReason || 'The filing does not support this answer.'} /> : <><b>Answer</b><p>{answer.answer}</p>{answer.citations.map((citation) => <a href={`#section-${citation.sectionIds[0]}`} key={citation.id}>[{citation.id}] {citation.heading || 'Filing section'}<small>{citation.excerpt}</small></a>)}<small>{answer.model} · {answer.promptVersion}</small></>}</article>}<small>Answers are limited to retrieved filing evidence.</small></aside></div>
     </>
   }}</RemoteBoundary></div>
+}
+
+type FilingSectionData = FilingDetail['documents'][number]['sections'][number]
+
+function FilingSection({ section, selected, translation, translationBusy, translationError, onTranslate, onAsk, filingReady }: {
+  section: FilingSectionData
+  selected: boolean
+  translation?: TranslationResult
+  translationBusy: boolean
+  translationError?: string
+  onTranslate: () => void
+  onAsk: () => void
+  filingReady: boolean
+}) {
+  const result = translation?.status === 'READY' ? translation.result : null
+  const pending = ['PENDING', 'PROCESSING'].includes(translation?.status || '')
+  const heading = result?.translatedHeading || section.heading
+  const text = result?.translatedText || section.text
+  const tableData = result && Object.hasOwn(result, 'translatedTableData')
+    ? result.translatedTableData
+    : section.tableData
+  return <section id={`section-${section.id}`} className={selected ? 'selected' : ''}>
+    <div className="section-language-row"><span>{result ? 'English cached translation' : 'Original Korean'}</span><button disabled={translationBusy || pending} onClick={onTranslate}>{translationBusy ? 'Checking…' : pending ? 'Translating…' : result ? 'Refresh translation' : 'Translate section'}</button></div>
+    {heading && <h2>{heading}</h2>}
+    {section.kind === 'TABLE' ? <StructuredTable data={tableData} /> : <p>{text || 'Section text unavailable.'}</p>}
+    {translationError && <StatusPanel title="Translation failed" message={translationError} tone="error" />}
+    {pending && <small className="translation-progress">Shared translation is being generated. This section updates automatically.</small>}
+    <button disabled={!filingReady} onClick={onAsk}>✦ Ask AI about this section</button>
+  </section>
 }
 
 function StructuredTable({ data }: { data: unknown }) {

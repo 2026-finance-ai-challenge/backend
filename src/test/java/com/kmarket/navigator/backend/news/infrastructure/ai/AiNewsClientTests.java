@@ -29,7 +29,7 @@ class AiNewsClientTests {
 		properties.setServiceToken("test-service-token");
 		AiNewsClient client = new AiNewsClient(builder.build(), properties);
 
-		server.expect(requestTo(containsString("/internal/v1/news/analysis")))
+		server.expect(requestTo(containsString("/internal/v1/news/signals")))
 			.andExpect(header(HttpHeaders.AUTHORIZATION, "Bearer test-service-token"))
 			.andExpect(content().json("""
 				{
@@ -40,11 +40,6 @@ class AiNewsClientTests {
 				"""))
 			.andRespond(withSuccess("""
 				{
-				  "english_title": "Samsung Electronics expands investment",
-				  "translated_paragraphs": ["The company will expand investment."],
-				  "what": "The company announced an investment.",
-				  "why": "It plans to expand capacity.",
-				  "impact": "Capacity may increase.",
 				  "event_type": "CAPEX",
 				  "sentiment": "POSITIVE",
 				  "importance": "HIGH",
@@ -55,8 +50,7 @@ class AiNewsClientTests {
 				  "sentiment_confidence": 0.8,
 				  "importance_confidence": 0.85,
 				  "market_impact_confidence": 0.75,
-				  "model": "gpt-5-mini",
-				  "prompt_version": "news-analysis-v1"
+				  "model": "kmarket-finance-transformer-v1"
 				}
 				""", MediaType.APPLICATION_JSON));
 
@@ -65,10 +59,10 @@ class AiNewsClientTests {
 			List.of("반도체 설비 투자를 확대한다."),
 			List.of("삼성전자")
 		);
-		assertThat(analysis.englishTitle()).isEqualTo("Samsung Electronics expands investment");
+		assertThat(analysis.englishTitle()).isNull();
 		assertThat(analysis.marketImpactImportance()).isEqualTo(NewsImportance.MEDIUM);
 		assertThat(analysis.marketImpactScore()).isEqualByComparingTo("0.55");
-		assertThat(analysis.promptVersion()).isEqualTo("news-analysis-v1");
+		assertThat(analysis.promptVersion()).isEqualTo("news-signals-v1");
 		server.verify();
 		server.reset();
 

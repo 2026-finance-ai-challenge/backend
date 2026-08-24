@@ -43,12 +43,12 @@ class AiNewsClient implements NewsAiGateway {
 		List<String> paragraphs,
 		List<String> candidateCompanies
 	) {
-		AnalysisResponse response = post(
-			"/internal/v1/news/analysis",
+		SignalResponse signals = post(
+			"/internal/v1/news/signals",
 			new AnalysisRequest(title, paragraphs, candidateCompanies),
-			AnalysisResponse.class
+			SignalResponse.class
 		);
-		return response.toDomain();
+		return signals.toDomain(null, "news-signals-v1");
 	}
 
 	@Override
@@ -100,12 +100,7 @@ class AiNewsClient implements NewsAiGateway {
 	}
 
 	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-	private record AnalysisResponse(
-		String englishTitle,
-		List<String> translatedParagraphs,
-		String what,
-		String why,
-		String impact,
+	private record SignalResponse(
 		String eventType,
 		NewsSentiment sentiment,
 		NewsImportance importance,
@@ -116,16 +111,15 @@ class AiNewsClient implements NewsAiGateway {
 		BigDecimal sentimentConfidence,
 		BigDecimal importanceConfidence,
 		BigDecimal marketImpactConfidence,
-		String model,
-		String promptVersion
+		String model
 	) {
-		private NewsAnalysis toDomain() {
+		private NewsAnalysis toDomain(String englishTitle, String titlePromptVersion) {
 			return new NewsAnalysis(
 				englishTitle,
-				translatedParagraphs,
-				what,
-				why,
-				impact,
+				List.of(),
+				null,
+				null,
+				null,
 				eventType,
 				sentiment,
 				importance,
@@ -137,7 +131,7 @@ class AiNewsClient implements NewsAiGateway {
 				importanceConfidence,
 				marketImpactConfidence,
 				model,
-				promptVersion
+				titlePromptVersion
 			);
 		}
 	}
@@ -194,4 +188,5 @@ class AiNewsClient implements NewsAiGateway {
 			);
 		}
 	}
+
 }
