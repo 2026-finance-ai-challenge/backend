@@ -42,6 +42,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import com.kmarket.navigator.backend.disclosure.application.DisclosureDocumentHandler;
 import com.kmarket.navigator.backend.disclosure.application.DisclosureQueryHandler;
+import com.kmarket.navigator.backend.disclosure.application.DisclosureTitleTranslationWorker;
 import com.kmarket.navigator.backend.disclosure.application.port.DisclosureRepository;
 import com.kmarket.navigator.backend.disclosure.application.port.DisclosureBackfillRepository;
 import com.kmarket.navigator.backend.disclosure.application.port.DisclosureRagGateway;
@@ -116,6 +117,9 @@ class BackendApplicationTests {
 
 	@Autowired
 	DisclosureQueryHandler disclosureQueryHandler;
+
+	@Autowired
+	DisclosureTitleTranslationWorker disclosureTitleTranslationWorker;
 
 	@Autowired
 	JdbcClient jdbcClient;
@@ -1230,6 +1234,34 @@ class BackendApplicationTests {
 		mockMvc.perform(get("/api/v1/disclosures").param("stockCode", "0126Z0"))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.items[0].stockCode").value("0126Z0"));
+	}
+
+	@Test
+	void reusesReviewedEnglishTitleAcrossDisclosures() {
+		OpenDartFiling first = new OpenDartFiling(
+			"20260824000001", "00126380", "삼성전자", "005930",
+			CorporationClass.KOSPI, DisclosureType.PERIODIC,
+			"사업보고서 (2025.12)", "삼성전자", LocalDate.of(2026, 8, 24), ""
+		);
+		OpenDartFiling second = new OpenDartFiling(
+			"20260824000002", "00126380", "삼성전자", "005930",
+			CorporationClass.KOSPI, DisclosureType.PERIODIC,
+			"사업보고서 (2025.12)", "삼성전자", LocalDate.of(2026, 8, 24), ""
+		);
+		disclosureRepository.saveFiling(first);
+		disclosureRepository.saveFiling(second);
+		activateCommonStocks("005930");
+
+		assertThat(disclosureTitleTranslationWorker.processBatch(10)).isEqualTo(1);
+		assertThat(disclosureRepository.findByReceiptNumber(first.receiptNumber()))
+			.get()
+			.extracting(detail -> detail.titleEn())
+			.isEqualTo("Annual Report (2025.12)");
+		assertThat(jdbcClient.sql("""
+			SELECT count(*) FROM translation_memory
+			WHERE content_kind = 'DISCLOSURE_TITLE'
+			  AND normalized_source_text = '사업보고서 (2025.12)'
+			""").query(Long.class).single()).isEqualTo(1);
 	}
 
 	@Test
