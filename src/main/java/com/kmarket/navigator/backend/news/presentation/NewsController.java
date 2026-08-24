@@ -12,6 +12,8 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -33,6 +35,9 @@ import com.kmarket.navigator.backend.news.domain.NewsImportance;
 import com.kmarket.navigator.backend.news.domain.NewsQuery;
 import com.kmarket.navigator.backend.news.domain.NewsSentiment;
 import com.kmarket.navigator.backend.news.domain.NewsSort;
+import com.kmarket.navigator.backend.translation.application.OnDemandTranslationService;
+import com.kmarket.navigator.backend.translation.domain.TranslationStatus;
+import com.kmarket.navigator.backend.translation.presentation.TranslationResponse;
 
 @Validated
 @RestController
@@ -40,10 +45,16 @@ import com.kmarket.navigator.backend.news.domain.NewsSort;
 class NewsController {
 
 	private final NewsService service;
+	private final OnDemandTranslationService translationService;
 	private final ClientContextResolver clientContextResolver;
 
-	NewsController(NewsService service, ClientContextResolver clientContextResolver) {
+	NewsController(
+		NewsService service,
+		OnDemandTranslationService translationService,
+		ClientContextResolver clientContextResolver
+	) {
 		this.service = service;
+		this.translationService = translationService;
 		this.clientContextResolver = clientContextResolver;
 	}
 
@@ -96,6 +107,26 @@ class NewsController {
 	@GetMapping("/{articleId}")
 	NewsArticleResponse findOne(@PathVariable UUID articleId) {
 		return NewsArticleResponse.from(service.findOne(articleId));
+	}
+
+	@GetMapping("/{articleId}/translation")
+	TranslationResponse findTranslation(@PathVariable UUID articleId) {
+		return TranslationResponse.from(translationService.findNews(articleId));
+	}
+
+	@PostMapping("/{articleId}/translation")
+	ResponseEntity<TranslationResponse> requestTranslation(
+		@PathVariable UUID articleId,
+		HttpServletRequest request
+	) {
+		var result = translationService.requestNews(
+			articleId,
+			clientContextResolver.resolve(request).ipHash()
+		);
+		var builder = result.status() == TranslationStatus.READY
+			? ResponseEntity.ok()
+			: ResponseEntity.accepted().header(HttpHeaders.RETRY_AFTER, "2");
+		return builder.body(TranslationResponse.from(result));
 	}
 
 	@PostMapping("/{articleId}/term-explanations")

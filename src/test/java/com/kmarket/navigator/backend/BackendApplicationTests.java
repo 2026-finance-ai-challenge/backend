@@ -1788,6 +1788,7 @@ class BackendApplicationTests {
 		jdbcClient.sql("""
 			INSERT INTO news_article (
 			    id, cluster_id, provider, provider_article_id, original_title,
+			    title_source_hash,
 			    original_excerpt, english_title, english_body, what_summary,
 			    why_summary, impact_summary, event_type, sentiment, importance,
 			    market_impact, market_impact_importance, market_impact_score,
@@ -1799,6 +1800,7 @@ class BackendApplicationTests {
 			)
 			VALUES (
 			    :id, :clusterId, 'NAVER_NEWS', :providerId, :title,
+			    encode(digest(regexp_replace(btrim(:title), '[[:space:]]+', ' ', 'g'), 'sha256'), 'hex'),
 			    :excerpt, :title, :excerpt, 'A market event occurred.',
 			    'The article states the reason.', 'The event may affect future operations.',
 			    'CORPORATE_ACTION', 'POSITIVE', :importance, 'POSITIVE',
