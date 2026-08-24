@@ -1,10 +1,6 @@
 package com.kmarket.navigator.backend.news.infrastructure.ai;
 
 import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -52,26 +48,7 @@ class AiNewsClient implements NewsAiGateway {
 			new AnalysisRequest(title, paragraphs, candidateCompanies),
 			SignalResponse.class
 		);
-		String sourceHash = sha256(title);
-		String id = sourceHash;
-		TitleBatchResponse titles = post(
-			"/internal/v1/translations/titles",
-			new TitleBatchRequest(
-				List.of(new TitleSource(id, sourceHash, title)),
-				"en",
-				"news-title-v1"
-			),
-			TitleBatchResponse.class
-		);
-		if (titles.items().size() != 1
-			|| !id.equals(titles.items().getFirst().id())
-			|| !sourceHash.equals(titles.items().getFirst().sourceHash())) {
-			throw new BusinessException(ErrorCode.AI_SERVICE_UNAVAILABLE);
-		}
-		return signals.toDomain(
-			titles.items().getFirst().translatedText(),
-			titles.promptVersion()
-		);
+		return signals.toDomain(null, "news-signals-v1");
 	}
 
 	@Override
@@ -160,32 +137,6 @@ class AiNewsClient implements NewsAiGateway {
 	}
 
 	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-	private record TitleBatchRequest(
-		List<TitleSource> items,
-		String targetLocale,
-		String translationVersion
-	) {
-	}
-
-	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-	private record TitleSource(String id, String sourceHash, String sourceText) {
-	}
-
-	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-	private record TitleBatchResponse(
-		List<TranslatedTitle> items,
-		String targetLocale,
-		String translationVersion,
-		String model,
-		String promptVersion
-	) {
-	}
-
-	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-	private record TranslatedTitle(String id, String sourceHash, String translatedText) {
-	}
-
-	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 	private record TermRequest(
 		String selectedText,
 		String articleContext,
@@ -238,14 +189,4 @@ class AiNewsClient implements NewsAiGateway {
 		}
 	}
 
-	private static String sha256(String value) {
-		try {
-			return HexFormat.of().formatHex(
-				MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))
-			);
-		}
-		catch (NoSuchAlgorithmException exception) {
-			throw new IllegalStateException("SHA-256 algorithm is unavailable", exception);
-		}
-	}
 }

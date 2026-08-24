@@ -17,6 +17,7 @@ import com.kmarket.navigator.backend.translation.application.port.TranslationAiG
 import com.kmarket.navigator.backend.translation.application.port.TranslationRepository;
 import com.kmarket.navigator.backend.translation.domain.GeneratedTranslation;
 import com.kmarket.navigator.backend.translation.domain.TranslationJob;
+import com.kmarket.navigator.backend.translation.domain.TitleTranslationJob;
 
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import tools.jackson.databind.JsonNode;
@@ -27,6 +28,7 @@ public class TranslationWorker {
 
 	private static final Logger log = LoggerFactory.getLogger(TranslationWorker.class);
 	private static final int BATCH_SIZE = 10;
+	private static final int TITLE_BATCH_SIZE = 25;
 	private final TranslationRepository repository;
 	private final TranslationAiGateway aiGateway;
 	private final TranslationGenerationGuard guard;
@@ -62,11 +64,34 @@ public class TranslationWorker {
 	@SchedulerLock(name = "on-demand-translation", lockAtMostFor = "PT4M", lockAtLeastFor = "PT0.5S")
 	public void process() {
 		Instant now = Instant.now(clock);
+		processTitles(now);
 		List<TranslationJob> jobs = repository.claim(
 			BATCH_SIZE, workerId, now, now.minus(Duration.ofMinutes(5))
 		);
 		for (TranslationJob job : jobs) {
 			process(job);
+		}
+	}
+
+	private void processTitles(Instant now) {
+		List<TitleTranslationJob> jobs = repository.claimNewsTitles(
+			TITLE_BATCH_SIZE, workerId, now, now.minus(Duration.ofMinutes(5))
+		);
+		if (jobs.isEmpty()) {
+			return;
+		}
+		try {
+			var generated = aiGateway.translateTitles(jobs);
+			generated.forEach(title -> repository.completeNewsTitle(title, Instant.now(clock)));
+		}
+		catch (RuntimeException exception) {
+			for (TitleTranslationJob job : jobs) {
+				Duration delay = Duration.ofSeconds(Math.min(3_600, 15L << Math.min(job.attempts(), 7)));
+				repository.fail(job.id(), job.attempts(), exception.getClass().getSimpleName(),
+					Instant.now(clock), delay);
+			}
+			log.warn("News title translation batch failed size={} type={}",
+				jobs.size(), exception.getClass().getSimpleName());
 		}
 	}
 

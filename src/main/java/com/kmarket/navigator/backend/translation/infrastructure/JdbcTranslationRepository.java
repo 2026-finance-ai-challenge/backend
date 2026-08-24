@@ -14,10 +14,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.kmarket.navigator.backend.translation.application.port.TranslationRepository;
 import com.kmarket.navigator.backend.translation.domain.GeneratedTranslation;
+import com.kmarket.navigator.backend.translation.domain.GeneratedTitle;
 import com.kmarket.navigator.backend.translation.domain.TranslationJob;
 import com.kmarket.navigator.backend.translation.domain.TranslationKind;
 import com.kmarket.navigator.backend.translation.domain.TranslationStatus;
 import com.kmarket.navigator.backend.translation.domain.TranslationView;
+import com.kmarket.navigator.backend.translation.domain.TitleTranslationJob;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -187,6 +189,56 @@ class JdbcTranslationRepository implements TranslationRepository {
 
 	@Override
 	@Transactional
+	public List<TitleTranslationJob> claimNewsTitles(
+		int limit,
+		String workerId,
+		Instant now,
+		Instant staleBefore
+	) {
+		recover("NEWS_TITLE", now, staleBefore);
+		return jdbcClient.sql("""
+			WITH selected AS (
+			    SELECT job.translation_memory_id
+			    FROM translation_job job
+			    JOIN translation_memory memory ON memory.id = job.translation_memory_id
+			    WHERE memory.content_kind = 'NEWS_TITLE'
+			      AND memory.target_locale = 'en'
+			      AND memory.translation_version = 'news-title-v1'
+			      AND job.status = 'PENDING' AND job.available_at <= :now
+			    ORDER BY job.available_at, job.updated_at, job.translation_memory_id
+			    FOR UPDATE OF job SKIP LOCKED LIMIT :limit
+			), claimed AS (
+			    UPDATE translation_job job
+			    SET status = 'PROCESSING', attempts = attempts + 1,
+			        locked_at = :now, locked_by = :workerId, updated_at = :now
+			    FROM selected WHERE job.translation_memory_id = selected.translation_memory_id
+			    RETURNING job.translation_memory_id, job.attempts
+			), marked AS (
+			    UPDATE translation_memory memory
+			    SET status = 'PROCESSING', updated_at = :now
+			    FROM claimed WHERE memory.id = claimed.translation_memory_id
+			    RETURNING memory.id, memory.source_hash, memory.source_text,
+			              memory.translation_version
+			)
+			SELECT marked.*, claimed.attempts
+			FROM marked JOIN claimed ON claimed.translation_memory_id = marked.id
+			ORDER BY marked.id
+			""")
+			.param("now", atUtc(now))
+			.param("workerId", workerId)
+			.param("limit", limit)
+			.query((resultSet, rowNumber) -> new TitleTranslationJob(
+				resultSet.getObject("id", UUID.class),
+				resultSet.getString("source_hash"),
+				resultSet.getString("source_text"),
+				resultSet.getString("translation_version"),
+				resultSet.getInt("attempts")
+			))
+			.list();
+	}
+
+	@Override
+	@Transactional
 	public void complete(UUID id, GeneratedTranslation generated, Instant now) {
 		int updated = jdbcClient.sql("""
 			UPDATE translation_memory
@@ -217,6 +269,41 @@ class JdbcTranslationRepository implements TranslationRepository {
 			.param("id", id)
 			.param("now", atUtc(now))
 			.update();
+	}
+
+	@Override
+	@Transactional
+	public void completeNewsTitle(GeneratedTitle generated, Instant now) {
+		int updated = jdbcClient.sql("""
+			UPDATE translation_memory
+			SET translated_text = :translatedText, status = 'READY',
+			    model_id = :modelId, prompt_version = :promptVersion,
+			    generated_at = :now, updated_at = :now
+			WHERE id = :id AND status = 'PROCESSING' AND content_kind = 'NEWS_TITLE'
+			  AND source_hash = :sourceHash AND target_locale = :targetLocale
+			  AND translation_version = :version
+			""")
+			.param("id", generated.id())
+			.param("translatedText", generated.translatedText())
+			.param("modelId", generated.modelId())
+			.param("promptVersion", generated.promptVersion())
+			.param("sourceHash", generated.sourceHash())
+			.param("targetLocale", generated.targetLocale())
+			.param("version", generated.translationVersion())
+			.param("now", atUtc(now))
+			.update();
+		if (updated != 1) {
+			throw new IllegalStateException("Claimed news title changed before completion");
+		}
+		jdbcClient.sql("""
+			UPDATE news_article
+			SET english_title = :translatedText
+			WHERE title_source_hash = :sourceHash
+			""")
+			.param("translatedText", generated.translatedText())
+			.param("sourceHash", generated.sourceHash())
+			.update();
+		markReady(generated.id(), now);
 	}
 
 	@Override
@@ -262,6 +349,42 @@ class JdbcTranslationRepository implements TranslationRepository {
 			generatedAt == null ? null : generatedAt.toInstant(),
 			resultSet.getString("last_error_code")
 		);
+	}
+
+	private void recover(String kind, Instant now, Instant staleBefore) {
+		jdbcClient.sql("""
+			WITH recovered AS (
+			    UPDATE translation_job job
+			    SET status = CASE WHEN attempts >= :maxAttempts THEN 'FAILED' ELSE 'PENDING' END,
+			        locked_at = NULL, locked_by = NULL, available_at = :now,
+			        last_error_code = 'STALE_PROCESSING_RECOVERED', updated_at = :now
+			    FROM translation_memory memory
+			    WHERE memory.id = job.translation_memory_id
+			      AND memory.content_kind = :kind
+			      AND job.status = 'PROCESSING' AND job.locked_at < :staleBefore
+			    RETURNING memory.id, job.status
+			)
+			UPDATE translation_memory memory
+			SET status = recovered.status, updated_at = :now
+			FROM recovered WHERE memory.id = recovered.id
+			""")
+			.param("maxAttempts", MAX_ATTEMPTS)
+			.param("kind", kind)
+			.param("now", atUtc(now))
+			.param("staleBefore", atUtc(staleBefore))
+			.update();
+	}
+
+	private void markReady(UUID id, Instant now) {
+		jdbcClient.sql("""
+			UPDATE translation_job
+			SET status = 'READY', locked_at = NULL, locked_by = NULL,
+			    last_error_code = NULL, updated_at = :now
+			WHERE translation_memory_id = :id
+			""")
+			.param("id", id)
+			.param("now", atUtc(now))
+			.update();
 	}
 
 	private static OffsetDateTime atUtc(Instant instant) {

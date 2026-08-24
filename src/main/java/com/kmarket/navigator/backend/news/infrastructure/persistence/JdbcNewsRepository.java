@@ -290,12 +290,14 @@ class JdbcNewsRepository implements NewsRepository {
 		Optional<UUID> inserted = jdbcClient.sql("""
 			INSERT INTO news_article (
 			    id, cluster_id, provider, provider_article_id, original_title,
+			    title_source_hash,
 			    original_excerpt, original_url, canonical_url, canonical_url_hash,
 			    publisher, thumbnail_url, content_availability, analysis_status,
 			    duplicate_score, published_at, collected_at
 			)
 			VALUES (
 			    :id, :clusterId, 'NAVER_NEWS', :providerArticleId, :title,
+			    encode(digest(regexp_replace(btrim(:title), '[[:space:]]+', ' ', 'g'), 'sha256'), 'hex'),
 			    :excerpt, :originalUrl, :canonicalUrl, :canonicalUrlHash,
 			    :publisher, :thumbnailUrl, 'SOURCE_EXCERPT', 'PENDING',
 			    :duplicateScore, :publishedAt, :collectedAt
@@ -321,6 +323,7 @@ class JdbcNewsRepository implements NewsRepository {
 		if (inserted.isEmpty()) {
 			return false;
 		}
+		queueTitleTranslation(draft.title(), draft.collectedAt());
 		for (var match : draft.stockConfidences().entrySet()) {
 			jdbcClient.sql("""
 				INSERT INTO news_article_security (article_id, security_id, match_confidence)
@@ -355,6 +358,36 @@ class JdbcNewsRepository implements NewsRepository {
 			.param("now", atUtc(draft.collectedAt()))
 			.update();
 		return true;
+	}
+
+	private void queueTitleTranslation(String title, Instant now) {
+		jdbcClient.sql("""
+			WITH source AS (
+			    SELECT regexp_replace(btrim(:title), '[[:space:]]+', ' ', 'g') AS normalized
+			), memory AS (
+			    INSERT INTO translation_memory (
+			        id, content_kind, source_locale, target_locale, translation_version,
+			        source_hash, source_text, normalized_source_text, status,
+			        created_at, updated_at
+			    )
+			    SELECT gen_random_uuid(), 'NEWS_TITLE', 'ko', 'en', 'news-title-v1',
+			           encode(digest(normalized, 'sha256'), 'hex'), normalized, normalized,
+			           'PENDING', :now, :now
+			    FROM source
+			    ON CONFLICT (content_kind, source_hash, target_locale, translation_version)
+			    DO UPDATE SET updated_at = translation_memory.updated_at
+			    RETURNING id, status
+			)
+			INSERT INTO translation_job (
+			    translation_memory_id, status, attempts, available_at, created_at, updated_at
+			)
+			SELECT id, 'PENDING', 0, :now, :now, :now
+			FROM memory WHERE status <> 'READY'
+			ON CONFLICT (translation_memory_id) DO NOTHING
+			""")
+			.param("title", title)
+			.param("now", atUtc(now))
+			.update();
 	}
 
 	@Override
@@ -409,7 +442,7 @@ class JdbcNewsRepository implements NewsRepository {
 	public void completeAnalysis(UUID articleId, NewsAnalysis analysis, Instant analyzedAt) {
 		jdbcClient.sql("""
 			UPDATE news_article
-			SET english_title = :englishTitle, event_type = :eventType,
+			SET event_type = :eventType,
 			    sentiment = :sentiment, importance = :importance,
 			    market_impact = :marketImpact,
 			    market_impact_importance = :marketImpactImportance,
@@ -423,7 +456,6 @@ class JdbcNewsRepository implements NewsRepository {
 			WHERE id = :articleId
 			""")
 			.param("articleId", articleId)
-			.param("englishTitle", analysis.englishTitle())
 			.param("eventType", analysis.eventType())
 			.param("sentiment", analysis.sentiment().name())
 			.param("importance", analysis.importance().name())

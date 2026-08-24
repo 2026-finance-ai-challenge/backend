@@ -3,8 +3,12 @@ package com.kmarket.navigator.backend.translation.application.port;
 import java.util.List;
 
 import com.kmarket.navigator.backend.translation.domain.GeneratedTranslation;
+import com.kmarket.navigator.backend.translation.domain.GeneratedTitle;
+import com.kmarket.navigator.backend.translation.domain.TitleTranslationJob;
 
 public interface TranslationAiGateway {
+
+	List<GeneratedTitle> translateTitles(List<TitleTranslationJob> jobs);
 
 	GeneratedTranslation translateNews(
 		String sourceHash,

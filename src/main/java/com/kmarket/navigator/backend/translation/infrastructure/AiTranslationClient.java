@@ -1,6 +1,10 @@
 package com.kmarket.navigator.backend.translation.infrastructure;
 
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpHeaders;
@@ -13,6 +17,8 @@ import com.kmarket.navigator.backend.global.error.BusinessException;
 import com.kmarket.navigator.backend.global.error.ErrorCode;
 import com.kmarket.navigator.backend.translation.application.port.TranslationAiGateway;
 import com.kmarket.navigator.backend.translation.domain.GeneratedTranslation;
+import com.kmarket.navigator.backend.translation.domain.GeneratedTitle;
+import com.kmarket.navigator.backend.translation.domain.TitleTranslationJob;
 
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.annotation.JsonNaming;
@@ -34,6 +40,58 @@ class AiTranslationClient implements TranslationAiGateway {
 		this.restClient = restClient;
 		this.properties = properties;
 		this.objectMapper = objectMapper;
+	}
+
+	@Override
+	public List<GeneratedTitle> translateTitles(List<TitleTranslationJob> jobs) {
+		if (jobs.isEmpty()) {
+			return List.of();
+		}
+		String version = jobs.getFirst().translationVersion();
+		if (jobs.stream().anyMatch(job -> !version.equals(job.translationVersion()))) {
+			throw new IllegalArgumentException("Title translation versions must match");
+		}
+		TitleBatchResponse response = post(
+			"/internal/v1/translations/titles",
+			new TitleBatchRequest(
+				jobs.stream().map(job -> new TitleSource(
+					job.id().toString(), job.sourceHash(), job.sourceText()
+				)).toList(),
+				"en",
+				version
+			),
+			TitleBatchResponse.class
+		);
+		Map<UUID, TitleTranslationJob> expected = jobs.stream().collect(Collectors.toMap(
+			TitleTranslationJob::id,
+			Function.identity()
+		));
+		if (!"en".equals(response.targetLocale()) || !version.equals(response.translationVersion())
+			|| response.items().size() != expected.size()) {
+			throw new BusinessException(ErrorCode.AI_SERVICE_UNAVAILABLE);
+		}
+		java.util.Set<UUID> seen = new java.util.HashSet<>();
+		List<GeneratedTitle> generated = response.items().stream().map(item -> {
+			UUID id;
+			try {
+				id = UUID.fromString(item.id());
+			}
+			catch (IllegalArgumentException exception) {
+				throw new BusinessException(ErrorCode.AI_SERVICE_UNAVAILABLE);
+			}
+			TitleTranslationJob source = expected.get(id);
+			if (source == null || !seen.add(id) || !source.sourceHash().equals(item.sourceHash())) {
+				throw new BusinessException(ErrorCode.AI_SERVICE_UNAVAILABLE);
+			}
+			return new GeneratedTitle(
+				id, item.sourceHash(), item.translatedText(), response.targetLocale(),
+				response.translationVersion(), response.model(), response.promptVersion()
+			);
+		}).toList();
+		if (seen.size() != expected.size()) {
+			throw new BusinessException(ErrorCode.AI_SERVICE_UNAVAILABLE);
+		}
+		return generated;
 	}
 
 	@Override
@@ -148,6 +206,32 @@ class AiTranslationClient implements TranslationAiGateway {
 		else {
 			node.put(field, value);
 		}
+	}
+
+	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+	private record TitleBatchRequest(
+		List<TitleSource> items,
+		String targetLocale,
+		String translationVersion
+	) {
+	}
+
+	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+	private record TitleSource(String id, String sourceHash, String sourceText) {
+	}
+
+	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+	private record TitleBatchResponse(
+		List<TranslatedTitle> items,
+		String targetLocale,
+		String translationVersion,
+		String model,
+		String promptVersion
+	) {
+	}
+
+	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+	private record TranslatedTitle(String id, String sourceHash, String translatedText) {
 	}
 
 	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
