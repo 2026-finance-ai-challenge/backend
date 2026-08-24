@@ -121,10 +121,10 @@ public class TranslationWorker {
 	private GeneratedTranslation generateNews(TranslationJob job) {
 		JsonNode source = objectMapper.readTree(job.canonicalSource());
 		List<String> paragraphs = new ArrayList<>();
-		source.path("paragraphs").forEach(value -> paragraphs.add(value.asText()));
+		source.path("paragraphs").forEach(value -> paragraphs.add(value.asString()));
 		return aiGateway.translateNews(
-			job.sourceHash(), source.path("title").asText(), paragraphs,
-			source.path("content_availability").asText(), job.translationVersion()
+			job.sourceHash(), source.path("title").asString(), paragraphs,
+			source.path("content_availability").asString(), job.translationVersion()
 		);
 	}
 
@@ -132,14 +132,14 @@ public class TranslationWorker {
 		JsonNode source = objectMapper.readTree(job.canonicalSource());
 		JsonNode context = job.context();
 		return aiGateway.translateDisclosureSection(
-			context.path("receipt_number").asText(), context.path("document_version").asInt(),
-			context.path("section_id").asText(), job.sourceHash(),
+			context.path("receipt_number").asString(), context.path("document_version").asInt(),
+			context.path("section_id").asString(), job.sourceHash(),
 			nullableText(source.get("heading")), nullableText(source.get("text")),
 			nullableText(source.get("table_data_json")), job.translationVersion()
 		);
 	}
 
 	private static String nullableText(JsonNode value) {
-		return value == null || value.isNull() ? null : value.asText();
+		return value == null || value.isNull() ? null : value.asString();
 	}
 }
