@@ -9,6 +9,9 @@ import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import com.kmarket.navigator.backend.disclosure.application.DisclosureQueryHandler;
+import com.kmarket.navigator.backend.disclosure.domain.DisclosureDocument;
+import com.kmarket.navigator.backend.disclosure.domain.DisclosureSection;
 import com.kmarket.navigator.backend.global.error.BusinessException;
 import com.kmarket.navigator.backend.global.error.ErrorCode;
 import com.kmarket.navigator.backend.news.application.port.NewsRepository;
@@ -24,7 +27,9 @@ import tools.jackson.databind.node.ObjectNode;
 public class OnDemandTranslationService {
 
 	public static final String NEWS_VERSION = "news-narrative-v1";
+	public static final String DISCLOSURE_SECTION_VERSION = "disclosure-section-v1";
 	private final NewsRepository newsRepository;
+	private final DisclosureQueryHandler disclosureQueryHandler;
 	private final TranslationRepository translationRepository;
 	private final TranslationCanonicalizer canonicalizer;
 	private final TranslationRequestRateLimiter rateLimiter;
@@ -34,17 +39,20 @@ public class OnDemandTranslationService {
 	@Autowired
 	public OnDemandTranslationService(
 		NewsRepository newsRepository,
+		DisclosureQueryHandler disclosureQueryHandler,
 		TranslationRepository translationRepository,
 		TranslationCanonicalizer canonicalizer,
 		TranslationRequestRateLimiter rateLimiter,
 		ObjectMapper objectMapper
 	) {
-		this(newsRepository, translationRepository, canonicalizer, rateLimiter, objectMapper,
+		this(newsRepository, disclosureQueryHandler, translationRepository, canonicalizer,
+			rateLimiter, objectMapper,
 			Clock.systemUTC());
 	}
 
 	OnDemandTranslationService(
 		NewsRepository newsRepository,
+		DisclosureQueryHandler disclosureQueryHandler,
 		TranslationRepository translationRepository,
 		TranslationCanonicalizer canonicalizer,
 		TranslationRequestRateLimiter rateLimiter,
@@ -52,6 +60,7 @@ public class OnDemandTranslationService {
 		Clock clock
 	) {
 		this.newsRepository = newsRepository;
+		this.disclosureQueryHandler = disclosureQueryHandler;
 		this.translationRepository = translationRepository;
 		this.canonicalizer = canonicalizer;
 		this.rateLimiter = rateLimiter;
@@ -81,6 +90,38 @@ public class OnDemandTranslationService {
 		);
 	}
 
+	public TranslationView findDisclosureSection(String receiptNumber, UUID sectionId) {
+		DisclosureSource source = disclosureSource(receiptNumber, sectionId);
+		return translationRepository.find(
+			TranslationKind.DISCLOSURE_SECTION,
+			source.source().hash(),
+			DISCLOSURE_SECTION_VERSION
+		).orElseGet(() -> TranslationView.notRequested(
+			source.source().hash(), DISCLOSURE_SECTION_VERSION
+		));
+	}
+
+	public TranslationView requestDisclosureSection(
+		String receiptNumber,
+		UUID sectionId,
+		String clientHash
+	) {
+		rateLimiter.check(clientHash);
+		DisclosureSource source = disclosureSource(receiptNumber, sectionId);
+		ObjectNode context = objectMapper.createObjectNode();
+		context.put("receipt_number", receiptNumber);
+		context.put("document_version", source.document().version());
+		context.put("section_id", sectionId.toString());
+		return translationRepository.request(
+			TranslationKind.DISCLOSURE_SECTION,
+			source.source().hash(),
+			source.source().canonical(),
+			context,
+			DISCLOSURE_SECTION_VERSION,
+			Instant.now(clock)
+		);
+	}
+
 	private NewsSource newsSource(UUID articleId) {
 		var article = newsRepository.findById(articleId)
 			.orElseThrow(() -> new BusinessException(ErrorCode.NEWS_NOT_FOUND));
@@ -100,6 +141,33 @@ public class OnDemandTranslationService {
 		);
 	}
 
+	private DisclosureSource disclosureSource(String receiptNumber, UUID sectionId) {
+		var detail = disclosureQueryHandler.findOne(receiptNumber);
+		for (DisclosureDocument document : detail.documents()) {
+			for (DisclosureSection section : document.sections()) {
+				if (section.id().equals(sectionId)) {
+					if (section.heading() == null && section.text() == null
+						&& section.tableData() == null) {
+						throw new BusinessException(ErrorCode.SOURCE_CONTENT_UNAVAILABLE);
+					}
+					return new DisclosureSource(
+						document,
+						canonicalizer.disclosureSection(
+							section.heading(), section.text(), section.tableData()
+						)
+					);
+				}
+			}
+		}
+		throw new BusinessException(ErrorCode.DISCLOSURE_SECTION_NOT_FOUND);
+	}
+
 	private record NewsSource(TranslationCanonicalizer.Source source) {
+	}
+
+	private record DisclosureSource(
+		DisclosureDocument document,
+		TranslationCanonicalizer.Source source
+	) {
 	}
 }

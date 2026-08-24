@@ -165,6 +165,11 @@ public enum ErrorCode {
 		"Secure tax document storage is temporarily unavailable."
 	),
 	DISCLOSURE_NOT_FOUND(HttpStatus.NOT_FOUND, "DISCLOSURE_NOT_FOUND", "The disclosure was not found."),
+	DISCLOSURE_SECTION_NOT_FOUND(
+		HttpStatus.NOT_FOUND,
+		"DISCLOSURE_SECTION_NOT_FOUND",
+		"The section does not belong to the current disclosure document version."
+	),
 	DISCLOSURE_INDEX_NOT_READY(
 		HttpStatus.CONFLICT,
 		"DISCLOSURE_INDEX_NOT_READY",
