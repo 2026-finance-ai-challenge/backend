@@ -20,6 +20,7 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.kmarket.navigator.backend.disclosure.application.port.DisclosureRepository;
+import com.kmarket.navigator.backend.disclosure.application.DisclosureTitlePolicy;
 import com.kmarket.navigator.backend.disclosure.application.port.DocumentJob;
 import com.kmarket.navigator.backend.disclosure.application.port.StoredDocumentArchive;
 import com.kmarket.navigator.backend.disclosure.application.port.OpenDartCorporation;
@@ -149,16 +150,20 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			? null
 			: upsertSecurity(issuerId, filing.stockCode(), filing.corporationClass().market());
 		String filingFamilyKey = filingFamilyKey(filing.reportName());
+		String normalizedTitle = DisclosureTitlePolicy.normalize(filing.reportName());
+		String titleSourceHash = DisclosureTitlePolicy.sourceHash(normalizedTitle);
 
 		Optional<UUID> inserted = jdbcClient.sql("""
 			INSERT INTO disclosure (
 			    id, receipt_number, issuer_id, security_id, disclosure_type, title_ko,
+			    title_source_hash,
 			    submitter, filed_date, detected_at, official_url, remark, correction,
 			    filing_family_key,
 			    document_status, created_at, updated_at
 			)
 			VALUES (
 			    :id, :receiptNumber, :issuerId, :securityId, :disclosureType, :titleKo,
+			    :titleSourceHash,
 			    :submitter, :filedDate, :detectedAt, :officialUrl, :remark, :correction,
 			    :filingFamilyKey,
 			    'PENDING', :createdAt, :updatedAt
@@ -172,6 +177,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			.param("securityId", securityId)
 			.param("disclosureType", filing.disclosureType().code())
 			.param("titleKo", filing.reportName())
+			.param("titleSourceHash", titleSourceHash)
 			.param("submitter", filing.submitter())
 			.param("filedDate", filing.filedDate())
 			.param("detectedAt", now)
@@ -191,6 +197,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 				    security_id = :securityId,
 				    disclosure_type = :disclosureType,
 				    title_ko = :titleKo,
+				    title_source_hash = :titleSourceHash,
 				    submitter = :submitter,
 				    filed_date = :filedDate,
 				    remark = :remark,
@@ -203,6 +210,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 				.param("securityId", securityId)
 				.param("disclosureType", filing.disclosureType().code())
 				.param("titleKo", filing.reportName())
+				.param("titleSourceHash", titleSourceHash)
 				.param("submitter", filing.submitter())
 				.param("filedDate", filing.filedDate())
 				.param("remark", filing.remark())
@@ -211,9 +219,15 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 				.param("updatedAt", now)
 				.param("receiptNumber", filing.receiptNumber())
 				.update();
+			enqueueTitleTranslationIfSupported(
+				filing.stockCode(), titleSourceHash, filing.reportName(), normalizedTitle, now
+			);
 			relinkCorrectionFamily(issuerId, filingFamilyKey);
 			return false;
 		}
+		enqueueTitleTranslationIfSupported(
+			filing.stockCode(), titleSourceHash, filing.reportName(), normalizedTitle, now
+		);
 		relinkCorrectionFamily(issuerId, filingFamilyKey);
 
 		if (filing.stockCode() != null) {
@@ -607,15 +621,23 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 		StringBuilder sql = new StringBuilder("""
 			SELECT d.receipt_number, i.dart_corp_code, i.name_ko, i.name_en,
 			       s.stock_code, COALESCE(s.market, 'UNKNOWN') AS market,
-			       d.disclosure_type, d.title_ko, NULL AS title_en, d.filed_date,
+			       d.disclosure_type, d.title_ko,
+			       CASE WHEN translation.status = 'READY' THEN translation.translated_text END AS title_en,
+			       d.filed_date,
 			       d.detected_at, d.correction, d.document_status, d.index_status, d.official_url
 			FROM disclosure d
 			JOIN issuer i ON i.id = d.issuer_id
 			JOIN security s ON s.id = d.security_id
 			JOIN service_stock_universe universe ON universe.stock_code = s.stock_code
+			LEFT JOIN translation_memory translation
+			  ON translation.content_kind = 'DISCLOSURE_TITLE'
+			 AND translation.source_hash = d.title_source_hash
+			 AND translation.target_locale = 'en'
+			 AND translation.translation_version = :translationVersion
 			WHERE s.active AND s.common_stock
 			""");
 		Map<String, Object> parameters = new LinkedHashMap<>();
+		parameters.put("translationVersion", DisclosureTitlePolicy.TRANSLATION_VERSION);
 		appendFilters(sql, parameters, query);
 		sql.append(" ORDER BY d.filed_date DESC, d.receipt_number DESC LIMIT :fetchSize");
 		parameters.put("fetchSize", fetchSize);
@@ -633,17 +655,25 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			SELECT d.id, d.issuer_id, d.filing_family_key, d.receipt_number,
 			       i.dart_corp_code, i.name_ko, i.name_en,
 			       s.stock_code, COALESCE(s.market, 'UNKNOWN') AS market,
-			       d.disclosure_type, d.title_ko, NULL AS title_en, d.submitter,
+			       d.disclosure_type, d.title_ko,
+			       CASE WHEN translation.status = 'READY' THEN translation.translated_text END AS title_en,
+			       d.submitter,
 			       d.filed_date, d.detected_at, d.remark, d.correction,
 			       d.document_status, d.index_status, d.official_url
 			FROM disclosure d
 			JOIN issuer i ON i.id = d.issuer_id
 			JOIN security s ON s.id = d.security_id
 			JOIN service_stock_universe universe ON universe.stock_code = s.stock_code
+			LEFT JOIN translation_memory translation
+			  ON translation.content_kind = 'DISCLOSURE_TITLE'
+			 AND translation.source_hash = d.title_source_hash
+			 AND translation.target_locale = 'en'
+			 AND translation.translation_version = :translationVersion
 			WHERE d.receipt_number = :receiptNumber
 			  AND s.active AND s.common_stock
 			""")
 			.param("receiptNumber", receiptNumber)
+			.param("translationVersion", DisclosureTitlePolicy.TRANSLATION_VERSION)
 			.query(this::mapDetailRow)
 			.optional();
 		return detail.map(this::withDocuments);
@@ -960,6 +990,75 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			.orElseThrow(() -> new IllegalStateException("Disclosure does not exist"));
 	}
 
+	private void enqueueTitleTranslationIfSupported(
+		String stockCode,
+		String sourceHash,
+		String sourceTitle,
+		String normalizedTitle,
+		OffsetDateTime now
+	) {
+		if (stockCode == null || !isSupportedStock(stockCode)) {
+			return;
+		}
+		UUID translationId = jdbcClient.sql("""
+			INSERT INTO translation_memory (
+			    id, content_kind, source_locale, target_locale, translation_version,
+			    source_hash, source_text, normalized_source_text, status,
+			    created_at, updated_at
+			)
+			VALUES (
+			    :id, :contentKind, :sourceLocale, :targetLocale, :translationVersion,
+			    :sourceHash, :sourceTitle, :normalizedTitle, 'PENDING', :now, :now
+			)
+			ON CONFLICT (content_kind, source_hash, target_locale, translation_version)
+			DO UPDATE SET
+			    source_text = EXCLUDED.source_text,
+			    normalized_source_text = EXCLUDED.normalized_source_text,
+			    updated_at = CASE
+			        WHEN translation_memory.status = 'READY' THEN translation_memory.updated_at
+			        ELSE EXCLUDED.updated_at
+			    END
+			RETURNING id
+			""")
+			.param("id", UUID.randomUUID())
+			.param("contentKind", DisclosureTitlePolicy.CONTENT_KIND)
+			.param("sourceLocale", DisclosureTitlePolicy.SOURCE_LOCALE)
+			.param("targetLocale", DisclosureTitlePolicy.TARGET_LOCALE)
+			.param("translationVersion", DisclosureTitlePolicy.TRANSLATION_VERSION)
+			.param("sourceHash", sourceHash)
+			.param("sourceTitle", sourceTitle)
+			.param("normalizedTitle", normalizedTitle)
+			.param("now", now)
+			.query(UUID.class)
+			.single();
+
+		jdbcClient.sql("""
+			INSERT INTO translation_job (
+			    translation_memory_id, status, attempts, available_at, created_at, updated_at
+			)
+			SELECT :translationId, 'PENDING', 0, :now, :now, :now
+			FROM translation_memory memory
+			WHERE memory.id = :translationId AND memory.status <> 'READY'
+			ON CONFLICT (translation_memory_id) DO NOTHING
+			""")
+			.param("translationId", translationId)
+			.param("now", now)
+			.update();
+	}
+
+	private boolean isSupportedStock(String stockCode) {
+		return jdbcClient.sql("""
+			SELECT EXISTS (
+			    SELECT 1
+			    FROM service_stock_universe
+			    WHERE stock_code = :stockCode
+			)
+			""")
+			.param("stockCode", stockCode)
+			.query(Boolean.class)
+			.single();
+	}
+
 	private void appendFilters(
 		StringBuilder sql,
 		Map<String, Object> parameters,
@@ -969,6 +1068,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			sql.append("""
 				 AND (
 				     d.title_ko ILIKE '%' || :query || '%' ESCAPE '\\'
+				     OR COALESCE(translation.translated_text, '') ILIKE '%' || :query || '%' ESCAPE '\\'
 				     OR i.name_ko ILIKE '%' || :query || '%' ESCAPE '\\'
 				     OR COALESCE(i.name_en, '') ILIKE '%' || :query || '%' ESCAPE '\\'
 				     OR s.stock_code ILIKE '%' || :query || '%' ESCAPE '\\'

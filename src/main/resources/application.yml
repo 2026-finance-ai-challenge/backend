@@ -48,6 +48,9 @@ opendart:
 
 kmarket:
 
+  disclosure:
+    title-translation-interval: ${KMARKET_DISCLOSURE_TITLE_TRANSLATION_INTERVAL:5s}
+
   global-peer:
     data-version: ${KMARKET_GLOBAL_PEER_DATA_VERSION:hana-global-peer-2026-07-21-openai-v1}
   tax:
