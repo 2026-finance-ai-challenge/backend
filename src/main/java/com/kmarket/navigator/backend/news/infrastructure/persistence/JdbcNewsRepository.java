@@ -409,9 +409,7 @@ class JdbcNewsRepository implements NewsRepository {
 	public void completeAnalysis(UUID articleId, NewsAnalysis analysis, Instant analyzedAt) {
 		jdbcClient.sql("""
 			UPDATE news_article
-			SET english_title = :englishTitle, english_body = :englishBody,
-			    what_summary = :whatSummary, why_summary = :whySummary,
-			    impact_summary = :impactSummary, event_type = :eventType,
+			SET english_title = :englishTitle, event_type = :eventType,
 			    sentiment = :sentiment, importance = :importance,
 			    market_impact = :marketImpact,
 			    market_impact_importance = :marketImpactImportance,
@@ -426,10 +424,6 @@ class JdbcNewsRepository implements NewsRepository {
 			""")
 			.param("articleId", articleId)
 			.param("englishTitle", analysis.englishTitle())
-			.param("englishBody", String.join("\n\n", analysis.translatedParagraphs()))
-			.param("whatSummary", analysis.what())
-			.param("whySummary", analysis.why())
-			.param("impactSummary", analysis.impact())
 			.param("eventType", analysis.eventType())
 			.param("sentiment", analysis.sentiment().name())
 			.param("importance", analysis.importance().name())

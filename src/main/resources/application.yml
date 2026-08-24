@@ -48,6 +48,11 @@ opendart:
 
 kmarket:
 
+  translation:
+    generation-interval: ${KMARKET_TRANSLATION_GENERATION_INTERVAL:2s}
+    per-client-minute-limit: ${KMARKET_TRANSLATION_PER_CLIENT_MINUTE_LIMIT:12}
+    global-daily-limit: ${KMARKET_TRANSLATION_GLOBAL_DAILY_LIMIT:5000}
+
   disclosure:
     title-translation-interval: ${KMARKET_DISCLOSURE_TITLE_TRANSLATION_INTERVAL:5s}
 

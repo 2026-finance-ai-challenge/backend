@@ -1,6 +1,10 @@
 package com.kmarket.navigator.backend.news.infrastructure.ai;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -43,12 +47,31 @@ class AiNewsClient implements NewsAiGateway {
 		List<String> paragraphs,
 		List<String> candidateCompanies
 	) {
-		AnalysisResponse response = post(
-			"/internal/v1/news/analysis",
+		SignalResponse signals = post(
+			"/internal/v1/news/signals",
 			new AnalysisRequest(title, paragraphs, candidateCompanies),
-			AnalysisResponse.class
+			SignalResponse.class
 		);
-		return response.toDomain();
+		String sourceHash = sha256(title);
+		String id = sourceHash;
+		TitleBatchResponse titles = post(
+			"/internal/v1/translations/titles",
+			new TitleBatchRequest(
+				List.of(new TitleSource(id, sourceHash, title)),
+				"en",
+				"news-title-v1"
+			),
+			TitleBatchResponse.class
+		);
+		if (titles.items().size() != 1
+			|| !id.equals(titles.items().getFirst().id())
+			|| !sourceHash.equals(titles.items().getFirst().sourceHash())) {
+			throw new BusinessException(ErrorCode.AI_SERVICE_UNAVAILABLE);
+		}
+		return signals.toDomain(
+			titles.items().getFirst().translatedText(),
+			titles.promptVersion()
+		);
 	}
 
 	@Override
@@ -100,12 +123,7 @@ class AiNewsClient implements NewsAiGateway {
 	}
 
 	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-	private record AnalysisResponse(
-		String englishTitle,
-		List<String> translatedParagraphs,
-		String what,
-		String why,
-		String impact,
+	private record SignalResponse(
 		String eventType,
 		NewsSentiment sentiment,
 		NewsImportance importance,
@@ -116,16 +134,15 @@ class AiNewsClient implements NewsAiGateway {
 		BigDecimal sentimentConfidence,
 		BigDecimal importanceConfidence,
 		BigDecimal marketImpactConfidence,
-		String model,
-		String promptVersion
+		String model
 	) {
-		private NewsAnalysis toDomain() {
+		private NewsAnalysis toDomain(String englishTitle, String titlePromptVersion) {
 			return new NewsAnalysis(
 				englishTitle,
-				translatedParagraphs,
-				what,
-				why,
-				impact,
+				List.of(),
+				null,
+				null,
+				null,
 				eventType,
 				sentiment,
 				importance,
@@ -137,9 +154,35 @@ class AiNewsClient implements NewsAiGateway {
 				importanceConfidence,
 				marketImpactConfidence,
 				model,
-				promptVersion
+				titlePromptVersion
 			);
 		}
+	}
+
+	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+	private record TitleBatchRequest(
+		List<TitleSource> items,
+		String targetLocale,
+		String translationVersion
+	) {
+	}
+
+	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+	private record TitleSource(String id, String sourceHash, String sourceText) {
+	}
+
+	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+	private record TitleBatchResponse(
+		List<TranslatedTitle> items,
+		String targetLocale,
+		String translationVersion,
+		String model,
+		String promptVersion
+	) {
+	}
+
+	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+	private record TranslatedTitle(String id, String sourceHash, String translatedText) {
 	}
 
 	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
@@ -192,6 +235,17 @@ class AiNewsClient implements NewsAiGateway {
 				model,
 				promptVersion
 			);
+		}
+	}
+
+	private static String sha256(String value) {
+		try {
+			return HexFormat.of().formatHex(
+				MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))
+			);
+		}
+		catch (NoSuchAlgorithmException exception) {
+			throw new IllegalStateException("SHA-256 algorithm is unavailable", exception);
 		}
 	}
 }
