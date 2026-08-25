@@ -36,7 +36,10 @@ public class NewsAnalysisWorker {
 		this.clock = clock;
 	}
 
-	@Scheduled(fixedDelayString = "${kmarket.news.analysis-interval:5s}")
+	@Scheduled(
+		fixedDelayString = "${kmarket.news.analysis-interval:5s}",
+		initialDelayString = "${kmarket.news.analysis-initial-delay:30s}"
+	)
 	@SchedulerLock(name = "news-analysis", lockAtMostFor = "PT4M", lockAtLeastFor = "PT1S")
 	public void process() {
 		Instant now = Instant.now(clock);

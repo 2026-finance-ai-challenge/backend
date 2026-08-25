@@ -16,6 +16,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.time.LocalDate;
 import java.time.Instant;
+import java.time.Duration;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.util.List;
@@ -63,9 +64,13 @@ import com.kmarket.navigator.backend.disclosure.domain.DisclosureType;
 import com.kmarket.navigator.backend.disclosure.domain.ListedCommonStock;
 import com.kmarket.navigator.backend.disclosure.domain.Market;
 import com.kmarket.navigator.backend.disclosure.domain.SectionKind;
+import com.kmarket.navigator.backend.disclosure.infrastructure.ai.AiServiceProperties;
+import com.kmarket.navigator.backend.disclosure.infrastructure.opendart.OpenDartProperties;
 import com.kmarket.navigator.backend.news.application.port.NewsAiGateway;
+import com.kmarket.navigator.backend.news.application.port.NewsRepository;
 import com.kmarket.navigator.backend.news.domain.TermExplanation;
 import com.kmarket.navigator.backend.news.domain.TermReference;
+import com.kmarket.navigator.backend.news.infrastructure.naver.NaverNewsProperties;
 import com.kmarket.navigator.backend.chat.application.ChatGenerationWorker;
 import com.kmarket.navigator.backend.chat.application.port.AgentGateway;
 import com.kmarket.navigator.backend.chat.domain.AgentAnswer;
@@ -122,6 +127,9 @@ class BackendApplicationTests {
 	DisclosureTitleTranslationWorker disclosureTitleTranslationWorker;
 
 	@Autowired
+	NewsRepository newsRepository;
+
+	@Autowired
 	JdbcClient jdbcClient;
 
 	@Autowired
@@ -157,8 +165,36 @@ class BackendApplicationTests {
 	@Autowired
 	TaxDocumentProperties taxDocumentProperties;
 
+	@Autowired
+	AiServiceProperties aiServiceProperties;
+
+	@Autowired
+	NaverNewsProperties naverNewsProperties;
+
+	@Autowired
+	OpenDartProperties openDartProperties;
+
 	@Test
 	void contextLoads() {
+	}
+
+	@Test
+	void usesTimeoutsThatAllowBoundedProviderRetriesToComplete() {
+		assertThat(aiServiceProperties.connectTimeout()).isEqualTo(Duration.ofSeconds(3));
+		assertThat(aiServiceProperties.readTimeout()).isEqualTo(Duration.ofSeconds(120));
+		assertThat(naverNewsProperties.getConnectTimeout()).isEqualTo(Duration.ofSeconds(10));
+		assertThat(naverNewsProperties.getReadTimeout()).isEqualTo(Duration.ofSeconds(30));
+		assertThat(openDartProperties.connectTimeout()).isEqualTo(Duration.ofSeconds(5));
+		assertThat(openDartProperties.readTimeout()).isEqualTo(Duration.ofSeconds(150));
+	}
+
+	@Test
+	void loadsNewsStockMappingsWithAliasesFromCurrentSchema() {
+		var mappings = newsRepository.findStockMappings();
+
+		assertThat(mappings).hasSize(75);
+		assertThat(mappings)
+			.allSatisfy(mapping -> assertThat(mapping.aliases()).isNotEmpty());
 	}
 
 	@Test
@@ -1539,6 +1575,39 @@ class BackendApplicationTests {
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.answer").value("Revenue increased. [C1]"))
 			.andExpect(jsonPath("$.model").value("test-model"));
+	}
+
+	@Test
+	void allowsAnonymousOnDemandNewsAndDisclosureTranslationRequests() throws Exception {
+		UUID articleId = insertReadyNews(
+			"Market disclosure translation test",
+			"The company described a financing plan.",
+			Instant.parse("2026-08-23T00:00:00Z"),
+			"MEDIUM"
+		);
+
+		mockMvc.perform(post("/api/v1/news/{articleId}/translation", articleId))
+			.andExpect(status().isAccepted())
+			.andExpect(jsonPath("$.status").value("PENDING"));
+
+		OpenDartFiling filing = filing("20260823800003");
+		disclosureRepository.saveFiling(filing);
+		activateCommonStocks("005930");
+		disclosureRepository.completeDocumentJob(
+			filing.receiptNumber(),
+			List.of(document("e", "The company approved a new facility.")),
+			List.of()
+		);
+		UUID sectionId = disclosureQueryHandler.findOne(filing.receiptNumber())
+			.documents().getFirst().sections().getFirst().id();
+
+		mockMvc.perform(post(
+			"/api/v1/disclosures/{receiptNumber}/sections/{sectionId}/translation",
+			filing.receiptNumber(),
+			sectionId
+		))
+			.andExpect(status().isAccepted())
+			.andExpect(jsonPath("$.status").value("PENDING"));
 	}
 
 	@Test

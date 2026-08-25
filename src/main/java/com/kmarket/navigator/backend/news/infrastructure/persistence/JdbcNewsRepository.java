@@ -219,9 +219,10 @@ class JdbcNewsRepository implements NewsRepository {
 				stock.nameEn(),
 				stock.market(),
 				jdbcClient.sql("""
-					SELECT alias
+					SELECT stock_alias.alias
 					FROM stock_alias
-					WHERE stock_code = :stockCode
+					JOIN security ON security.id = stock_alias.security_id
+					WHERE security.stock_code = :stockCode
 					ORDER BY alias
 					""")
 					.param("stockCode", stock.stockCode())

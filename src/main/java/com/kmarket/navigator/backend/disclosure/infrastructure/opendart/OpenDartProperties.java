@@ -5,13 +5,14 @@ import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.Pattern;
 
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
-	@Validated
+@Validated
 @ConfigurationProperties(prefix = "opendart")
 public class OpenDartProperties {
 
@@ -19,6 +20,8 @@ public class OpenDartProperties {
 	private List<@NotBlank @Pattern(regexp = "^[A-Za-z0-9]{40}$") String> apiKeys = new ArrayList<>();
 
 	private Path archiveRoot = Path.of("data/opendart-archives");
+	private Duration connectTimeout = Duration.ofSeconds(5);
+	private Duration readTimeout = Duration.ofSeconds(150);
 
 	public List<String> apiKeys() {
 		return List.copyOf(apiKeys);
@@ -42,5 +45,21 @@ public class OpenDartProperties {
 
 	public void setArchiveRoot(Path archiveRoot) {
 		this.archiveRoot = archiveRoot;
+	}
+
+	public Duration connectTimeout() {
+		return connectTimeout;
+	}
+
+	public void setConnectTimeout(Duration connectTimeout) {
+		this.connectTimeout = connectTimeout;
+	}
+
+	public Duration readTimeout() {
+		return readTimeout;
+	}
+
+	public void setReadTimeout(Duration readTimeout) {
+		this.readTimeout = readTimeout;
 	}
 }

@@ -45,11 +45,20 @@ management:
 opendart:
   api-keys: ${OPENDART_API_KEYS:${OPENDART_API_KEY}}
   archive-root: ${OPENDART_ARCHIVE_ROOT:./data/opendart-archives}
+  connect-timeout: ${OPENDART_CONNECT_TIMEOUT:5s}
+  read-timeout: ${OPENDART_READ_TIMEOUT:150s}
 
 kmarket:
 
+  ai:
+    base-url: ${KMARKET_AI_BASE_URL:http://127.0.0.1:8000}
+    service-token: ${KMARKET_AI_SERVICE_TOKEN:}
+    connect-timeout: ${KMARKET_AI_CONNECT_TIMEOUT:3s}
+    read-timeout: ${KMARKET_AI_READ_TIMEOUT:120s}
+
   translation:
     generation-interval: ${KMARKET_TRANSLATION_GENERATION_INTERVAL:2s}
+    generation-initial-delay: ${KMARKET_TRANSLATION_GENERATION_INITIAL_DELAY:30s}
     per-client-minute-limit: ${KMARKET_TRANSLATION_PER_CLIENT_MINUTE_LIMIT:12}
     global-daily-limit: ${KMARKET_TRANSLATION_GLOBAL_DAILY_LIMIT:5000}
 
@@ -75,6 +84,7 @@ kmarket:
     collection-interval: ${KMARKET_NEWS_COLLECTION_INTERVAL:10m}
     collection-initial-delay: ${KMARKET_NEWS_COLLECTION_INITIAL_DELAY:30s}
     analysis-interval: ${KMARKET_NEWS_ANALYSIS_INTERVAL:5s}
+    analysis-initial-delay: ${KMARKET_NEWS_ANALYSIS_INITIAL_DELAY:30s}
     naver:
       enabled: ${KMARKET_NAVER_NEWS_ENABLED:false}
       base-url: ${KMARKET_NAVER_NEWS_BASE_URL:https://openapi.naver.com}
@@ -82,8 +92,8 @@ kmarket:
       client-secret: ${KMARKET_NAVER_NEWS_CLIENT_SECRET:}
       display: ${KMARKET_NAVER_NEWS_DISPLAY:20}
       target-batch-size: ${KMARKET_NAVER_NEWS_TARGET_BATCH_SIZE:8}
-      connect-timeout: ${KMARKET_NAVER_NEWS_CONNECT_TIMEOUT:3s}
-      read-timeout: ${KMARKET_NAVER_NEWS_READ_TIMEOUT:10s}
+      connect-timeout: ${KMARKET_NAVER_NEWS_CONNECT_TIMEOUT:10s}
+      read-timeout: ${KMARKET_NAVER_NEWS_READ_TIMEOUT:30s}
       request-delay: ${KMARKET_NAVER_NEWS_REQUEST_DELAY:125ms}
       queries: ${KMARKET_NAVER_NEWS_QUERIES:코스피,코스닥,한국 증시}
   market:

@@ -16,8 +16,8 @@ public class NaverNewsProperties {
 	private String clientSecret = "";
 	private int display = 20;
 	private int targetBatchSize = 8;
-	private Duration connectTimeout = Duration.ofSeconds(3);
-	private Duration readTimeout = Duration.ofSeconds(10);
+	private Duration connectTimeout = Duration.ofSeconds(10);
+	private Duration readTimeout = Duration.ofSeconds(30);
 	private Duration requestDelay = Duration.ofMillis(125);
 	private List<String> queries = new ArrayList<>(List.of("코스피", "코스닥", "한국 증시"));
 

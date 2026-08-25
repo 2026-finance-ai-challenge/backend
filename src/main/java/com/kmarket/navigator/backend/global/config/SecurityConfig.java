@@ -59,6 +59,7 @@ public class SecurityConfig {
 				.requestMatchers(HttpMethod.GET, "/api/v1/news", "/api/v1/news/**").permitAll()
 				.requestMatchers(
 					HttpMethod.POST,
+					"/api/v1/news/{articleId}/translation",
 					"/api/v1/news/{articleId}/term-explanations"
 				).permitAll()
 				.requestMatchers(
@@ -69,6 +70,14 @@ public class SecurityConfig {
 				.requestMatchers(
 					HttpMethod.POST,
 					"/api/v1/disclosures/{receiptNumber:[0-9]{14}}/questions"
+				).permitAll()
+				.requestMatchers(
+					HttpMethod.GET,
+					"/api/v1/disclosures/{receiptNumber:[0-9]{14}}/sections/{sectionId}/translation"
+				).permitAll()
+				.requestMatchers(
+					HttpMethod.POST,
+					"/api/v1/disclosures/{receiptNumber:[0-9]{14}}/sections/{sectionId}/translation"
 				).permitAll()
 				.requestMatchers(
 					HttpMethod.POST,
