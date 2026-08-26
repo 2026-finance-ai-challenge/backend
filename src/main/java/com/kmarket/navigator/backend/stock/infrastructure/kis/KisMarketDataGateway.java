@@ -3,16 +3,21 @@ package com.kmarket.navigator.backend.stock.infrastructure.kis;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.DayOfWeek;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ThreadLocalRandom;
 
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 
 import com.kmarket.navigator.backend.stock.application.port.MarketDataGateway;
 import com.kmarket.navigator.backend.stock.domain.MarketDataStatus;
@@ -131,7 +136,51 @@ class KisMarketDataGateway implements MarketDataGateway {
 
 	private JsonNode request(String path, String transactionId, String marketCode, String code) {
 		String token = tokenProvider.accessToken();
-		JsonNode root = circuitBreaker.execute(() -> restClient.get()
+		JsonNode root = circuitBreaker.execute(() -> requestWithRetry(
+			path,
+			transactionId,
+			marketCode,
+			code,
+			token
+		));
+		if (root == null || !"0".equals(text(root, "rt_cd"))) {
+			throw new KisProviderException("KIS market response was rejected");
+		}
+		JsonNode output = root.path("output");
+		if (output.isMissingNode() || output.isNull()) {
+			throw new KisProviderException("KIS market response has no output");
+		}
+		return output;
+	}
+
+	private JsonNode requestWithRetry(
+		String path,
+		String transactionId,
+		String marketCode,
+		String code,
+		String token
+	) {
+		int maxAttempts = Math.max(1, properties.getRetryMaxAttempts());
+		for (int attempt = 1; ; attempt++) {
+			try {
+				return exchange(path, transactionId, marketCode, code, token);
+			} catch (RuntimeException exception) {
+				if (attempt >= maxAttempts || !isTransient(exception)) {
+					throw exception;
+				}
+				pauseBeforeRetry(attempt);
+			}
+		}
+	}
+
+	private JsonNode exchange(
+		String path,
+		String transactionId,
+		String marketCode,
+		String code,
+		String token
+	) {
+		return restClient.get()
 			.uri(uriBuilder -> uriBuilder
 				.path(path)
 				.queryParam("FID_COND_MRKT_DIV_CODE", marketCode)
@@ -143,15 +192,50 @@ class KisMarketDataGateway implements MarketDataGateway {
 			.header("appsecret", properties.getAppSecret())
 			.header("tr_id", transactionId)
 			.retrieve()
-			.body(JsonNode.class));
-		if (root == null || !"0".equals(text(root, "rt_cd"))) {
-			throw new KisProviderException("KIS market response was rejected");
+			.body(JsonNode.class);
+	}
+
+	private void pauseBeforeRetry(int failedAttempt) {
+		Duration initialDelay = nonNegative(properties.getRetryInitialDelay());
+		Duration maxDelay = nonNegative(properties.getRetryMaxDelay());
+		long multiplier = 1L << Math.min(failedAttempt - 1, 20);
+		Duration ceiling = min(initialDelay.multipliedBy(multiplier), maxDelay);
+		if (ceiling.isZero()) {
+			return;
 		}
-		JsonNode output = root.path("output");
-		if (output.isMissingNode() || output.isNull()) {
-			throw new KisProviderException("KIS market response has no output");
+		long ceilingMillis = Math.max(1L, ceiling.toMillis());
+		long delayMillis = ThreadLocalRandom.current().nextLong(
+			Math.max(1L, ceilingMillis / 2),
+			ceilingMillis + 1
+		);
+		try {
+			Thread.sleep(Duration.ofMillis(delayMillis));
+		} catch (InterruptedException exception) {
+			Thread.currentThread().interrupt();
+			throw new KisProviderException("KIS market retry was interrupted", exception);
 		}
-		return output;
+	}
+
+	private static boolean isTransient(RuntimeException exception) {
+		if (exception instanceof ResourceAccessException) {
+			return true;
+		}
+		if (exception instanceof RestClientResponseException responseException) {
+			HttpStatusCode status = responseException.getStatusCode();
+			return status.is5xxServerError() || status.value() == 429;
+		}
+		return false;
+	}
+
+	private static Duration nonNegative(Duration duration) {
+		return duration == null || duration.isNegative() ? Duration.ZERO : duration;
+	}
+
+	private static Duration min(Duration first, Duration second) {
+		if (second.isZero()) {
+			return Duration.ZERO;
+		}
+		return first.compareTo(second) <= 0 ? first : second;
 	}
 
 	private MarketDataStatus marketDataStatus() {
@@ -263,7 +347,11 @@ class KisMarketDataGateway implements MarketDataGateway {
 		if (output == null) {
 			return "";
 		}
-		String value = output.path(field).stringValue();
+		JsonNode fieldNode = output.path(field);
+		if (fieldNode.isMissingNode() || fieldNode.isNull()) {
+			return "";
+		}
+		String value = fieldNode.stringValue();
 		return value == null ? "" : value.trim();
 	}
 

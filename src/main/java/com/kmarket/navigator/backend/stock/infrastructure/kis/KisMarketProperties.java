@@ -15,6 +15,9 @@ public class KisMarketProperties {
 	private Duration connectTimeout = Duration.ofSeconds(3);
 	private Duration readTimeout = Duration.ofSeconds(5);
 	private Duration collectionDelay = Duration.ofMillis(125);
+	private int retryMaxAttempts = 3;
+	private Duration retryInitialDelay = Duration.ofMillis(250);
+	private Duration retryMaxDelay = Duration.ofSeconds(2);
 	private String redisKeyPrefix = "kmarket:market:kis";
 
 	public boolean configured() {
@@ -75,6 +78,30 @@ public class KisMarketProperties {
 
 	public void setCollectionDelay(Duration collectionDelay) {
 		this.collectionDelay = collectionDelay;
+	}
+
+	public int getRetryMaxAttempts() {
+		return retryMaxAttempts;
+	}
+
+	public void setRetryMaxAttempts(int retryMaxAttempts) {
+		this.retryMaxAttempts = retryMaxAttempts;
+	}
+
+	public Duration getRetryInitialDelay() {
+		return retryInitialDelay;
+	}
+
+	public void setRetryInitialDelay(Duration retryInitialDelay) {
+		this.retryInitialDelay = retryInitialDelay;
+	}
+
+	public Duration getRetryMaxDelay() {
+		return retryMaxDelay;
+	}
+
+	public void setRetryMaxDelay(Duration retryMaxDelay) {
+		this.retryMaxDelay = retryMaxDelay;
 	}
 
 	public String getRedisKeyPrefix() {

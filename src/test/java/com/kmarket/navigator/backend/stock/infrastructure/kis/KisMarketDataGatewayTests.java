@@ -5,6 +5,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.queryParam;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withBadRequest;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import java.math.BigDecimal;
@@ -13,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 
 class KisMarketDataGatewayTests {
 
@@ -75,5 +78,62 @@ class KisMarketDataGatewayTests {
 		assertThat(index.currentValue()).isEqualByComparingTo(new BigDecimal("2850.50"));
 		assertThat(index.source()).isEqualTo("KIS_REST_INDEX_PRICE");
 		server.verify();
+	}
+
+	@Test
+	void retriesTransientServerErrorsAndReturnsTheRecoveredQuote() {
+		KisMarketProperties properties = configuredProperties();
+		properties.setRetryInitialDelay(java.time.Duration.ZERO);
+		properties.setRetryMaxDelay(java.time.Duration.ZERO);
+		RestClient.Builder builder = RestClient.builder();
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		KisAccessTokenProvider tokenProvider = mock(KisAccessTokenProvider.class);
+		when(tokenProvider.accessToken()).thenReturn("access-token");
+		KisMarketDataGateway gateway = new KisMarketDataGateway(
+			builder.baseUrl("https://example.test").build(),
+			properties,
+			tokenProvider,
+			new KisCircuitBreaker()
+		);
+
+		server.expect(queryParam("FID_INPUT_ISCD", "005930")).andRespond(withServerError());
+		server.expect(queryParam("FID_INPUT_ISCD", "005930")).andRespond(withSuccess("""
+			{
+			  "rt_cd": "0",
+			  "output": {"stck_prpr": "78000", "prdy_vrss": "0", "prdy_ctrt": "0"}
+			}
+			""", MediaType.APPLICATION_JSON));
+
+		assertThat(gateway.fetchQuote("005930")).isPresent();
+		server.verify();
+	}
+
+	@Test
+	void doesNotRetryNonTransientClientErrors() {
+		KisMarketProperties properties = configuredProperties();
+		RestClient.Builder builder = RestClient.builder();
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		KisAccessTokenProvider tokenProvider = mock(KisAccessTokenProvider.class);
+		when(tokenProvider.accessToken()).thenReturn("access-token");
+		KisMarketDataGateway gateway = new KisMarketDataGateway(
+			builder.baseUrl("https://example.test").build(),
+			properties,
+			tokenProvider,
+			new KisCircuitBreaker()
+		);
+
+		server.expect(queryParam("FID_INPUT_ISCD", "005930")).andRespond(withBadRequest());
+
+		org.assertj.core.api.Assertions.assertThatThrownBy(() -> gateway.fetchQuote("005930"))
+			.isInstanceOf(RestClientResponseException.class);
+		server.verify();
+	}
+
+	private static KisMarketProperties configuredProperties() {
+		KisMarketProperties properties = new KisMarketProperties();
+		properties.setEnabled(true);
+		properties.setAppKey("app-key");
+		properties.setAppSecret("app-secret");
+		return properties;
 	}
 }
