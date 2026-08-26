@@ -73,7 +73,15 @@ public class NewsFingerprint {
 		intersection.retainAll(rightTokens);
 		Set<String> union = new HashSet<>(leftTokens);
 		union.addAll(rightTokens);
-		return (double)intersection.size() / union.size();
+		double jaccard = (double)intersection.size() / union.size();
+		if (Math.min(leftTokens.size(), rightTokens.size()) < 4) {
+			return jaccard;
+		}
+		double containment = (double)intersection.size()
+			/ Math.min(leftTokens.size(), rightTokens.size());
+		double dice = (2.0 * intersection.size()) / (leftTokens.size() + rightTokens.size());
+		// 언론사가 제목에 보충 문구를 덧붙인 재전송 기사도 같은 뉴스로 묶는다.
+		return Math.max(jaccard, (containment * 0.65) + (dice * 0.35));
 	}
 
 	private Set<String> tokens(String value) {

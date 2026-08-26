@@ -1,0 +1,13 @@
+[Unit]
+Description=Renew K-Market short-lived IP TLS certificate
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/certbot-5.4/bin/certbot renew --quiet --deploy-hook "/usr/bin/systemctl reload nginx"
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/etc/letsencrypt /var/lib/letsencrypt /var/log/letsencrypt /var/www/certbot
+NoNewPrivileges=true
