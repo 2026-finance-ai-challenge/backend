@@ -8,6 +8,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
@@ -20,23 +21,34 @@ class DisclosureBackfillRunner implements ApplicationRunner {
 	private static final Logger log = LoggerFactory.getLogger(DisclosureBackfillRunner.class);
 
 	private final DisclosureBackfillHandler backfillHandler;
+	private final ConfigurableApplicationContext applicationContext;
 
-	DisclosureBackfillRunner(DisclosureBackfillHandler backfillHandler) {
+	DisclosureBackfillRunner(
+		DisclosureBackfillHandler backfillHandler,
+		ConfigurableApplicationContext applicationContext
+	) {
 		this.backfillHandler = backfillHandler;
+		this.applicationContext = applicationContext;
 	}
 
 	@Override
 	public void run(ApplicationArguments arguments) {
-		LocalDate from = requiredDate(arguments, "from");
-		LocalDate to = requiredDate(arguments, "to");
-		var result = backfillHandler.run(from, to);
-		log.info(
-			"과거 공시 적재 완료: from={}, to={}, collectedCount={}, alreadyCompleted={}",
-			result.from(),
-			result.to(),
-			result.collectedCount(),
-			result.alreadyCompleted()
-		);
+		try {
+			LocalDate from = requiredDate(arguments, "from");
+			LocalDate to = requiredDate(arguments, "to");
+			var result = backfillHandler.run(from, to);
+			log.info(
+				"과거 공시 적재 완료: from={}, to={}, collectedCount={}, alreadyCompleted={}",
+				result.from(),
+				result.to(),
+				result.collectedCount(),
+				result.alreadyCompleted()
+			);
+		}
+		finally {
+			// 일회성 백필이 끝나면 스케줄러를 남기지 않고 프로세스를 종료한다.
+			applicationContext.close();
+		}
 	}
 
 	private static LocalDate requiredDate(ApplicationArguments arguments, String name) {
