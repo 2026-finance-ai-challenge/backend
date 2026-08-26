@@ -31,7 +31,7 @@ services:
   redis-init:
     image: redis:8.6.2
     entrypoint: ["/bin/sh", "-c"]
-    command: ["chown root:root /data && chmod 700 /data && chown -R redis:redis /data"]
+    command: ["chown root:root /data && chmod 700 /data && chown redis:redis /data"]
     user: "0:0"
     volumes:
       - redis-data:/data
