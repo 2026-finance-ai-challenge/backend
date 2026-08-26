@@ -28,9 +28,27 @@ services:
       retries: 20
     stop_grace_period: 60s
 
+  redis-init:
+    image: redis:8.6.2
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["chown root:root /data && chmod 700 /data && chown redis:redis /data"]
+    user: "0:0"
+    volumes:
+      - redis-data:/data
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      # 실제 Redis 프로세스가 아닌 1회성 볼륨 초기화에만 허용한다.
+      - CHOWN
+
   redis:
     <<: *service-defaults
     image: redis:8.6.2
+    user: "999:999"
     command:
       - redis-server
       - --requirepass
@@ -41,6 +59,9 @@ services:
       - everysec
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?required}
+    depends_on:
+      redis-init:
+        condition: service_completed_successfully
     volumes:
       - redis-data:/data
     healthcheck:
@@ -101,6 +122,24 @@ services:
       - ALL
     stop_grace_period: 30s
 
+  model-cache-init:
+    image: ghcr.io/2026-finance-ai-challenge/ai:${AI_IMAGE_TAG:?required}
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["chown root:root /cache && chmod 700 /cache && chown 10001:10001 /cache"]
+    user: "0:0"
+    profiles: ["worker"]
+    volumes:
+      - model-cache:/cache
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      # 실제 RAG 프로세스가 아닌 1회성 캐시 볼륨 초기화에만 허용한다.
+      - CHOWN
+
   rag-worker:
     <<: *service-defaults
     image: ghcr.io/2026-finance-ai-challenge/ai:${AI_IMAGE_TAG:?required}
@@ -111,6 +150,11 @@ services:
       KMARKET_AI_DATABASE_URL: postgresql://kmarket:${DB_PASSWORD:?required}@postgres:5432/kmarket
     depends_on:
       postgres:
+        condition: service_healthy
+      model-cache-init:
+        condition: service_completed_successfully
+      # 초기 덤프 이후 Flyway 마이그레이션이 끝난 뒤 인덱싱을 시작한다.
+      backend:
         condition: service_healthy
     volumes:
       - model-cache:/home/kmarket/.cache
@@ -125,6 +169,7 @@ services:
     <<: *service-defaults
     image: ghcr.io/2026-finance-ai-challenge/backend:${BACKEND_IMAGE_TAG:?required}
     environment:
+      JAVA_TOOL_OPTIONS: -Djava.io.tmpdir=/app/native-tmp
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/kmarket
       SPRING_DATASOURCE_USERNAME: kmarket
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD:?required}
@@ -165,9 +210,13 @@ services:
       interval: 10s
       timeout: 3s
       retries: 30
+      # 대용량 초기 덤프의 Flyway 마이그레이션 동안 조기 실패로 판정하지 않는다.
+      start_period: 10m
     read_only: true
     tmpfs:
       - /tmp:size=128m,mode=1777
+      # Zstd JNI 전용 경로만 실행 가능하게 열고 일반 /tmp는 noexec로 유지한다.
+      - /app/native-tmp:size=32m,mode=0700,uid=10001,gid=10001,exec
     cap_drop:
       - ALL
     stop_grace_period: 45s

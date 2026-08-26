@@ -1,7 +1,6 @@
 package com.kmarket.navigator.backend.disclosure.infrastructure.ai;
 
 import java.net.http.HttpClient;
-import java.time.Duration;
 
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -16,12 +15,12 @@ class AiServiceConfig {
 	@Bean
 	RestClient aiServiceRestClient(RestClient.Builder builder, AiServiceProperties properties) {
 		HttpClient httpClient = HttpClient.newBuilder()
-			.connectTimeout(Duration.ofSeconds(3))
+			.connectTimeout(properties.connectTimeout())
 			.version(HttpClient.Version.HTTP_1_1)
 			.followRedirects(HttpClient.Redirect.NEVER)
 			.build();
 		JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
-		requestFactory.setReadTimeout(Duration.ofSeconds(30));
+		requestFactory.setReadTimeout(properties.readTimeout());
 		return builder
 			.baseUrl(properties.baseUrl().toString())
 			.requestFactory(requestFactory)

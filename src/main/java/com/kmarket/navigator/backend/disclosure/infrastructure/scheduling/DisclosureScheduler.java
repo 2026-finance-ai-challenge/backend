@@ -61,12 +61,8 @@ class DisclosureScheduler {
 	}
 
 	@Scheduled(fixedDelay = 2_000, initialDelay = 10_000)
-	@SchedulerLock(name = "processDisclosureDocuments", lockAtMostFor = "PT1M")
+	@SchedulerLock(name = "processDisclosureDocuments", lockAtMostFor = "PT3M")
 	void processDisclosureDocuments() {
-		for (int index = 0; index < 5; index++) {
-			if (!documentHandler.processNext()) {
-				return;
-			}
-		}
+		documentHandler.processNext();
 	}
 }

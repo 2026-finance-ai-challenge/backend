@@ -42,7 +42,7 @@ class TranslationWorkerTests {
 			id, job.sourceHash(), "Samsung Electronics expands investment", "en",
 			"news-title-v1", "gpt-5-mini", "news-title-v1"
 		);
-		when(repository.claimNewsTitles(eq(25), anyString(), eq(NOW), eq(NOW.minusSeconds(300))))
+		when(repository.claimNewsTitles(eq(10), anyString(), eq(NOW), eq(NOW.minusSeconds(300))))
 			.thenReturn(List.of(job));
 		when(repository.claim(eq(10), anyString(), eq(NOW), eq(NOW.minusSeconds(300))))
 			.thenReturn(List.of());

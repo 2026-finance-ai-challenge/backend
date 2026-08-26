@@ -28,7 +28,7 @@ public class TranslationWorker {
 
 	private static final Logger log = LoggerFactory.getLogger(TranslationWorker.class);
 	private static final int BATCH_SIZE = 10;
-	private static final int TITLE_BATCH_SIZE = 25;
+	private static final int TITLE_BATCH_SIZE = 10;
 	private final TranslationRepository repository;
 	private final TranslationAiGateway aiGateway;
 	private final TranslationGenerationGuard guard;
@@ -60,7 +60,10 @@ public class TranslationWorker {
 		this.clock = clock;
 	}
 
-	@Scheduled(fixedDelayString = "${kmarket.translation.generation-interval:2s}")
+	@Scheduled(
+		fixedDelayString = "${kmarket.translation.generation-interval:2s}",
+		initialDelayString = "${kmarket.translation.generation-initial-delay:30s}"
+	)
 	@SchedulerLock(name = "on-demand-translation", lockAtMostFor = "PT4M", lockAtLeastFor = "PT0.5S")
 	public void process() {
 		Instant now = Instant.now(clock);
