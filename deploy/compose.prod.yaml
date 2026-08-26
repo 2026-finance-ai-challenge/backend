@@ -28,9 +28,27 @@ services:
       retries: 20
     stop_grace_period: 60s
 
+  redis-init:
+    image: redis:8.6.2
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["chown root:root /data && chmod 700 /data && chown -R redis:redis /data"]
+    user: "0:0"
+    volumes:
+      - redis-data:/data
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      # 실제 Redis 프로세스가 아닌 1회성 볼륨 초기화에만 허용한다.
+      - CHOWN
+
   redis:
     <<: *service-defaults
     image: redis:8.6.2
+    user: "999:999"
     command:
       - redis-server
       - --requirepass
@@ -41,6 +59,9 @@ services:
       - everysec
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?required}
+    depends_on:
+      redis-init:
+        condition: service_completed_successfully
     volumes:
       - redis-data:/data
     healthcheck:
@@ -111,6 +132,9 @@ services:
       KMARKET_AI_DATABASE_URL: postgresql://kmarket:${DB_PASSWORD:?required}@postgres:5432/kmarket
     depends_on:
       postgres:
+        condition: service_healthy
+      # 초기 덤프 이후 Flyway 마이그레이션이 끝난 뒤 인덱싱을 시작한다.
+      backend:
         condition: service_healthy
     volumes:
       - model-cache:/home/kmarket/.cache
