@@ -34,6 +34,6 @@ update_image_tag FRONTEND_IMAGE_TAG "$1"
 
 cd "$DEPLOY_ROOT"
 docker compose --env-file "$RUNTIME_ENV" --env-file "$IMAGE_ENV" -f "$COMPOSE_FILE" pull backend frontend
-docker compose --profile worker --env-file "$RUNTIME_ENV" --env-file "$IMAGE_ENV" -f "$COMPOSE_FILE" up -d --wait --wait-timeout 300
+docker compose --profile worker --env-file "$RUNTIME_ENV" --env-file "$IMAGE_ENV" -f "$COMPOSE_FILE" up -d --wait --wait-timeout 900
 curl --fail --silent --show-error --max-time 10 http://127.0.0.1:15101/healthz >/dev/null
 docker image prune --force --filter until=168h >/dev/null
