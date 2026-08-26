@@ -25,13 +25,33 @@ class NewsFingerprintTests {
 	}
 
 	@Test
-	void calculatesTokenJaccardSimilarityAfterNormalization() {
+	void calculatesTokenSimilarityAfterNormalization() {
 		double similarity = fingerprint.similarity(
 			"삼성전자, 반도체 투자 확대 발표",
 			"삼성전자 반도체 투자 확대"
 		);
 
-		assertThat(similarity).isEqualTo(0.8);
+		assertThat(similarity).isGreaterThan(0.95);
 		assertThat(fingerprint.similarity("", "삼성전자")).isZero();
+	}
+
+	@Test
+	void detectsSyndicatedArticleWithPublisherWordingAdded() {
+		double similarity = fingerprint.similarity(
+			"삼성전자 반도체 투자 확대 발표 평택 생산라인 증설",
+			"단독 삼성전자 반도체 투자 확대 발표 평택 생산라인 증설 업계 최초"
+		);
+
+		assertThat(similarity).isGreaterThanOrEqualTo(0.82);
+	}
+
+	@Test
+	void keepsShortArticlesOnStrictJaccardToAvoidFalseClusters() {
+		double similarity = fingerprint.similarity(
+			"삼성전자 실적 발표",
+			"삼성전자 실적 전망"
+		);
+
+		assertThat(similarity).isLessThan(0.82);
 	}
 }

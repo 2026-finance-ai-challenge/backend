@@ -1,4 +1,4 @@
-name: Backend CI
+name: Backend CI/CD
 
 on:
   pull_request:
@@ -10,33 +10,29 @@ permissions:
   contents: read
 
 concurrency:
-  group: backend-ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: backend-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   test:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: 소스 체크아웃
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
       - name: Java 구성
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
         with:
           distribution: temurin
           java-version: "25"
-
       - name: Gradle 구성
         uses: gradle/actions/setup-gradle@50e97c2cd7a37755bbfafc9c5b7cafaece252f6e # v6.1.0
         with:
           cache-provider: basic
-
       - name: 전체 검증
         run: ./gradlew check --no-daemon
-
       - name: Compose 구성 검증
         env:
           SPRING_DATASOURCE_USERNAME: ci
@@ -47,9 +43,136 @@ jobs:
           KMARKET_JWT_SECRET_BASE64: bG9jYWwtdGVzdC1qd3Qtc2VjcmV0LTAxMjM0NTY3ODktQUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVotYWJjZGVmZ2g=
           KMARKET_TAX_DOCUMENT_KEY_BASE64: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
         run: docker compose config --quiet
-
       - name: Backend 이미지 빌드
         run: docker build --tag kmarket-backend:ci .
-
       - name: Frontend 이미지 빌드 및 테스트
         run: docker build --tag kmarket-frontend:ci frontend
+
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: backend
+            context: .
+          - image: frontend
+            context: frontend
+    steps:
+      - name: 소스 체크아웃
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Buildx 구성
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: GHCR 로그인
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: ARM64 이미지 발행
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: ${{ matrix.context }}
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:main
+          cache-from: type=gha,scope=${{ matrix.image }}-arm64
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}-arm64
+          provenance: mode=max
+          sbom: true
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - name: 소스 체크아웃
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: SSH 클라이언트 구성
+        env:
+          PROD_SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+          PROD_SSH_HOST_KEY: ${{ secrets.PROD_SSH_HOST_KEY }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends sshpass
+          install -m 700 -d "$RUNNER_TEMP/ssh"
+          printf '%s\n' "$PROD_SSH_KEY" > "$RUNNER_TEMP/ssh/key"
+          printf '%s\n' "$PROD_SSH_HOST_KEY" > "$RUNNER_TEMP/ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/ssh/key" "$RUNNER_TEMP/ssh/known_hosts"
+      - name: 배포 구성 전송
+        env:
+          SSHPASS: ${{ secrets.PROD_SSH_PASSWORD }}
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+        run: |
+          SSH_OPTIONS=(-i "$RUNNER_TEMP/ssh/key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/ssh/known_hosts" -o PreferredAuthentications=publickey,keyboard-interactive,password)
+          tar -C deploy -cf - . | sshpass -e ssh "${SSH_OPTIONS[@]}" "ubuntu@$PROD_HOST" 'tar -C /opt/kmarket -xf -'
+      - name: 운영 비밀 환경 전송
+        env:
+          SSHPASS: ${{ secrets.PROD_SSH_PASSWORD }}
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          OPENDART_API_KEYS: ${{ secrets.OPENDART_API_KEYS }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          KMARKET_AI_SERVICE_TOKEN: ${{ secrets.KMARKET_AI_SERVICE_TOKEN }}
+          KMARKET_CONTEXT_PEPPER: ${{ secrets.KMARKET_CONTEXT_PEPPER }}
+          KMARKET_JWT_SECRET_BASE64: ${{ secrets.KMARKET_JWT_SECRET_BASE64 }}
+          KMARKET_TAX_DOCUMENT_KEY_BASE64: ${{ secrets.KMARKET_TAX_DOCUMENT_KEY_BASE64 }}
+          KMARKET_NAVER_NEWS_CLIENT_ID: ${{ secrets.KMARKET_NAVER_NEWS_CLIENT_ID }}
+          KMARKET_NAVER_NEWS_CLIENT_SECRET: ${{ secrets.KMARKET_NAVER_NEWS_CLIENT_SECRET }}
+          KMARKET_KIS_APP_KEY: ${{ secrets.KMARKET_KIS_APP_KEY }}
+          KMARKET_KIS_APP_SECRET: ${{ secrets.KMARKET_KIS_APP_SECRET }}
+        run: |
+          umask 077
+          {
+            printf 'DB_PASSWORD=%s\n' "$DB_PASSWORD"
+            printf 'REDIS_PASSWORD=%s\n' "$REDIS_PASSWORD"
+            printf 'OPENDART_API_KEYS=%s\n' "$OPENDART_API_KEYS"
+            printf 'OPENAI_API_KEY=%s\n' "$OPENAI_API_KEY"
+            printf 'KMARKET_AI_ALLOWED_HOSTS=["localhost","127.0.0.1","ai-api"]\n'
+            printf 'KMARKET_AI_SERVICE_TOKEN=%s\n' "$KMARKET_AI_SERVICE_TOKEN"
+            printf 'KMARKET_AI_HANA_EXPECTED_COMMIT=ab82ccc51cb096872f9a110a85c027a4158a147f\n'
+            printf 'KMARKET_CONTEXT_PEPPER=%s\n' "$KMARKET_CONTEXT_PEPPER"
+            printf 'KMARKET_JWT_SECRET_BASE64=%s\n' "$KMARKET_JWT_SECRET_BASE64"
+            printf 'KMARKET_TAX_DOCUMENT_KEY_BASE64=%s\n' "$KMARKET_TAX_DOCUMENT_KEY_BASE64"
+            printf 'KMARKET_NAVER_NEWS_ENABLED=true\n'
+            printf 'KMARKET_NAVER_NEWS_CLIENT_ID=%s\n' "$KMARKET_NAVER_NEWS_CLIENT_ID"
+            printf 'KMARKET_NAVER_NEWS_CLIENT_SECRET=%s\n' "$KMARKET_NAVER_NEWS_CLIENT_SECRET"
+            printf 'KMARKET_KIS_ENABLED=true\n'
+            printf 'KMARKET_KIS_APP_KEY=%s\n' "$KMARKET_KIS_APP_KEY"
+            printf 'KMARKET_KIS_APP_SECRET=%s\n' "$KMARKET_KIS_APP_SECRET"
+            printf 'KMARKET_KRX_ENABLED=false\n'
+            printf 'KMARKET_KRX_MEMBER_ID=\n'
+            printf 'KMARKET_KRX_PASSWORD=\n'
+          } > "$RUNNER_TEMP/runtime.env"
+          SSH_OPTIONS=(-i "$RUNNER_TEMP/ssh/key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/ssh/known_hosts" -o PreferredAuthentications=publickey,keyboard-interactive,password)
+          sshpass -e scp "${SSH_OPTIONS[@]}" "$RUNNER_TEMP/runtime.env" "ubuntu@$PROD_HOST:/opt/kmarket/runtime.env"
+          rm -f "$RUNNER_TEMP/runtime.env"
+      - name: Backend 및 Frontend 배포
+        env:
+          SSHPASS: ${{ secrets.PROD_SSH_PASSWORD }}
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        run: |
+          SSH_OPTIONS=(-i "$RUNNER_TEMP/ssh/key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/ssh/known_hosts" -o PreferredAuthentications=publickey,keyboard-interactive,password)
+          {
+            printf '%s\n' "$GHCR_USERNAME"
+            printf '%s\n' "$GHCR_TOKEN"
+          } | sshpass -e ssh "${SSH_OPTIONS[@]}" "ubuntu@$PROD_HOST" "IFS= read -r GHCR_USERNAME; IFS= read -r GHCR_TOKEN; export GHCR_USERNAME GHCR_TOKEN; /opt/kmarket/deploy-backend.sh '$GITHUB_SHA'"
