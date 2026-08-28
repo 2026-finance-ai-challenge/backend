@@ -5,6 +5,8 @@ import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.HexFormat;
@@ -64,8 +66,55 @@ public class NewsFingerprint {
 	}
 
 	public double similarity(String left, String right) {
-		Set<String> leftTokens = tokens(left);
-		Set<String> rightTokens = tokens(right);
+		return tokenSimilarity(tokens(left), tokens(right));
+	}
+
+	public Profile profile(String title, String excerpt) {
+		String normalizedTitle = normalize(title);
+		String normalizedExcerpt = normalize(excerpt);
+		return new Profile(
+			normalizedTitle,
+			normalizedExcerpt,
+			tokens(normalizedTitle),
+			tokens(normalizedExcerpt)
+		);
+	}
+
+	public DuplicateMatch match(Profile left, Instant leftPublishedAt, Profile right, Instant rightPublishedAt) {
+		Duration distance = Duration.between(leftPublishedAt, rightPublishedAt).abs();
+		if (distance.compareTo(Duration.ofHours(72)) > 0) {
+			return DuplicateMatch.notDuplicate();
+		}
+		double title = tokenSimilarity(left.titleTokens(), right.titleTokens());
+		double excerpt = meaningfulExcerpt(left, right)
+			? tokenSimilarity(left.excerptTokens(), right.excerptTokens())
+			: 0;
+		Set<String> leftCombined = combined(left);
+		Set<String> rightCombined = combined(right);
+		double combined = tokenSimilarity(leftCombined, rightCombined);
+		double score = Math.max(title, Math.max(excerpt, combined));
+		boolean shortTitle = Math.min(left.titleTokens().size(), right.titleTokens().size()) < 4;
+		boolean exactTitle = !left.normalizedTitle().isBlank()
+			&& left.normalizedTitle().equals(right.normalizedTitle());
+		boolean duplicate;
+		if (distance.compareTo(Duration.ofHours(12)) <= 0) {
+			duplicate = exactTitle
+				|| (!shortTitle && title >= 0.72)
+				|| (title >= 0.58 && excerpt >= 0.58)
+				|| (title >= 0.35 && excerpt >= 0.72)
+				|| (title >= 0.35 && combined >= 0.82);
+		} else if (distance.compareTo(Duration.ofHours(36)) <= 0) {
+			duplicate = (!shortTitle && title >= 0.82 && excerpt >= 0.30)
+				|| (title >= 0.65 && excerpt >= 0.65)
+				|| (title >= 0.50 && excerpt >= 0.78)
+				|| (title >= 0.40 && combined >= 0.88);
+		} else {
+			duplicate = title >= 0.90 && excerpt >= 0.70;
+		}
+		return new DuplicateMatch(duplicate, score, title, excerpt, combined);
+	}
+
+	private double tokenSimilarity(Set<String> leftTokens, Set<String> rightTokens) {
 		if (leftTokens.isEmpty() || rightTokens.isEmpty()) {
 			return 0;
 		}
@@ -82,6 +131,16 @@ public class NewsFingerprint {
 		double dice = (2.0 * intersection.size()) / (leftTokens.size() + rightTokens.size());
 		// 언론사가 제목에 보충 문구를 덧붙인 재전송 기사도 같은 뉴스로 묶는다.
 		return Math.max(jaccard, (containment * 0.65) + (dice * 0.35));
+	}
+
+	private boolean meaningfulExcerpt(Profile left, Profile right) {
+		return left.normalizedExcerpt().length() >= 40 && right.normalizedExcerpt().length() >= 40;
+	}
+
+	private Set<String> combined(Profile profile) {
+		Set<String> combined = new HashSet<>(profile.titleTokens());
+		combined.addAll(profile.excerptTokens());
+		return combined;
 	}
 
 	private Set<String> tokens(String value) {
@@ -102,5 +161,35 @@ public class NewsFingerprint {
 			.sorted()
 			.collect(Collectors.joining("&"));
 		return cleaned.isBlank() ? null : cleaned;
+	}
+
+	public record Profile(
+		String normalizedTitle,
+		String normalizedExcerpt,
+		Set<String> titleTokens,
+		Set<String> excerptTokens
+	) {
+		public Profile {
+			titleTokens = Set.copyOf(titleTokens);
+			excerptTokens = Set.copyOf(excerptTokens);
+		}
+
+		public Set<String> indexTokens() {
+			Set<String> result = new HashSet<>(titleTokens);
+			excerptTokens.stream().filter(token -> token.length() >= 3).forEach(result::add);
+			return Set.copyOf(result);
+		}
+	}
+
+	public record DuplicateMatch(
+		boolean duplicate,
+		double score,
+		double titleScore,
+		double excerptScore,
+		double combinedScore
+	) {
+		private static DuplicateMatch notDuplicate() {
+			return new DuplicateMatch(false, 0, 0, 0, 0);
+		}
 	}
 }
