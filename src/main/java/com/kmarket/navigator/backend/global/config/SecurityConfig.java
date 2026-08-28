@@ -39,6 +39,14 @@ public class SecurityConfig {
 				.requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
 				.requestMatchers(
 					HttpMethod.GET,
+					"/v3/api-docs",
+					"/v3/api-docs.yaml",
+					"/v3/api-docs/**",
+					"/swagger-ui.html",
+					"/swagger-ui/**"
+				).permitAll()
+				.requestMatchers(
+					HttpMethod.GET,
 					"/api/v1/auth/login-id-availability"
 				).permitAll()
 				.requestMatchers(

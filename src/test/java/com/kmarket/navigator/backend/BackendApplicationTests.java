@@ -22,9 +22,11 @@ import java.nio.file.Files;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -35,6 +37,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.containers.GenericContainer;
@@ -134,6 +137,10 @@ class BackendApplicationTests {
 
 	@Autowired
 	ObjectMapper objectMapper;
+
+	@Autowired
+	@Qualifier("requestMappingHandlerMapping")
+	RequestMappingHandlerMapping requestMappingHandlerMapping;
 
 	@MockitoBean
 	DisclosureRagGateway disclosureRagGateway;
@@ -374,6 +381,80 @@ class BackendApplicationTests {
 		mockMvc.perform(get("/actuator/health"))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.status").value("UP"));
+	}
+
+	@Test
+	void publishesCompleteOpenApiContractAndSwaggerUi() throws Exception {
+		String body = mockMvc.perform(get("/v3/api-docs")
+				.header("X-Forwarded-Host", "api.example.test")
+				.header("X-Forwarded-Proto", "https"))
+			.andExpect(status().isOk())
+			.andReturn()
+			.getResponse()
+			.getContentAsString();
+		JsonNode openApi = objectMapper.readTree(body);
+		assertThat(openApi.path("openapi").asString()).startsWith("3.1.");
+
+		Set<String> applicationPaths = requestMappingHandlerMapping.getHandlerMethods().keySet().stream()
+			.flatMap(mapping -> mapping.getPatternValues().stream())
+			.filter(path -> path.startsWith("/api/v1/"))
+			.collect(Collectors.toUnmodifiableSet());
+		Set<String> documentedPaths = Set.copyOf(openApi.path("paths").propertyNames());
+		assertThat(documentedPaths).containsExactlyInAnyOrderElementsOf(applicationPaths);
+
+		Set<String> httpMethods = Set.of("get", "post", "put", "patch", "delete");
+		Set<String> applicationOperations = requestMappingHandlerMapping.getHandlerMethods().keySet().stream()
+			.flatMap(mapping -> mapping.getPatternValues().stream()
+				.flatMap(path -> mapping.getMethodsCondition().getMethods().stream()
+					.map(method -> method.name().toLowerCase() + " " + path)))
+			.filter(operation -> operation.substring(operation.indexOf(' ') + 1).startsWith("/api/v1/"))
+			.collect(Collectors.toUnmodifiableSet());
+		Set<String> documentedOperations = openApi.path("paths").properties().stream()
+			.flatMap(pathEntry -> pathEntry.getValue().properties().stream()
+				.filter(operationEntry -> httpMethods.contains(operationEntry.getKey()))
+				.map(operationEntry -> operationEntry.getKey() + " " + pathEntry.getKey()))
+			.collect(Collectors.toUnmodifiableSet());
+		assertThat(documentedOperations).containsExactlyInAnyOrderElementsOf(applicationOperations);
+
+		openApi.path("paths").properties().forEach(pathEntry ->
+			pathEntry.getValue().properties().stream()
+				.filter(operationEntry -> httpMethods.contains(operationEntry.getKey()))
+				.forEach(operationEntry -> {
+					JsonNode operation = operationEntry.getValue();
+					assertThat(operation.path("operationId").asString())
+						.as(pathEntry.getKey() + " " + operationEntry.getKey() + " operationId")
+						.isNotBlank();
+					assertThat(operation.path("summary").asString())
+						.as(pathEntry.getKey() + " " + operationEntry.getKey() + " summary")
+						.isNotBlank();
+					assertThat(operation.path("tags").isArray())
+						.as(pathEntry.getKey() + " " + operationEntry.getKey() + " tags")
+						.isTrue();
+				})
+		);
+
+		assertThat(openApi.at("/components/securitySchemes/bearerAuth/type").asString())
+			.isEqualTo("http");
+		assertThat(openApi.path("paths").path("/api/v1/me").path("get").path("security").isArray())
+			.isTrue();
+		assertThat(openApi.path("paths").path("/api/v1/auth/login").path("post").path("security").isMissingNode())
+			.isTrue();
+		assertThat(openApi.path("paths").path("/api/v1/market/stocks").path("get").path("security").size())
+			.isEqualTo(2);
+		assertThat(openApi.path("paths").path("/api/v1/news/{articleId}/translation").path("post")
+			.path("responses").has("202"))
+			.isTrue();
+
+		mockMvc.perform(get("/v3/api-docs.yaml"))
+			.andExpect(status().isOk());
+		String swaggerUi = mockMvc.perform(get("/swagger-ui/index.html"))
+			.andExpect(status().isOk())
+			.andReturn()
+			.getResponse()
+			.getContentAsString();
+		assertThat(swaggerUi).contains("Swagger UI");
+		mockMvc.perform(get("/swagger-ui.html"))
+			.andExpect(status().is3xxRedirection());
 	}
 
 	@Test
