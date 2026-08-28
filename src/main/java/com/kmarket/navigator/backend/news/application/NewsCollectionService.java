@@ -5,7 +5,6 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -24,7 +23,6 @@ import com.kmarket.navigator.backend.news.application.port.NewsRepository;
 import com.kmarket.navigator.backend.news.domain.CollectedNewsArticle;
 import com.kmarket.navigator.backend.news.domain.NewsCollectionTarget;
 import com.kmarket.navigator.backend.news.domain.NewsDraft;
-import com.kmarket.navigator.backend.news.domain.NewsDuplicateCandidate;
 import com.kmarket.navigator.backend.news.domain.NewsStockMapping;
 import com.kmarket.navigator.backend.news.infrastructure.naver.NaverNewsProperties;
 
@@ -34,7 +32,7 @@ import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 public class NewsCollectionService {
 
 	private static final Logger log = LoggerFactory.getLogger(NewsCollectionService.class);
-	private static final double DUPLICATE_THRESHOLD = 0.82;
+	private static final int DUPLICATE_CANDIDATE_LIMIT = 50_000;
 	private final NewsProviderGateway provider;
 	private final NewsRepository repository;
 	private final NewsFingerprint fingerprint;
@@ -79,9 +77,14 @@ public class NewsCollectionService {
 			return;
 		}
 		List<NewsStockMapping> mappings = repository.findStockMappings();
-		List<NewsDuplicateCandidate> candidates = new ArrayList<>(repository.findDuplicateCandidates(
+		NewsDuplicateIndex duplicateIndex = new NewsDuplicateIndex(fingerprint);
+		repository.findDuplicateCandidates(
 			Instant.now(clock).minus(Duration.ofHours(72)),
-			2_000
+			DUPLICATE_CANDIDATE_LIMIT
+		).forEach(candidate -> duplicateIndex.add(
+			candidate.clusterId(),
+			fingerprint.profile(candidate.title(), candidate.excerpt()),
+			candidate.publishedAt()
 		));
 		Set<String> queries = new LinkedHashSet<>(properties.getQueries());
 		List<NewsCollectionTarget> targets = repository.findCollectionTargets(properties.getTargetBatchSize());
@@ -94,7 +97,7 @@ public class NewsCollectionService {
 				.orElse(null);
 			try {
 				for (CollectedNewsArticle article : provider.search(query, properties.getDisplay())) {
-					store(article, queryStockCode, mappings, candidates);
+					store(article, queryStockCode, mappings, duplicateIndex);
 				}
 				if (queryStockCode != null) {
 					repository.markTargetCollected(queryStockCode, Instant.now(clock));
@@ -114,22 +117,20 @@ public class NewsCollectionService {
 		CollectedNewsArticle article,
 		String queryStockCode,
 		List<NewsStockMapping> mappings,
-		List<NewsDuplicateCandidate> candidates
+		NewsDuplicateIndex duplicateIndex
 	) {
+		Instant now = Instant.now(clock);
+		if (article.publishedAt().isBefore(now.minus(properties.getMaxArticleAge()))
+			|| article.publishedAt().isAfter(now.plus(Duration.ofMinutes(15)))) {
+			return;
+		}
 		String canonicalUrl = fingerprint.canonicalizeUrl(article.canonicalUrl());
 		String normalizedTitle = fingerprint.normalize(article.title());
-		String comparableText = normalizedTitle + " " + fingerprint.normalize(article.excerpt());
-		NewsDuplicateCandidate duplicate = null;
-		double bestScore = 0;
-		for (NewsDuplicateCandidate candidate : candidates) {
-			double score = fingerprint.similarity(comparableText, candidate.comparableText());
-			if (score > bestScore) {
-				bestScore = score;
-				duplicate = candidate;
-			}
-		}
-		UUID clusterId = bestScore >= DUPLICATE_THRESHOLD && duplicate != null
-			? duplicate.clusterId()
+		NewsFingerprint.Profile incoming = fingerprint.profile(article.title(), article.excerpt());
+		NewsDuplicateIndex.Match duplicate = duplicateIndex.findBest(incoming, article.publishedAt());
+		double bestScore = duplicate.score();
+		UUID clusterId = duplicate.targetClusterId() != null
+			? duplicate.targetClusterId()
 			: UUID.randomUUID();
 		Map<String, BigDecimal> stockMatches = stockMatcher.match(
 			article.title() + " " + article.excerpt(),
@@ -152,12 +153,12 @@ public class NewsCollectionService {
 			article.publisher(),
 			article.thumbnailUrl(),
 			article.publishedAt(),
-			Instant.now(clock),
+			now,
 			BigDecimal.valueOf(bestScore),
 			stockMatches
 		);
-		if (repository.saveCollected(draft) && bestScore < DUPLICATE_THRESHOLD) {
-			candidates.add(new NewsDuplicateCandidate(clusterId, comparableText));
+		if (repository.saveCollected(draft)) {
+			duplicateIndex.add(clusterId, incoming, article.publishedAt());
 		}
 	}
 

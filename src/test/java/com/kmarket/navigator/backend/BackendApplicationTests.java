@@ -14,11 +14,11 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.time.LocalDate;
-import java.time.Instant;
-import java.time.Duration;
 import java.math.BigDecimal;
 import java.nio.file.Files;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -69,6 +69,7 @@ import com.kmarket.navigator.backend.disclosure.domain.Market;
 import com.kmarket.navigator.backend.disclosure.domain.SectionKind;
 import com.kmarket.navigator.backend.disclosure.infrastructure.ai.AiServiceProperties;
 import com.kmarket.navigator.backend.disclosure.infrastructure.opendart.OpenDartProperties;
+import com.kmarket.navigator.backend.news.application.NewsClusterReconciliationService;
 import com.kmarket.navigator.backend.news.application.port.NewsAiGateway;
 import com.kmarket.navigator.backend.news.application.port.NewsRepository;
 import com.kmarket.navigator.backend.news.domain.TermExplanation;
@@ -133,6 +134,9 @@ class BackendApplicationTests {
 	NewsRepository newsRepository;
 
 	@Autowired
+	NewsClusterReconciliationService newsClusterReconciliationService;
+
+	@Autowired
 	JdbcClient jdbcClient;
 
 	@Autowired
@@ -191,6 +195,7 @@ class BackendApplicationTests {
 		assertThat(aiServiceProperties.readTimeout()).isEqualTo(Duration.ofSeconds(120));
 		assertThat(naverNewsProperties.getConnectTimeout()).isEqualTo(Duration.ofSeconds(10));
 		assertThat(naverNewsProperties.getReadTimeout()).isEqualTo(Duration.ofSeconds(30));
+		assertThat(naverNewsProperties.getMaxArticleAge()).isEqualTo(Duration.ofHours(72));
 		assertThat(openDartProperties.connectTimeout()).isEqualTo(Duration.ofSeconds(5));
 		assertThat(openDartProperties.readTimeout()).isEqualTo(Duration.ofSeconds(150));
 	}
@@ -625,6 +630,11 @@ class BackendApplicationTests {
 			"A new event was detected for the watched company.",
 			Instant.parse("2026-08-23T11:00:00Z"),
 			"HIGH"
+		);
+		insertNewsCoverage(
+			watchedNewsId,
+			"Syndicated Samsung Electronics watchlist event",
+			"Another publisher covered the same watchlist event."
 		);
 		assertThat(jdbcClient.sql("""
 			SELECT COUNT(*) FROM user_notification
@@ -1229,6 +1239,11 @@ class BackendApplicationTests {
 			Instant.parse("2026-08-23T10:00:00Z"),
 			"HIGH"
 		);
+		insertNewsCoverage(
+			firstArticleId,
+			"Syndicated semiconductor financing coverage",
+			"A second publisher reported the same financing event."
+		);
 		UUID secondArticleId = insertReadyNews(
 			"Samsung Electronics expands production",
 			"The company will expand memory production.",
@@ -1274,6 +1289,12 @@ class BackendApplicationTests {
 				.param("marketImpactImportance", "HIGH"))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.items.length()").value(1))
+			.andExpect(jsonPath("$.items[0].id").value(firstArticleId.toString()))
+			.andExpect(jsonPath("$.items[0].relatedCoverageCount").value(2));
+		mockMvc.perform(get("/api/v1/news")
+				.param("query", "second publisher"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.items.length()").value(1))
 			.andExpect(jsonPath("$.items[0].id").value(firstArticleId.toString()));
 
 		mockMvc.perform(get("/api/v1/news")
@@ -1314,6 +1335,38 @@ class BackendApplicationTests {
 				.content("{\"selectedText\":\"text absent from the article\"}"))
 			.andExpect(status().isBadRequest())
 			.andExpect(jsonPath("$.code").value("INVALID_NEWS_SELECTION"));
+	}
+
+	@Test
+	void reconcilesExistingCrossPublisherNewsAndReturnsOneStory() throws Exception {
+		Instant publishedAt = Instant.now().minusSeconds(3_600);
+		UUID firstArticleId = insertReadyNews(
+			"네팔 중국 대홍수 사망자 584명 실종자 2500명 육박",
+			"네팔과 중국에서 발생한 홍수로 사망자가 584명으로 늘고 실종자가 2500명에 육박했다.",
+			publishedAt,
+			"HIGH"
+		);
+		UUID duplicateArticleId = insertReadyNews(
+			"네팔 대홍수 사망자 584명 실종자 2천500명 육박",
+			"대홍수 피해가 이어져 사망자 584명과 실종자 약 2500명이 집계됐다.",
+			publishedAt.plusSeconds(600),
+			"HIGH"
+		);
+
+		newsClusterReconciliationService.reconcile();
+
+		Long clusters = jdbcClient.sql("""
+			SELECT COUNT(DISTINCT cluster_id) FROM news_article WHERE id IN (:first, :second)
+			""")
+			.param("first", firstArticleId)
+			.param("second", duplicateArticleId)
+			.query(Long.class)
+			.single();
+		assertThat(clusters).isEqualTo(1);
+		mockMvc.perform(get("/api/v1/news").param("query", "대홍수"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.items.length()").value(1))
+			.andExpect(jsonPath("$.items[0].relatedCoverageCount").value(2));
 	}
 
 	@Test
@@ -1975,6 +2028,54 @@ class BackendApplicationTests {
 			""")
 			.param("articleId", articleId)
 			.param("clusterId", clusterId)
+			.update();
+		jdbcClient.sql("""
+			INSERT INTO news_article_security (article_id, security_id, match_confidence)
+			VALUES (:articleId, :securityId, 0.99)
+			""")
+			.param("articleId", articleId)
+			.param("securityId", securityId("005930"))
+			.update();
+		return articleId;
+	}
+
+	private UUID insertNewsCoverage(UUID representativeArticleId, String title, String excerpt) {
+		UUID articleId = UUID.randomUUID();
+		String articleHash = articleId.toString().replace("-", "").repeat(2);
+		jdbcClient.sql("""
+			INSERT INTO news_article (
+			    id, cluster_id, provider, provider_article_id, original_title,
+			    title_source_hash, original_excerpt, original_body, english_title,
+			    english_body, what_summary, why_summary, impact_summary, event_type,
+			    sentiment, importance, market_impact, market_impact_importance,
+			    market_impact_score, event_confidence, sentiment_confidence,
+			    importance_confidence, market_impact_confidence, original_url,
+			    canonical_url, canonical_url_hash, publisher, thumbnail_url,
+			    content_availability, analysis_status, model_id, prompt_version,
+			    published_at, collected_at, analyzed_at
+			)
+			SELECT :id, source.cluster_id, source.provider, :providerId, :title,
+			       encode(digest(regexp_replace(btrim(:title), '[[:space:]]+', ' ', 'g'), 'sha256'), 'hex'),
+			       :excerpt, source.original_body, :title, :excerpt,
+			       source.what_summary, source.why_summary, source.impact_summary,
+			       source.event_type, source.sentiment, source.importance,
+			       source.market_impact, source.market_impact_importance,
+			       source.market_impact_score, source.event_confidence,
+			       source.sentiment_confidence, source.importance_confidence,
+			       source.market_impact_confidence, :url, :url, :hash,
+			       'wire.example.com', source.thumbnail_url, source.content_availability,
+			       source.analysis_status, source.model_id, source.prompt_version,
+			       source.published_at + INTERVAL '1 minute',
+			       source.collected_at + INTERVAL '1 minute', source.analyzed_at
+			FROM news_article source WHERE source.id = :representativeArticleId
+			""")
+			.param("id", articleId)
+			.param("providerId", articleId.toString())
+			.param("title", title)
+			.param("excerpt", excerpt)
+			.param("url", "https://wire.example.com/" + articleId)
+			.param("hash", articleHash)
+			.param("representativeArticleId", representativeArticleId)
 			.update();
 		jdbcClient.sql("""
 			INSERT INTO news_article_security (article_id, security_id, match_confidence)

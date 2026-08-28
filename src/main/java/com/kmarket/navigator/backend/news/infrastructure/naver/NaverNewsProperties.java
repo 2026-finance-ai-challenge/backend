@@ -19,6 +19,7 @@ public class NaverNewsProperties {
 	private Duration connectTimeout = Duration.ofSeconds(10);
 	private Duration readTimeout = Duration.ofSeconds(30);
 	private Duration requestDelay = Duration.ofMillis(125);
+	private Duration maxArticleAge = Duration.ofHours(72);
 	private List<String> queries = new ArrayList<>(List.of("코스피", "코스닥", "한국 증시"));
 
 	public boolean configured() {
@@ -95,6 +96,17 @@ public class NaverNewsProperties {
 
 	public void setRequestDelay(Duration requestDelay) {
 		this.requestDelay = requestDelay;
+	}
+
+	public Duration getMaxArticleAge() {
+		return maxArticleAge;
+	}
+
+	public void setMaxArticleAge(Duration maxArticleAge) {
+		if (maxArticleAge == null || maxArticleAge.isNegative() || maxArticleAge.isZero()) {
+			throw new IllegalArgumentException("maxArticleAge must be positive");
+		}
+		this.maxArticleAge = maxArticleAge;
 	}
 
 	public List<String> getQueries() {

@@ -3,7 +3,10 @@
 ## 범위
 
 - Naver Search API에서 시장 뉴스와 지원 종목 75개 관련 뉴스를 수집한다.
-- 정규화 URL 해시로 동일 기사를 멱등 저장하고, 최근 72시간의 제목·요약 유사도로 동일 이슈를 묶는다.
+- 정규화 URL 해시로 동일 URL을 멱등 저장하고, 최근 72시간의 제목·요약을 독립 비교해 언론사별 재전송 기사를 동일 사건 군집으로 묶는다.
+- 원문 출처는 근거와 보도 범위 확인을 위해 보존하되 목록에는 군집 대표 기사 한 건만 노출한다. `relatedCoverageCount`는 같은 사건으로 묶인 전체 출처 수다.
+- 관심종목 알림도 원문별이 아니라 군집 대표 기사 기준으로 한 번만 생성한다.
+- 현재 시각보다 72시간 이상 오래된 검색 결과와 15분 이상 미래 시각인 결과는 저장하지 않는다. 기존 군집은 6시간마다 같은 판정식으로 재검증한다.
 - 검색 API가 제공하는 제목과 요약만 저장하며, 제공받지 않은 기사 전문을 보유한 것처럼 표시하지 않는다.
 - 목록용 영어 제목은 수집 후 비동기 작업으로 생성하고 정규화 제목 해시 기반 번역 메모리에서 재사용한다.
 - 기사 본문 또는 검색 요약의 영어 번역과 What/Why/Impact는 사용자가 상세·AI Insight를 처음 요청할 때만 생성하고 원문 해시 기준으로 저장한다.
@@ -23,7 +26,7 @@
 | `POST` | `/api/v1/news/{articleId}/translation` | 영어 본문·What/Why/Impact 온디맨드 생성 요청 또는 캐시 재사용 |
 | `POST` | `/api/v1/news/{articleId}/term-explanations` | 기사에서 실제 선택한 텍스트의 금융 문맥 해설 |
 
-목록 정렬은 `LATEST`, `IMPORTANCE`, `MARKET_IMPACT`를 지원한다. `MARKET_IMPACT`는 방향이 아니라 K-FNSPID 점수를 기준으로 정렬한다. `watchlist=true`는 인증 사용자의 관심종목 연관 기사만 반환하며 서버가 소유권을 검증한다. 다음 페이지는 응답의 `nextCursor`를 그대로 전달한다. 원문 전문이 없으면 `contentAvailability=SOURCE_EXCERPT`이며 `originalBody`는 `null`이다.
+목록 정렬은 `LATEST`, `IMPORTANCE`, `MARKET_IMPACT`를 지원한다. `MARKET_IMPACT`는 방향이 아니라 K-FNSPID 점수를 기준으로 정렬한다. 검색·종목·관심종목 필터는 대표 기사뿐 아니라 군집에 속한 모든 출처를 대상으로 적용한다. `watchlist=true`는 인증 사용자의 관심종목 연관 기사만 반환하며 서버가 소유권을 검증한다. 다음 페이지는 응답의 `nextCursor`를 그대로 전달한다. 원문 전문이 없으면 `contentAvailability=SOURCE_EXCERPT`이며 `originalBody`는 `null`이다.
 
 주요 응답 필드는 `sentiment`, `importance`, `marketImpact`, `marketImpactImportance`, `marketImpactScore`, 각 confidence, 모델·프롬프트 버전이다. 감성·의미 중요도·시장영향 중요도를 하나의 값으로 합치지 않는다.
 
@@ -58,7 +61,9 @@
 | `KMARKET_NAVER_NEWS_DISPLAY` | 검색어별 요청 건수, 1~100 |
 | `KMARKET_NAVER_NEWS_TARGET_BATCH_SIZE` | 수집 주기당 종목 검색 수, 1~75 |
 | `KMARKET_NEWS_COLLECTION_INTERVAL` | 뉴스 수집 주기, 기본 10분 |
+| `KMARKET_NEWS_MAX_ARTICLE_AGE` | 검색 결과 저장 허용 발행 경과 시간, 기본 72시간 |
 | `KMARKET_NEWS_ANALYSIS_INTERVAL` | 분석 큐 확인 주기, 기본 5초 |
+| `KMARKET_NEWS_RECONCILIATION_INTERVAL` | 기존 기사 사건 군집 재검증 주기, 기본 6시간 |
 
 OpenAI 모델과 프롬프트 버전은 AI 서비스의 `KMARKET_AI_NEWS_MODEL`, `KMARKET_AI_NEWS_PROMPT_VERSION`, `KMARKET_AI_TERM_PROMPT_VERSION`으로 관리한다. 분류 런타임은 Hana 프로젝트 경로, 허용 commit과 모델 SHA-256으로 고정한다. KF-DeBERTa v6 후보는 공식 gate가 `KEEP_CURRENT_MODEL`이므로 활성 모델로 표기하지 않는다. API 키는 AI 서비스에만 주입하며 브라우저나 Backend 응답에 포함하지 않는다.
 
