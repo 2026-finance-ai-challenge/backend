@@ -32,7 +32,12 @@ update_image_tag() {
 }
 
 update_image_tag BACKEND_IMAGE_TAG "$1"
-update_image_tag FRONTEND_IMAGE_TAG "$1"
+
+# 과거 운영 Frontend 태그가 남아 있어도 다음 배포부터 참조하지 않는다.
+temporary=$(mktemp "$DEPLOY_ROOT/.image.env.XXXXXX")
+awk -F= '$1 != "FRONTEND_IMAGE_TAG" { print }' "$IMAGE_ENV" >"$temporary"
+chmod 600 "$temporary"
+mv "$temporary" "$IMAGE_ENV"
 
 reload_edge_nginx() {
   local backup
@@ -69,8 +74,8 @@ reload_edge_nginx() {
 }
 
 cd "$DEPLOY_ROOT"
-docker compose --env-file "$RUNTIME_ENV" --env-file "$IMAGE_ENV" -f "$COMPOSE_FILE" pull backend frontend
-docker compose --profile worker --env-file "$RUNTIME_ENV" --env-file "$IMAGE_ENV" -f "$COMPOSE_FILE" up -d --wait --wait-timeout 900
-curl --fail --silent --show-error --max-time 10 http://127.0.0.1:15101/healthz >/dev/null
+docker compose --env-file "$RUNTIME_ENV" --env-file "$IMAGE_ENV" -f "$COMPOSE_FILE" pull backend
+docker compose --profile worker --env-file "$RUNTIME_ENV" --env-file "$IMAGE_ENV" -f "$COMPOSE_FILE" up -d --wait --wait-timeout 900 --remove-orphans
+curl --fail --silent --show-error --max-time 10 http://127.0.0.1:15102/actuator/health >/dev/null
 reload_edge_nginx
 docker image prune --force --filter until=168h >/dev/null

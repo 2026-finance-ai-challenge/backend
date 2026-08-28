@@ -43,6 +43,26 @@ jobs:
           KMARKET_JWT_SECRET_BASE64: bG9jYWwtdGVzdC1qd3Qtc2VjcmV0LTAxMjM0NTY3ODktQUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVotYWJjZGVmZ2g=
           KMARKET_TAX_DOCUMENT_KEY_BASE64: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
         run: docker compose config --quiet
+      - name: 운영 Compose 구성 검증
+        env:
+          BACKEND_IMAGE_TAG: 0000000000000000000000000000000000000000
+          AI_IMAGE_TAG: 0000000000000000000000000000000000000000
+          DB_PASSWORD: ci-password
+          REDIS_PASSWORD: ci-redis-password
+          KMARKET_AI_ALLOWED_HOSTS: '["localhost","127.0.0.1","ai-api"]'
+          KMARKET_AI_SERVICE_TOKEN: ci-service-token
+          OPENAI_API_KEY: ci-openai-key
+          KMARKET_AI_HANA_EXPECTED_COMMIT: 0000000000000000000000000000000000000000
+          OPENDART_API_KEYS: ci-opendart-key
+          KMARKET_CONTEXT_PEPPER: ci-context-pepper-at-least-32-bytes
+          KMARKET_JWT_SECRET_BASE64: bG9jYWwtdGVzdC1qd3Qtc2VjcmV0LTAxMjM0NTY3ODktQUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVotYWJjZGVmZ2g=
+          KMARKET_TAX_DOCUMENT_KEY_BASE64: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+        run: |
+          docker compose --profile worker -f deploy/compose.prod.yaml config --quiet
+          if docker compose --profile worker -f deploy/compose.prod.yaml config --services | grep -qx frontend; then
+            echo "운영 Compose에 Frontend가 포함되어 있습니다." >&2
+            exit 1
+          fi
       - name: 배포 스크립트 및 Nginx 구성 검증
         run: |
           bash -n deploy/deploy-backend.sh
@@ -59,8 +79,6 @@ jobs:
             nginx@sha256:77e5d4a6ad906c5d3793764085706577fa705b1dc6f244ea0241c4b5e2155385 nginx -t
       - name: Backend 이미지 빌드
         run: docker build --tag kmarket-backend:ci .
-      - name: Frontend 이미지 빌드 및 테스트
-        run: docker build --tag kmarket-frontend:ci frontend
 
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -72,14 +90,6 @@ jobs:
       packages: write
       id-token: write
       attestations: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - image: backend
-            context: .
-          - image: frontend
-            context: frontend
     steps:
       - name: 소스 체크아웃
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -96,14 +106,14 @@ jobs:
       - name: ARM64 이미지 발행
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
-          context: ${{ matrix.context }}
+          context: .
           platforms: linux/arm64
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:${{ github.sha }}
-            ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:main
-          cache-from: type=gha,scope=${{ matrix.image }}-arm64
-          cache-to: type=gha,mode=max,scope=${{ matrix.image }}-arm64
+            ghcr.io/${{ github.repository_owner }}/backend:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/backend:main
+          cache-from: type=gha,scope=backend-arm64
+          cache-to: type=gha,mode=max,scope=backend-arm64
           provenance: mode=max
           sbom: true
 
@@ -178,7 +188,7 @@ jobs:
           SSH_OPTIONS=(-i "$RUNNER_TEMP/ssh/key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/ssh/known_hosts" -o PreferredAuthentications=publickey,keyboard-interactive,password)
           sshpass -e scp "${SSH_OPTIONS[@]}" "$RUNNER_TEMP/runtime.env" "ubuntu@$PROD_HOST:/opt/kmarket/runtime.env"
           rm -f "$RUNNER_TEMP/runtime.env"
-      - name: Backend 및 Frontend 배포
+      - name: Backend 배포
         env:
           SSHPASS: ${{ secrets.PROD_SSH_PASSWORD }}
           PROD_HOST: ${{ secrets.PROD_HOST }}
