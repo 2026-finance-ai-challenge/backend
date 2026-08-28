@@ -202,6 +202,9 @@ services:
         condition: service_healthy
       ai-api:
         condition: service_healthy
+    ports:
+      # 운영 외부 접근은 호스트 Nginx를 거치며 Backend 포트는 로컬에만 바인딩한다.
+      - "127.0.0.1:15102:8080"
     volumes:
       - ./data/opendart-archives:/app/data/opendart-archives
       - ./data/tax-documents:/app/data/tax-documents
@@ -220,26 +223,6 @@ services:
     cap_drop:
       - ALL
     stop_grace_period: 45s
-
-  frontend:
-    <<: *service-defaults
-    image: ghcr.io/2026-finance-ai-challenge/frontend:${FRONTEND_IMAGE_TAG:?required}
-    ports:
-      - "127.0.0.1:15101:8080"
-    depends_on:
-      backend:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
-      interval: 10s
-      timeout: 3s
-      retries: 20
-    read_only: true
-    tmpfs:
-      - /tmp:size=32m,mode=1777
-    cap_drop:
-      - ALL
-    stop_grace_period: 20s
 
 volumes:
   postgres-data:
