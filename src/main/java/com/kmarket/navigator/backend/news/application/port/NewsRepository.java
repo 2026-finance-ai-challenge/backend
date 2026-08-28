@@ -10,6 +10,7 @@ import com.kmarket.navigator.backend.news.domain.NewsAnalysis;
 import com.kmarket.navigator.backend.news.domain.NewsAnalysisJob;
 import com.kmarket.navigator.backend.news.domain.NewsArticle;
 import com.kmarket.navigator.backend.news.domain.NewsCollectionTarget;
+import com.kmarket.navigator.backend.news.domain.NewsClusterAssignment;
 import com.kmarket.navigator.backend.news.domain.NewsDraft;
 import com.kmarket.navigator.backend.news.domain.NewsDuplicateCandidate;
 import com.kmarket.navigator.backend.news.domain.NewsPage;
@@ -24,6 +25,8 @@ public interface NewsRepository {
 	Optional<NewsArticle> findById(UUID articleId);
 
 	List<NewsDuplicateCandidate> findDuplicateCandidates(Instant since, int limit);
+
+	int replaceClusterAssignments(List<NewsClusterAssignment> assignments, Instant reconciledAt);
 
 	List<NewsStockMapping> findStockMappings();
 

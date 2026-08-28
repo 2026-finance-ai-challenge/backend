@@ -98,6 +98,8 @@ kmarket:
   news:
     collection-interval: ${KMARKET_NEWS_COLLECTION_INTERVAL:10m}
     collection-initial-delay: ${KMARKET_NEWS_COLLECTION_INITIAL_DELAY:30s}
+    reconciliation-interval: ${KMARKET_NEWS_RECONCILIATION_INTERVAL:6h}
+    reconciliation-initial-delay: ${KMARKET_NEWS_RECONCILIATION_INITIAL_DELAY:1m}
     analysis-interval: ${KMARKET_NEWS_ANALYSIS_INTERVAL:5s}
     analysis-initial-delay: ${KMARKET_NEWS_ANALYSIS_INITIAL_DELAY:30s}
     naver:
@@ -110,6 +112,7 @@ kmarket:
       connect-timeout: ${KMARKET_NAVER_NEWS_CONNECT_TIMEOUT:10s}
       read-timeout: ${KMARKET_NAVER_NEWS_READ_TIMEOUT:30s}
       request-delay: ${KMARKET_NAVER_NEWS_REQUEST_DELAY:125ms}
+      max-article-age: ${KMARKET_NEWS_MAX_ARTICLE_AGE:72h}
       queries: ${KMARKET_NAVER_NEWS_QUERIES:코스피,코스닥,한국 증시}
   market:
     collection-interval: ${KMARKET_MARKET_COLLECTION_INTERVAL:60s}

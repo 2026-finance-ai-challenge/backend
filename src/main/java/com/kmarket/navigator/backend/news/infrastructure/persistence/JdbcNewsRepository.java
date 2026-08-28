@@ -21,6 +21,7 @@ import com.kmarket.navigator.backend.news.domain.NewsAnalysis;
 import com.kmarket.navigator.backend.news.domain.NewsAnalysisJob;
 import com.kmarket.navigator.backend.news.domain.NewsAnalysisStatus;
 import com.kmarket.navigator.backend.news.domain.NewsArticle;
+import com.kmarket.navigator.backend.news.domain.NewsClusterAssignment;
 import com.kmarket.navigator.backend.news.domain.NewsCollectionTarget;
 import com.kmarket.navigator.backend.news.domain.NewsContentAvailability;
 import com.kmarket.navigator.backend.news.domain.NewsCursor;
@@ -53,16 +54,25 @@ class JdbcNewsRepository implements NewsRepository {
 			       (SELECT COUNT(*) FROM news_article related
 			        WHERE related.cluster_id = article.cluster_id) AS related_coverage_count
 			FROM news_article article
+			JOIN news_cluster story
+			  ON story.id = article.cluster_id
+			 AND story.representative_article_id = article.id
 			WHERE (CAST(:query AS varchar) IS NULL
-			       OR article.original_title ILIKE '%%' || :query || '%%' ESCAPE '\\'
-			       OR article.original_excerpt ILIKE '%%' || :query || '%%' ESCAPE '\\'
-			       OR COALESCE(article.english_title, '') ILIKE '%%' || :query || '%%' ESCAPE '\\'
-			       OR COALESCE(article.english_body, '') ILIKE '%%' || :query || '%%' ESCAPE '\\')
+			       OR EXISTS (
+			         SELECT 1 FROM news_article searchable
+			         WHERE searchable.cluster_id = article.cluster_id
+			           AND (searchable.original_title ILIKE '%%' || :query || '%%' ESCAPE '\\'
+			             OR searchable.original_excerpt ILIKE '%%' || :query || '%%' ESCAPE '\\'
+			             OR COALESCE(searchable.english_title, '') ILIKE '%%' || :query || '%%' ESCAPE '\\'
+			             OR COALESCE(searchable.english_body, '') ILIKE '%%' || :query || '%%' ESCAPE '\\')
+			       ))
 			  AND (CAST(:stockCode AS varchar) IS NULL OR EXISTS (
 			    SELECT 1
-			    FROM news_article_security article_security
+			    FROM news_article related_article
+			    JOIN news_article_security article_security
+			      ON article_security.article_id = related_article.id
 			    JOIN security security_filter ON security_filter.id = article_security.security_id
-			    WHERE article_security.article_id = article.id
+			    WHERE related_article.cluster_id = article.cluster_id
 			      AND security_filter.stock_code = :stockCode
 			))
 			  AND (CAST(:sentiment AS varchar) IS NULL OR article.sentiment = :sentiment)
@@ -72,10 +82,12 @@ class JdbcNewsRepository implements NewsRepository {
 			       OR article.market_impact_importance = :marketImpactImportance)
 			  AND (CAST(:watchlistOnly AS boolean) = FALSE OR EXISTS (
 			    SELECT 1
-			    FROM news_article_security watched_article
+			    FROM news_article related_article
+			    JOIN news_article_security watched_article
+			      ON watched_article.article_id = related_article.id
 			    JOIN watchlist_item watched
 			      ON watched.security_id = watched_article.security_id
-			    WHERE watched_article.article_id = article.id
+			    WHERE related_article.cluster_id = article.cluster_id
 			      AND watched.user_id = :watchlistUserId
 			  ))
 			  AND (CAST(:fromTime AS timestamptz) IS NULL OR article.published_at >= :fromTime)
@@ -178,10 +190,9 @@ class JdbcNewsRepository implements NewsRepository {
 	@Override
 	public List<NewsDuplicateCandidate> findDuplicateCandidates(Instant since, int limit) {
 		return jdbcClient.sql("""
-			SELECT article.cluster_id,
-			       cluster.normalized_title || ' ' || article.original_excerpt AS comparable_text
+			SELECT article.id, article.cluster_id, article.original_title,
+			       article.original_excerpt, article.published_at
 			FROM news_article article
-			JOIN news_cluster cluster ON cluster.id = article.cluster_id
 			WHERE article.published_at >= :since
 			ORDER BY article.published_at DESC
 			LIMIT :limit
@@ -189,10 +200,59 @@ class JdbcNewsRepository implements NewsRepository {
 			.param("since", atUtc(since))
 			.param("limit", limit)
 			.query((resultSet, rowNumber) -> new NewsDuplicateCandidate(
+				resultSet.getObject("id", UUID.class),
 				resultSet.getObject("cluster_id", UUID.class),
-				resultSet.getString("comparable_text")
+				resultSet.getString("original_title"),
+				resultSet.getString("original_excerpt"),
+				instant(resultSet, "published_at")
 			))
 			.list();
+	}
+
+	@Override
+	@Transactional
+	public int replaceClusterAssignments(List<NewsClusterAssignment> assignments, Instant reconciledAt) {
+		int updated = 0;
+		for (NewsClusterAssignment assignment : assignments) {
+			updated += jdbcClient.sql("""
+				UPDATE news_article
+				SET cluster_id = :clusterId
+				WHERE id = :articleId AND cluster_id <> :clusterId
+				  AND EXISTS (SELECT 1 FROM news_cluster WHERE id = :clusterId)
+				""")
+				.param("clusterId", assignment.clusterId())
+				.param("articleId", assignment.articleId())
+				.update();
+		}
+		jdbcClient.sql("""
+			WITH representative AS (
+			    SELECT DISTINCT ON (article.cluster_id)
+			           article.cluster_id, article.id, article.original_title
+			    FROM news_article article
+			    ORDER BY article.cluster_id,
+			             (article.analysis_status = 'READY') DESC,
+			             LENGTH(article.original_excerpt) DESC,
+			             article.published_at,
+			             article.id
+			)
+			UPDATE news_cluster cluster
+			SET representative_article_id = representative.id,
+			    normalized_title = regexp_replace(
+			        lower(representative.original_title), '[^0-9a-z가-힣]+', ' ', 'g'
+			    ),
+			    updated_at = :now
+			FROM representative
+			WHERE cluster.id = representative.cluster_id
+			""")
+			.param("now", atUtc(reconciledAt))
+			.update();
+		jdbcClient.sql("""
+			DELETE FROM news_cluster cluster
+			WHERE NOT EXISTS (
+			    SELECT 1 FROM news_article article WHERE article.cluster_id = cluster.id
+			)
+			""").update();
+		return updated;
 	}
 
 	@Override
@@ -610,12 +670,17 @@ class JdbcNewsRepository implements NewsRepository {
 
 	private List<RelatedStock> findRelatedStocks(UUID articleId) {
 		return jdbcClient.sql("""
-			SELECT s.stock_code, issuer.name_ko, issuer.name_en, s.market, link.match_confidence
-			FROM news_article_security link
+			SELECT s.stock_code, issuer.name_ko, issuer.name_en, s.market,
+			       MAX(link.match_confidence) AS match_confidence
+			FROM news_article source_article
+			JOIN news_article related_article
+			  ON related_article.cluster_id = source_article.cluster_id
+			JOIN news_article_security link ON link.article_id = related_article.id
 			JOIN security s ON s.id = link.security_id
 			JOIN issuer ON issuer.id = s.issuer_id
-			WHERE link.article_id = :articleId
-			ORDER BY link.match_confidence DESC, s.stock_code
+			WHERE source_article.id = :articleId
+			GROUP BY s.stock_code, issuer.name_ko, issuer.name_en, s.market
+			ORDER BY MAX(link.match_confidence) DESC, s.stock_code
 			""")
 			.param("articleId", articleId)
 			.query((resultSet, rowNumber) -> new RelatedStock(
