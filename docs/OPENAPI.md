@@ -23,6 +23,10 @@ Swagger UI는 브라우저 저장소에 인증 값을 보존하지 않는다. �
 
 뉴스·공시 번역 요청은 캐시된 결과가 있으면 `200 OK`, 비동기 처리가 필요하면 `202 Accepted`를 반환하며 두 응답을 모두 OpenAPI에 명시한다.
 
+## 운영 전송
+
+Frontend Nginx는 Swagger JavaScript·CSS와 OpenAPI JSON·YAML을 gzip으로 압축한다. HTTPS 경계 Nginx는 상위 응답의 중복 HSTS·`X-Content-Type-Options`·`X-Frame-Options` 헤더를 제거하고 하나의 정책 값으로 재설정한다.
+
 ## 문서 그룹
 
 - `Authentication`: 회원가입, 로그인, 토큰 회전, 계정 관리
