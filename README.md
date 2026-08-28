@@ -7,6 +7,7 @@
 ## 프로젝트 문서
 
 - [제품 범위](docs/PRODUCT_SCOPE.md)
+- [OpenAPI·Swagger UI](docs/OPENAPI.md)
 - [Redis JWT 회원 인증 API](docs/AUTH_API.md)
 - [관심종목·최근 조회·알림 API](docs/PERSONALIZATION_API.md)
 - [시장·스크리너·외국인 한도 API](docs/MARKET_API.md)
@@ -145,6 +146,8 @@ docker compose up --build -d
 - 사용자 화면: `http://127.0.0.1:15101`
 - Backend 상태: `http://127.0.0.1:8080/actuator/health`
 - AI 상태: `http://127.0.0.1:8000/health`
+- Swagger UI: `http://127.0.0.1:15101/swagger-ui/index.html`
+- OpenAPI JSON: `http://127.0.0.1:15101/v3/api-docs`
 
 `OPENDART_API_KEYS`는 쉼표로 구분한 키 목록이며, 앞 키가 `STATUS_020`을 반환하면 다음 키로 자동 전환한다.
 

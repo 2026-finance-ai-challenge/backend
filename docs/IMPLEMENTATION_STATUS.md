@@ -1,6 +1,6 @@
 # 기능정의서 v2.0 구현 현황
 
-기준일: 2026-08-25
+기준일: 2026-08-28
 
 `완료`는 API 계약, Backend 연동 프로토타입과 자동 검증이 구현됐다는 뜻이다. 외부 공급자의 실시간 응답까지 항상 존재한다는 뜻은 아니다.
 
@@ -19,6 +19,7 @@
 | 세무 자격·보안 업로드·OCR | 완료 | 안내·문서 검증이며 세무 당국 승인 기능이 아님 |
 | Redis JWT 회원·개인화 | 완료 | Argon2id, 15분 Access JWT, Refresh 회전·재사용 탐지, Redis 폐기·로그인 제한 |
 | 반응형·접근성·공통 상태 | 완료 | Desktop·Tablet·Mobile 레이아웃과 Loading·Empty·Stale·오류 상태 구현 |
+| OpenAPI·Swagger UI | 완료 | 전체 `/api/v1/**` 매핑·스키마·JWT 보안 수준을 런타임에서 생성하고 운영 HTTPS로 제공 |
 
 ## 검증 증거
 
@@ -28,6 +29,7 @@
 - Frontend: Node 테스트 3개와 프로덕션 빌드 통과
 - Docker: PostgreSQL, Redis, AI API, Backend, Frontend 헬스체크 통과
 - 통합 보안: 실제 회원가입·로그인으로 Access JWT 발급, Redis 세션 응답, CSP 등 보안 헤더 확인
+- API 문서: Spring MVC 전체 매핑과 OpenAPI 경로 일치, 모든 작업의 요약·태그·보안 정의와 Swagger UI 응답 검증
 - 모델 런타임: 읽기 전용 Hana 저장소의 허용 commit·SHA-256을 확인한 뒤 실제 분류 추론 성공
 
 외부 공급자의 계약·자격증명이 없으면 해당 수집기는 기본 비활성화된다. 이 경우 기존 저장 데이터와 명시적 `Unavailable`·지연·부분 실패 상태를 사용하며 임의 현재가·뉴스·한도·AI 결과를 만들지 않는다.

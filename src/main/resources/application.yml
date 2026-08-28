@@ -23,6 +23,7 @@ spring:
 
 server:
   shutdown: graceful
+  forward-headers-strategy: framework
   error:
     include-binding-errors: never
     include-exception: false
@@ -41,6 +42,20 @@ management:
       probes:
         enabled: true
       show-details: never
+
+springdoc:
+  paths-to-match: /api/v1/**
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    disable-swagger-default-url: true
+    display-request-duration: true
+    doc-expansion: none
+    operations-sorter: alpha
+    tags-sorter: alpha
+    try-it-out-enabled: true
+    persist-authorization: false
 
 opendart:
   api-keys: ${OPENDART_API_KEYS:${OPENDART_API_KEY}}
