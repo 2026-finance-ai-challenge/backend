@@ -9,7 +9,7 @@ Backend의 실행 가능한 API 계약은 Spring MVC 컨트롤러와 DTO에서 O
 - OpenAPI JSON: `https://168.107.61.81/v3/api-docs`
 - OpenAPI YAML: `https://168.107.61.81/v3/api-docs.yaml`
 
-로컬에서는 호스트만 `http://127.0.0.1:15101`로 바꾼다. Swagger의 Server URL은 `/` 상대 경로이므로 현재 접속한 환경으로 요청하며 내부 컨테이너 주소를 노출하지 않는다.
+로컬 Compose의 MVP 화면에서는 호스트만 `http://127.0.0.1:15101`로 바꾼다. 운영에서는 MVP Frontend를 실행하지 않고 호스트 HTTPS Nginx가 Backend의 로컬 전용 포트로 직접 전달한다. Swagger의 Server URL은 `/` 상대 경로이므로 현재 접속한 환경으로 요청하며 내부 컨테이너 주소를 노출하지 않는다.
 
 ## 인증
 
@@ -25,7 +25,7 @@ Swagger UI는 브라우저 저장소에 인증 값을 보존하지 않는다. �
 
 ## 운영 전송
 
-Frontend Nginx는 Swagger JavaScript·CSS와 OpenAPI JSON·YAML을 gzip으로 압축한다. HTTPS 경계 Nginx는 상위 응답의 중복 HSTS·`X-Content-Type-Options`·`X-Frame-Options` 헤더를 제거하고 하나의 정책 값으로 재설정한다.
+운영 HTTPS 경계 Nginx는 Swagger JavaScript·CSS와 OpenAPI JSON·YAML을 gzip으로 압축한다. Backend 응답의 중복 HSTS·`X-Content-Type-Options`·`X-Frame-Options` 헤더를 제거하고 하나의 정책 값으로 재설정한다. MVP Frontend는 로컬 계약 확인용이며 운영 이미지로 빌드하거나 배포하지 않는다.
 
 ## 문서 그룹
 
