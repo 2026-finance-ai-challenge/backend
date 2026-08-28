@@ -1,0 +1,47 @@
+# OpenAPI·Swagger UI
+
+Backend의 실행 가능한 API 계약은 Spring MVC 컨트롤러와 DTO에서 OpenAPI 3.1 문서로 자동 생성한다. 수동 문서는 기능 배경과 운영 정책을 설명하고, 요청·응답 스키마와 현재 경로는 OpenAPI 문서를 기준으로 연동한다.
+
+## 운영 URL
+
+- Swagger UI: `https://168.107.61.81/swagger-ui/index.html`
+- Swagger UI 진입점: `https://168.107.61.81/swagger-ui.html`
+- OpenAPI JSON: `https://168.107.61.81/v3/api-docs`
+- OpenAPI YAML: `https://168.107.61.81/v3/api-docs.yaml`
+
+로컬에서는 호스트만 `http://127.0.0.1:15101`로 바꾼다. Swagger의 Server URL은 `/` 상대 경로이므로 현재 접속한 환경으로 요청하며 내부 컨테이너 주소를 노출하지 않는다.
+
+## 인증
+
+`Authentication`의 로그인 API에서 발급받은 Access Token을 Swagger UI의 `Authorize`에 입력한다. `Bearer ` 접두어는 UI가 자동으로 추가한다.
+
+- 자물쇠 없음: 인증 불필요
+- 닫힌 자물쇠: Access JWT 필수
+- 선택 인증: 비회원 호출이 가능하고, 토큰이 있으면 관심종목 등 사용자 문맥을 함께 반영
+
+Swagger UI는 브라우저 저장소에 인증 값을 보존하지 않는다. 새로고침하거나 창을 닫으면 다시 입력해야 한다.
+
+뉴스·공시 번역 요청은 캐시된 결과가 있으면 `200 OK`, 비동기 처리가 필요하면 `202 Accepted`를 반환하며 두 응답을 모두 OpenAPI에 명시한다.
+
+## 문서 그룹
+
+- `Authentication`: 회원가입, 로그인, 토큰 회전, 계정 관리
+- `Personalization`: 관심종목, 최근 조회, 알림
+- `AI Chat`: 근거 기반 Agent 채팅방과 메시지
+- `Market`: 종목 검색, 스크리너, 시세, 지수, 글로벌 피어
+- `News`: 뉴스, 번역, 중복 군집, 금융용어 해설
+- `Disclosures`: 공시, 번역, 인사이트, RAG 질의
+- `Tax`: 조세조약 안내와 암호화 세무 문서 검증
+
+오류 응답은 `application/problem+json` 형식이며 실제 API 권한은 Swagger 표시와 관계없이 Spring Security에서 검증한다.
+
+## 최신 상태 검증
+
+자동 테스트는 다음 조건을 검사한다.
+
+1. 실행 중인 모든 `/api/v1/**` Spring MVC 매핑과 OpenAPI `paths`가 정확히 일치한다.
+2. 모든 HTTP 작업에 고유한 `operationId`, 한글 요약과 기능 태그가 존재한다.
+3. JWT 필수 API와 공개 API의 보안 정의가 구분된다.
+4. Swagger UI와 JSON·YAML 문서가 인증 없이 제공된다.
+
+API를 추가하거나 경로를 변경할 때 `OpenApiConfig`의 요약·태그·인증 수준을 함께 갱신하지 않으면 검증이 실패한다.
