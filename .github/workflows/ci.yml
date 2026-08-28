@@ -43,6 +43,20 @@ jobs:
           KMARKET_JWT_SECRET_BASE64: bG9jYWwtdGVzdC1qd3Qtc2VjcmV0LTAxMjM0NTY3ODktQUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVotYWJjZGVmZ2g=
           KMARKET_TAX_DOCUMENT_KEY_BASE64: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
         run: docker compose config --quiet
+      - name: 배포 스크립트 및 Nginx 구성 검증
+        run: |
+          bash -n deploy/deploy-backend.sh
+          install -m 700 -d "$RUNNER_TEMP/nginx-cert"
+          openssl req -x509 -newkey rsa:2048 -nodes -subj /CN=localhost \
+            -keyout "$RUNNER_TEMP/nginx-cert/privkey.pem" \
+            -out "$RUNNER_TEMP/nginx-cert/fullchain.pem" -days 1 >/dev/null 2>&1
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE/deploy/nginx-http.conf:/etc/nginx/conf.d/default.conf:ro" \
+            nginx@sha256:77e5d4a6ad906c5d3793764085706577fa705b1dc6f244ea0241c4b5e2155385 nginx -t
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE/deploy/nginx-https.conf:/etc/nginx/conf.d/default.conf:ro" \
+            -v "$RUNNER_TEMP/nginx-cert:/etc/letsencrypt/live/168.107.61.81:ro" \
+            nginx@sha256:77e5d4a6ad906c5d3793764085706577fa705b1dc6f244ea0241c4b5e2155385 nginx -t
       - name: Backend 이미지 빌드
         run: docker build --tag kmarket-backend:ci .
       - name: Frontend 이미지 빌드 및 테스트
