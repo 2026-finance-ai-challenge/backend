@@ -193,7 +193,7 @@ class JdbcNewsRepository implements NewsRepository {
 			SELECT article.id, article.cluster_id, article.original_title,
 			       article.original_excerpt, article.publisher, article.published_at
 			FROM news_article article
-			WHERE article.published_at >= :since
+			WHERE article.collected_at >= :since
 			ORDER BY article.published_at DESC
 			LIMIT :limit
 			""")
