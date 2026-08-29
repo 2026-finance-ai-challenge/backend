@@ -40,6 +40,7 @@ class NewsClusterReconciliationServiceTests {
 				firstCluster,
 				"'네팔·중국 대홍수' 사망자 584명…실종자 2,500명 육박",
 				"네팔과 중국의 대규모 홍수로 사망자가 584명으로 늘고 실종자가 2500명에 육박했다.",
+				"first.example.com",
 				now.minusSeconds(3_600)
 			),
 			new NewsDuplicateCandidate(
@@ -47,6 +48,7 @@ class NewsClusterReconciliationServiceTests {
 				duplicateCluster,
 				"네팔 대홍수 사망자 584명…실종자 2천500명 육박",
 				"대홍수 피해가 이어져 사망자 584명과 실종자 약 2500명이 집계됐다.",
+				"second.example.com",
 				now.minusSeconds(3_000)
 			),
 			new NewsDuplicateCandidate(
@@ -54,6 +56,7 @@ class NewsClusterReconciliationServiceTests {
 				unrelatedCluster,
 				"기업 실적 악화 구조조정 검토",
 				boilerplate,
+				"same.example.com",
 				now.minusSeconds(2_000)
 			)
 		));

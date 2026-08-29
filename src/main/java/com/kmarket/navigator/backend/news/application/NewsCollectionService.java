@@ -84,7 +84,8 @@ public class NewsCollectionService {
 		).forEach(candidate -> duplicateIndex.add(
 			candidate.clusterId(),
 			fingerprint.profile(candidate.title(), candidate.excerpt()),
-			candidate.publishedAt()
+			candidate.publishedAt(),
+			candidate.publisher()
 		));
 		Set<String> queries = new LinkedHashSet<>(properties.getQueries());
 		List<NewsCollectionTarget> targets = repository.findCollectionTargets(properties.getTargetBatchSize());
@@ -127,7 +128,11 @@ public class NewsCollectionService {
 		String canonicalUrl = fingerprint.canonicalizeUrl(article.canonicalUrl());
 		String normalizedTitle = fingerprint.normalize(article.title());
 		NewsFingerprint.Profile incoming = fingerprint.profile(article.title(), article.excerpt());
-		NewsDuplicateIndex.Match duplicate = duplicateIndex.findBest(incoming, article.publishedAt());
+		NewsDuplicateIndex.Match duplicate = duplicateIndex.findBest(
+			incoming,
+			article.publishedAt(),
+			article.publisher()
+		);
 		double bestScore = duplicate.score();
 		UUID clusterId = duplicate.targetClusterId() != null
 			? duplicate.targetClusterId()
@@ -158,7 +163,7 @@ public class NewsCollectionService {
 			stockMatches
 		);
 		if (repository.saveCollected(draft)) {
-			duplicateIndex.add(clusterId, incoming, article.publishedAt());
+			duplicateIndex.add(clusterId, incoming, article.publishedAt(), article.publisher());
 		}
 	}
 

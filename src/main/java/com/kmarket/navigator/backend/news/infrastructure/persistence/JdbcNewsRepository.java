@@ -191,7 +191,7 @@ class JdbcNewsRepository implements NewsRepository {
 	public List<NewsDuplicateCandidate> findDuplicateCandidates(Instant since, int limit) {
 		return jdbcClient.sql("""
 			SELECT article.id, article.cluster_id, article.original_title,
-			       article.original_excerpt, article.published_at
+			       article.original_excerpt, article.publisher, article.published_at
 			FROM news_article article
 			WHERE article.published_at >= :since
 			ORDER BY article.published_at DESC
@@ -204,6 +204,7 @@ class JdbcNewsRepository implements NewsRepository {
 				resultSet.getObject("cluster_id", UUID.class),
 				resultSet.getString("original_title"),
 				resultSet.getString("original_excerpt"),
+				resultSet.getString("publisher"),
 				instant(resultSet, "published_at")
 			))
 			.list();
