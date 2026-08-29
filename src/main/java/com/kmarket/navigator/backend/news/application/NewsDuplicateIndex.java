@@ -39,6 +39,7 @@ final class NewsDuplicateIndex {
 		}
 		Entry best = null;
 		double bestScore = 0;
+		boolean bestCorroborated = false;
 		for (Entry candidate : possible) {
 			NewsFingerprint.DuplicateMatch match = fingerprint.match(
 				profile,
@@ -46,15 +47,20 @@ final class NewsDuplicateIndex {
 				candidate.profile(),
 				candidate.publishedAt()
 			);
-			boolean duplicate = match.duplicate() || corroboratedByDifferentPublisher(
+			boolean corroborated = corroboratedByDifferentPublisher(
 				profile,
 				publishedAt,
 				normalizedPublisher(publisher),
 				candidate
 			);
-			if (duplicate && match.score() > bestScore) {
+			boolean duplicate = match.duplicate() || corroborated;
+			boolean strongerEvidence = corroborated && !bestCorroborated;
+			if (duplicate && (best == null
+				|| strongerEvidence
+				|| (corroborated == bestCorroborated && match.score() > bestScore))) {
 				best = candidate;
 				bestScore = match.score();
+				bestCorroborated = corroborated;
 			}
 		}
 		return new Match(

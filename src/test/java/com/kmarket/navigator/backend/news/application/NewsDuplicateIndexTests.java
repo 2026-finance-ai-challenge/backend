@@ -53,4 +53,32 @@ class NewsDuplicateIndexTests {
 
 		assertThat(match.targetClusterId()).isNull();
 	}
+
+	@Test
+	void prefersCrossPublisherExactEvidenceWhenScoresAreTied() {
+		UUID currentClusterId = UUID.randomUUID();
+		UUID crossPublisherClusterId = UUID.randomUUID();
+		Instant publishedAt = Instant.parse("2026-08-29T00:00:00Z");
+		String sharedExcerpt = "현대글로비스는 화장품과 음반의 해외 항공운송 계약을 수주했으며 신규 고객을 위한 국제 물류 서비스를 확대한다고 밝혔다. 회사는 북미와 유럽 주요 도시로 운송 범위를 단계적으로 넓힐 계획이다.";
+		NewsFingerprint.Profile incoming = fingerprint.profile(
+			"현대글로비스 화장품 음반 항공운송 계약 수주",
+			sharedExcerpt
+		);
+		NewsDuplicateIndex index = new NewsDuplicateIndex(fingerprint);
+		index.add(currentClusterId, incoming, publishedAt, "same.example.com");
+		index.add(
+			crossPublisherClusterId,
+			fingerprint.profile("글로벌 물류 신규 고객 운송 확대", sharedExcerpt),
+			publishedAt.minusSeconds(600),
+			"other.example.com"
+		);
+
+		NewsDuplicateIndex.Match match = index.findBest(
+			incoming,
+			publishedAt.plusSeconds(600),
+			"www.same.example.com"
+		);
+
+		assertThat(match.targetClusterId()).isEqualTo(crossPublisherClusterId);
+	}
 }
