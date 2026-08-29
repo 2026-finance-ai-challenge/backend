@@ -1,11 +1,13 @@
 package com.kmarket.navigator.backend.news.application;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -20,14 +22,14 @@ final class NewsDuplicateIndex {
 		this.fingerprint = fingerprint;
 	}
 
-	void add(UUID targetClusterId, NewsFingerprint.Profile profile, Instant publishedAt) {
-		Entry entry = new Entry(targetClusterId, profile, publishedAt);
+	void add(UUID targetClusterId, NewsFingerprint.Profile profile, Instant publishedAt, String publisher) {
+		Entry entry = new Entry(targetClusterId, profile, publishedAt, normalizedPublisher(publisher));
 		for (String token : profile.indexTokens()) {
 			entriesByToken.computeIfAbsent(token, ignored -> new ArrayList<>()).add(entry);
 		}
 	}
 
-	Match findBest(NewsFingerprint.Profile profile, Instant publishedAt) {
+	Match findBest(NewsFingerprint.Profile profile, Instant publishedAt, String publisher) {
 		Set<Entry> possible = Collections.newSetFromMap(new IdentityHashMap<>());
 		for (String token : profile.indexTokens()) {
 			List<Entry> entries = entriesByToken.getOrDefault(token, List.of());
@@ -44,7 +46,13 @@ final class NewsDuplicateIndex {
 				candidate.profile(),
 				candidate.publishedAt()
 			);
-			if (match.duplicate() && match.score() > bestScore) {
+			boolean duplicate = match.duplicate() || corroboratedByDifferentPublisher(
+				profile,
+				publishedAt,
+				normalizedPublisher(publisher),
+				candidate
+			);
+			if (duplicate && match.score() > bestScore) {
 				best = candidate;
 				bestScore = match.score();
 			}
@@ -56,13 +64,38 @@ final class NewsDuplicateIndex {
 		);
 	}
 
+	private boolean corroboratedByDifferentPublisher(
+		NewsFingerprint.Profile profile,
+		Instant publishedAt,
+		String publisher,
+		Entry candidate
+	) {
+		if (publisher.isBlank() || candidate.publisher().isBlank()
+			|| publisher.equals(candidate.publisher())
+			|| Duration.between(publishedAt, candidate.publishedAt()).abs().compareTo(Duration.ofHours(36)) > 0) {
+			return false;
+		}
+		boolean exactExcerpt = profile.normalizedExcerpt().length() >= 80
+			&& profile.normalizedExcerpt().equals(candidate.profile().normalizedExcerpt());
+		boolean exactSpecificTitle = Math.min(
+			profile.titleTokens().size(),
+			candidate.profile().titleTokens().size()
+		) >= 5 && profile.normalizedTitle().equals(candidate.profile().normalizedTitle());
+		return exactExcerpt || exactSpecificTitle;
+	}
+
+	private String normalizedPublisher(String publisher) {
+		return publisher == null ? "" : publisher.toLowerCase(Locale.ROOT).replaceFirst("^www\\.", "");
+	}
+
 	record Match(UUID targetClusterId, double score, int comparisons) {
 	}
 
 	private record Entry(
 		UUID targetClusterId,
 		NewsFingerprint.Profile profile,
-		Instant publishedAt
+		Instant publishedAt,
+		String publisher
 	) {
 	}
 }

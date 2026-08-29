@@ -8,6 +8,7 @@ public record NewsDuplicateCandidate(
 	UUID clusterId,
 	String title,
 	String excerpt,
+	String publisher,
 	Instant publishedAt
 ) {
 }
