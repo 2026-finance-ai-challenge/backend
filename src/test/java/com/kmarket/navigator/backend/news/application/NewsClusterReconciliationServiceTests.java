@@ -32,6 +32,7 @@ class NewsClusterReconciliationServiceTests {
 		UUID unrelatedCluster = UUID.randomUUID();
 		UUID firstArticle = UUID.randomUUID();
 		UUID duplicateArticle = UUID.randomUUID();
+		UUID duplicateClusterSibling = UUID.randomUUID();
 		UUID unrelatedArticle = UUID.randomUUID();
 		String boilerplate = "아래는 위 기사를 번역한 영문 기사입니다 원본 기사 보기와 기자 연락처가 포함됩니다";
 		when(repository.findDuplicateCandidates(any(), anyInt())).thenReturn(List.of(
@@ -50,6 +51,14 @@ class NewsClusterReconciliationServiceTests {
 				"대홍수 피해가 이어져 사망자 584명과 실종자 약 2500명이 집계됐다.",
 				"second.example.com",
 				now.minusSeconds(3_000)
+			),
+			new NewsDuplicateCandidate(
+				duplicateClusterSibling,
+				duplicateCluster,
+				"지역 축제 개막 시민 참여 확대",
+				boilerplate,
+				"same.example.com",
+				now.minusSeconds(2_500)
 			),
 			new NewsDuplicateCandidate(
 				unrelatedArticle,
@@ -75,6 +84,9 @@ class NewsClusterReconciliationServiceTests {
 		ArgumentCaptor<List<NewsClusterAssignment>> captor = ArgumentCaptor.forClass(List.class);
 		verify(repository).replaceClusterAssignments(captor.capture(), any());
 		assertThat(captor.getValue())
-			.containsExactly(new NewsClusterAssignment(duplicateArticle, firstCluster));
+			.containsExactly(
+				new NewsClusterAssignment(duplicateArticle, firstCluster),
+				new NewsClusterAssignment(duplicateClusterSibling, firstCluster)
+			);
 	}
 }
