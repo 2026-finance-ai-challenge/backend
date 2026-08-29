@@ -5,7 +5,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.slf4j.Logger;
@@ -59,7 +61,8 @@ public class NewsClusterReconciliationService {
 			.comparing(NewsDuplicateCandidate::publishedAt)
 			.thenComparing(NewsDuplicateCandidate::articleId));
 		NewsDuplicateIndex duplicateIndex = new NewsDuplicateIndex(fingerprint);
-		List<NewsClusterAssignment> assignments = new ArrayList<>();
+		ClusterUnion clusters = new ClusterUnion();
+		articles.forEach(article -> clusters.add(article.clusterId()));
 		long comparisons = 0;
 		for (NewsDuplicateCandidate article : articles) {
 			NewsFingerprint.Profile profile = fingerprint.profile(article.title(), article.excerpt());
@@ -69,18 +72,50 @@ public class NewsClusterReconciliationService {
 				article.publisher()
 			);
 			comparisons += match.comparisons();
-			UUID targetClusterId = match.targetClusterId() == null
-				? article.clusterId()
-				: match.targetClusterId();
-			if (!targetClusterId.equals(article.clusterId())) {
-				assignments.add(new NewsClusterAssignment(article.articleId(), targetClusterId));
+			if (match.targetClusterId() != null) {
+				clusters.mergeInto(article.clusterId(), match.targetClusterId());
 			}
+			UUID targetClusterId = clusters.find(article.clusterId());
 			duplicateIndex.add(targetClusterId, profile, article.publishedAt(), article.publisher());
 		}
+		List<NewsClusterAssignment> assignments = articles.stream()
+			.filter(article -> !article.clusterId().equals(clusters.find(article.clusterId())))
+			.map(article -> new NewsClusterAssignment(
+				article.articleId(),
+				clusters.find(article.clusterId())
+			))
+			.toList();
 		int updated = repository.replaceClusterAssignments(assignments, now);
 		log.info(
 			"News cluster reconciliation completed articles={} comparisons={} assignments={} updated={}",
 			articles.size(), comparisons, assignments.size(), updated
 		);
+	}
+
+	private static final class ClusterUnion {
+
+		private final Map<UUID, UUID> parent = new HashMap<>();
+
+		void add(UUID clusterId) {
+			parent.putIfAbsent(clusterId, clusterId);
+		}
+
+		UUID find(UUID clusterId) {
+			add(clusterId);
+			UUID root = parent.get(clusterId);
+			if (!root.equals(clusterId)) {
+				root = find(root);
+				parent.put(clusterId, root);
+			}
+			return root;
+		}
+
+		void mergeInto(UUID sourceClusterId, UUID targetClusterId) {
+			UUID sourceRoot = find(sourceClusterId);
+			UUID targetRoot = find(targetClusterId);
+			if (!sourceRoot.equals(targetRoot)) {
+				parent.put(sourceRoot, targetRoot);
+			}
+		}
 	}
 }
