@@ -1339,7 +1339,7 @@ class BackendApplicationTests {
 
 	@Test
 	void reconcilesExistingCrossPublisherNewsAndReturnsOneStory() throws Exception {
-		Instant publishedAt = Instant.now().minusSeconds(3_600);
+		Instant publishedAt = Instant.now().minus(Duration.ofHours(80));
 		UUID firstArticleId = insertReadyNews(
 			"네팔 중국 대홍수 사망자 584명 실종자 2500명 육박",
 			"네팔과 중국에서 발생한 홍수로 사망자가 584명으로 늘고 실종자가 2500명에 육박했다.",
@@ -1352,6 +1352,13 @@ class BackendApplicationTests {
 			publishedAt.plusSeconds(600),
 			"HIGH"
 		);
+		jdbcClient.sql("""
+			UPDATE news_article SET collected_at = CURRENT_TIMESTAMP
+			WHERE id IN (:first, :second)
+			""")
+			.param("first", firstArticleId)
+			.param("second", duplicateArticleId)
+			.update();
 
 		newsClusterReconciliationService.reconcile();
 
