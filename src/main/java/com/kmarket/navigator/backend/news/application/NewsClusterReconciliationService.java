@@ -63,7 +63,11 @@ public class NewsClusterReconciliationService {
 		long comparisons = 0;
 		for (NewsDuplicateCandidate article : articles) {
 			NewsFingerprint.Profile profile = fingerprint.profile(article.title(), article.excerpt());
-			NewsDuplicateIndex.Match match = duplicateIndex.findBest(profile, article.publishedAt());
+			NewsDuplicateIndex.Match match = duplicateIndex.findBest(
+				profile,
+				article.publishedAt(),
+				article.publisher()
+			);
 			comparisons += match.comparisons();
 			UUID targetClusterId = match.targetClusterId() == null
 				? article.clusterId()
@@ -71,7 +75,7 @@ public class NewsClusterReconciliationService {
 			if (!targetClusterId.equals(article.clusterId())) {
 				assignments.add(new NewsClusterAssignment(article.articleId(), targetClusterId));
 			}
-			duplicateIndex.add(targetClusterId, profile, article.publishedAt());
+			duplicateIndex.add(targetClusterId, profile, article.publishedAt(), article.publisher());
 		}
 		int updated = repository.replaceClusterAssignments(assignments, now);
 		log.info(
