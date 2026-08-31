@@ -2063,7 +2063,7 @@ class BackendApplicationTests {
 			.update();
 		jdbcClient.sql("""
 			UPDATE translation_memory memory
-			SET translated_text = disclosure.title_ko, status = 'READY',
+			SET translated_text = 'Translated disclosure title', status = 'READY',
 			    model_id = 'test-reviewed-title', prompt_version = 'test-title-v1',
 			    generated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
 			FROM disclosure
@@ -2118,7 +2118,7 @@ class BackendApplicationTests {
 			VALUES (
 			    :id, :clusterId, 'NAVER_NEWS', :providerId, :title,
 			    encode(digest(regexp_replace(btrim(:title), '[[:space:]]+', ' ', 'g'), 'sha256'), 'hex'),
-			    NULL, :excerpt, :title, :excerpt, 'A market event occurred.',
+				    NULL, :excerpt, :englishTitle, :excerpt, 'A market event occurred.',
 			    'The article states the reason.', 'The event may affect future operations.',
 			    'CORPORATE_ACTION', 'POSITIVE', :importance, 'POSITIVE',
 			    :importance, 0.55, 0.90, 0.85, 0.80, 0.75,
@@ -2130,7 +2130,8 @@ class BackendApplicationTests {
 			.param("id", articleId)
 			.param("clusterId", clusterId)
 			.param("providerId", articleId.toString())
-			.param("title", title)
+				.param("title", title)
+				.param("englishTitle", "Ready English news title")
 			.param("excerpt", excerpt)
 			.param("importance", importance)
 			.param("url", "https://news.example.com/" + articleId)

@@ -68,6 +68,7 @@ class JdbcNewsRepository implements NewsRepository {
 			  AND article.analysis_status = 'READY'
 			  AND article.english_title IS NOT NULL
 			  AND btrim(article.english_title) <> ''
+			  AND article.english_title !~ '[가-힣ㄱ-ㅎㅏ-ㅣ]'
 			  AND (CAST(:query AS varchar) IS NULL
 			       OR article.original_title ILIKE '%%' || :query || '%%' ESCAPE '\\'
 			       OR article.original_body ILIKE '%%' || :query || '%%' ESCAPE '\\'
