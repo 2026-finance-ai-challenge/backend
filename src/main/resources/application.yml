@@ -128,6 +128,7 @@ kmarket:
     collection-initial-delay: ${KMARKET_MARKET_COLLECTION_INITIAL_DELAY:15s}
     reference-interval: ${KMARKET_MARKET_REFERENCE_INTERVAL:10m}
     history-cron: ${KMARKET_MARKET_HISTORY_CRON:0 20 18 * * MON-FRI}
+    foreign-prediction-cron: ${KMARKET_FOREIGN_PREDICTION_CRON:0 40 18 * * MON-FRI}
     frankfurter:
       enabled: ${KMARKET_FRANKFURTER_ENABLED:true}
       base-url: ${KMARKET_FRANKFURTER_BASE_URL:https://api.frankfurter.dev}

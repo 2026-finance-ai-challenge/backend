@@ -21,9 +21,11 @@ import com.kmarket.navigator.backend.global.error.BusinessException;
 import com.kmarket.navigator.backend.global.error.ErrorCode;
 import com.kmarket.navigator.backend.identity.domain.AuthenticatedUser;
 import com.kmarket.navigator.backend.stock.application.port.MarketRepository;
+import com.kmarket.navigator.backend.stock.application.port.ForeignLimitPredictionGateway;
 import com.kmarket.navigator.backend.stock.domain.ExchangeRateSnapshot;
 import com.kmarket.navigator.backend.stock.domain.ForeignLimitPolicy;
 import com.kmarket.navigator.backend.stock.domain.ForeignLimitPrediction;
+import com.kmarket.navigator.backend.stock.domain.ForeignOwnershipSnapshot;
 import com.kmarket.navigator.backend.stock.domain.MarketDataStatus;
 import com.kmarket.navigator.backend.stock.domain.MarketIndexSnapshot;
 import com.kmarket.navigator.backend.stock.domain.MarketForeignNetFlowSummary;
@@ -37,7 +39,7 @@ import com.kmarket.navigator.backend.stock.domain.StockMarketView;
 public class MarketService {
 
 	private static final Duration LIVE_QUOTE_MAX_AGE = Duration.ofMinutes(2);
-	private static final int FOREIGN_HISTORY_LIMIT = 30;
+	private static final int FOREIGN_HISTORY_LIMIT = 120;
 	private static final Map<String, String> INDEX_NAMES = Map.of(
 		"0001", "KOSPI",
 		"1001", "KOSDAQ",
@@ -46,11 +48,16 @@ public class MarketService {
 	private static final List<String> INDEX_ORDER = List.of("0001", "1001", "2001");
 	private final MarketRepository repository;
 	private final ForeignLimitPredictionEngine predictionEngine;
+	private final ForeignLimitPredictionGateway predictionGateway;
 	private final Clock clock;
 
 	@Autowired
-	public MarketService(MarketRepository repository, ForeignLimitPredictionEngine predictionEngine) {
-		this(repository, predictionEngine, Clock.systemUTC());
+	public MarketService(
+		MarketRepository repository,
+		ForeignLimitPredictionEngine predictionEngine,
+		ForeignLimitPredictionGateway predictionGateway
+	) {
+		this(repository, predictionEngine, predictionGateway, Clock.systemUTC());
 	}
 
 	MarketService(
@@ -58,8 +65,18 @@ public class MarketService {
 		ForeignLimitPredictionEngine predictionEngine,
 		Clock clock
 	) {
+		this(repository, predictionEngine, (stockCode, history) -> java.util.Optional.empty(), clock);
+	}
+
+	MarketService(
+		MarketRepository repository,
+		ForeignLimitPredictionEngine predictionEngine,
+		ForeignLimitPredictionGateway predictionGateway,
+		Clock clock
+	) {
 		this.repository = repository;
 		this.predictionEngine = predictionEngine;
+		this.predictionGateway = predictionGateway;
 		this.clock = clock;
 	}
 
@@ -101,7 +118,7 @@ public class MarketService {
 		ForeignLimitPolicy policy = policyByCode().get(view.stock().stockCode());
 		ForeignLimitPrediction prediction = policy == null || !predictionAllowed(view)
 			? null
-			: predict(view.stock().securityId());
+			: predict(view.stock().stockCode(), view.stock().securityId());
 		return new MarketStockDetail(view, usd, rate, policy, prediction);
 	}
 
@@ -125,7 +142,9 @@ public class MarketService {
 				view,
 				policy,
 				warning,
-				predictionAllowed(view) ? predict(view.stock().securityId()) : null
+				predictionAllowed(view)
+					? predict(view.stock().stockCode(), view.stock().securityId())
+					: null
 			));
 		}
 		return List.copyOf(result);
@@ -183,10 +202,17 @@ public class MarketService {
 		);
 	}
 
-	private ForeignLimitPrediction predict(UUID securityId) {
-		return predictionEngine.predict(
-			repository.findForeignOwnershipHistory(securityId, FOREIGN_HISTORY_LIMIT)
-		).orElse(null);
+	private ForeignLimitPrediction predict(String stockCode, UUID securityId) {
+		List<ForeignOwnershipSnapshot> history = repository.findForeignOwnershipHistory(
+			securityId,
+			FOREIGN_HISTORY_LIMIT
+		);
+		return repository.findLatestForeignLimitPrediction(securityId)
+			.filter(prediction -> history.isEmpty()
+				|| !prediction.baseDate().isBefore(history.getFirst().baseDate()))
+			.or(() -> predictionGateway.predict(stockCode, history))
+			.or(() -> predictionEngine.predict(history))
+			.orElse(null);
 	}
 
 	private boolean predictionAllowed(StockMarketView view) {
