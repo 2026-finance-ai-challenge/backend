@@ -65,8 +65,15 @@ class FrankfurterExchangeRateGateway implements ExchangeRateGateway {
 	}
 
 	private BigDecimal decimal(JsonNode node, String field) {
+		JsonNode value = node.path(field);
+		if (value.isMissingNode() || value.isNull()) {
+			return null;
+		}
+		if (value.isNumber()) {
+			return value.decimalValue();
+		}
 		try {
-			return new BigDecimal(text(node, field));
+			return new BigDecimal(value.stringValue().trim());
 		} catch (NumberFormatException exception) {
 			return null;
 		}
