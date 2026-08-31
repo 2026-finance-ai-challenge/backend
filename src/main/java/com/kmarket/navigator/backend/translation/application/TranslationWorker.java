@@ -31,6 +31,8 @@ public class TranslationWorker {
 	private static final Logger log = LoggerFactory.getLogger(TranslationWorker.class);
 	private static final int BATCH_SIZE = 10;
 	private static final int TITLE_BATCH_SIZE = 10;
+	private static final Duration TRANSIENT_FAILURE_COOLDOWN = Duration.ofSeconds(15);
+	private static final Duration RATE_LIMIT_COOLDOWN = Duration.ofMinutes(1);
 	private final TranslationRepository repository;
 	private final TranslationAiGateway aiGateway;
 	private final TranslationGenerationGuard guard;
@@ -99,18 +101,29 @@ public class TranslationWorker {
 			nextTitleAttemptAt = Instant.EPOCH;
 		}
 		catch (RuntimeException exception) {
-			nextTitleAttemptAt = now.plus(providerFailureCooldown);
+			Duration cooldown = cooldown(exception);
+			nextTitleAttemptAt = now.plus(cooldown);
 			String errorCode = errorCode(exception);
 			for (TitleTranslationJob job : jobs) {
 				Duration backoff = Duration.ofSeconds(Math.min(3_600, 15L << Math.min(job.attempts(), 7)));
-				Duration delay = backoff.compareTo(providerFailureCooldown) >= 0
-					? backoff : providerFailureCooldown;
+				Duration delay = backoff.compareTo(cooldown) >= 0 ? backoff : cooldown;
 				repository.fail(job.id(), job.attempts(), errorCode,
 					Instant.now(clock), delay);
 			}
 			log.warn("News title translation batch failed size={} error={} cooldownSeconds={}",
-				jobs.size(), errorCode, providerFailureCooldown.toSeconds());
+				jobs.size(), errorCode, cooldown.toSeconds());
 		}
+	}
+
+	private Duration cooldown(RuntimeException exception) {
+		if (exception instanceof TranslationProviderException providerException) {
+			return switch (providerException.failure()) {
+				case QUOTA_EXHAUSTED -> providerFailureCooldown;
+				case RATE_LIMITED -> RATE_LIMIT_COOLDOWN;
+				case TIMEOUT, UNAVAILABLE -> TRANSIENT_FAILURE_COOLDOWN;
+			};
+		}
+		return providerFailureCooldown;
 	}
 
 	private void process(TranslationJob job) {
@@ -162,6 +175,9 @@ public class TranslationWorker {
 	}
 
 	private static String errorCode(RuntimeException exception) {
+		if (exception instanceof TranslationProviderException providerException) {
+			return providerException.failure().code();
+		}
 		if (exception instanceof BusinessException businessException) {
 			return businessException.errorCode().code();
 		}

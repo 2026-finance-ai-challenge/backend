@@ -11,10 +11,13 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
 
 import com.kmarket.navigator.backend.disclosure.infrastructure.ai.AiServiceProperties;
 import com.kmarket.navigator.backend.global.error.BusinessException;
 import com.kmarket.navigator.backend.global.error.ErrorCode;
+import com.kmarket.navigator.backend.translation.application.TranslationProviderException;
+import com.kmarket.navigator.backend.translation.application.TranslationProviderException.Failure;
 import com.kmarket.navigator.backend.translation.application.port.TranslationAiGateway;
 import com.kmarket.navigator.backend.translation.domain.GeneratedTranslation;
 import com.kmarket.navigator.backend.translation.domain.GeneratedTitle;
@@ -194,9 +197,29 @@ class AiTranslationClient implements TranslationAiGateway {
 			}
 			return response;
 		}
-		catch (RestClientException exception) {
-			throw new BusinessException(ErrorCode.AI_SERVICE_UNAVAILABLE);
+		catch (RestClientResponseException exception) {
+			throw providerException(exception);
 		}
+		catch (RestClientException exception) {
+			throw new TranslationProviderException(Failure.UNAVAILABLE);
+		}
+	}
+
+	private TranslationProviderException providerException(RestClientResponseException exception) {
+		String code;
+		try {
+			code = objectMapper.readTree(exception.getResponseBodyAsString()).path("code").asString();
+		}
+		catch (RuntimeException ignored) {
+			code = "";
+		}
+		Failure failure = switch (code) {
+			case "AI_PROVIDER_QUOTA_EXHAUSTED" -> Failure.QUOTA_EXHAUSTED;
+			case "AI_PROVIDER_RATE_LIMITED" -> Failure.RATE_LIMITED;
+			case "AI_PROVIDER_TIMEOUT" -> Failure.TIMEOUT;
+			default -> Failure.UNAVAILABLE;
+		};
+		return new TranslationProviderException(failure);
 	}
 
 	private static void putNullable(ObjectNode node, String field, String value) {
