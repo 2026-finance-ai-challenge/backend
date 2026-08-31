@@ -67,7 +67,7 @@ public class OpenApiConfig {
 		entry("MarketController#history", operation("종목 가격 이력 조회", "Market")),
 		entry("MarketController#globalPeers", operation("글로벌 피어 비교 조회", "Market")),
 
-		entry("NewsController#findAll", operation("뉴스 목록 조회", "News", Access.OPTIONAL)),
+		entry("NewsController#findAll", operation("검증된 종목 뉴스 목록 조회", "News", Access.OPTIONAL)),
 		entry("NewsController#findOne", operation("뉴스 상세 조회", "News")),
 		entry("NewsController#findTranslation", operation("뉴스 번역 상태 조회", "News")),
 		entry("NewsController#requestTranslation", operation("뉴스 번역 요청", "News")),
@@ -104,7 +104,7 @@ public class OpenApiConfig {
 				new Tag().name("Personalization").description("관심종목, 최근 조회, 알림함"),
 				new Tag().name("AI Chat").description("근거 기반 AI Agent 채팅방과 메시지"),
 				new Tag().name("Market").description("종목 검색, 스크리너, 시세, 지수, 글로벌 피어"),
-				new Tag().name("News").description("뉴스 조회, 번역, 중복 군집, 금융용어 해설"),
+				new Tag().name("News").description("종목 연관 뉴스 조회, 수집 전 중복 차단, 번역, 금융용어 해설"),
 				new Tag().name("Disclosures").description("공시 조회, 번역, 인사이트, RAG 질의"),
 				new Tag().name("Tax").description("조세조약 안내와 암호화 세무 문서 검증")
 			))

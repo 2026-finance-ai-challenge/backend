@@ -53,7 +53,16 @@ final class NewsDuplicateIndex {
 				normalizedPublisher(publisher),
 				candidate
 			);
-			boolean duplicate = match.duplicate() || corroborated;
+			boolean samePublisher = !candidate.publisher().isBlank()
+				&& candidate.publisher().equals(normalizedPublisher(publisher));
+			boolean duplicate = corroborated
+				|| (!samePublisher && match.duplicate())
+				|| (samePublisher && strictSamePublisherDuplicate(
+					profile,
+					publishedAt,
+					candidate,
+					match
+				));
 			boolean strongerEvidence = corroborated && !bestCorroborated;
 			if (duplicate && (best == null
 				|| strongerEvidence
@@ -68,6 +77,21 @@ final class NewsDuplicateIndex {
 			bestScore,
 			possible.size()
 		);
+	}
+
+	private boolean strictSamePublisherDuplicate(
+		NewsFingerprint.Profile profile,
+		Instant publishedAt,
+		Entry candidate,
+		NewsFingerprint.DuplicateMatch match
+	) {
+		boolean exactExcerpt = profile.normalizedExcerpt().length() >= 80
+			&& profile.normalizedExcerpt().equals(candidate.profile().normalizedExcerpt());
+		boolean exactSpecificTitle = profile.titleTokens().size() >= 5
+			&& profile.normalizedTitle().equals(candidate.profile().normalizedTitle())
+			&& match.excerptScore() >= 0.75
+			&& Duration.between(publishedAt, candidate.publishedAt()).abs().compareTo(Duration.ofHours(12)) <= 0;
+		return exactExcerpt || exactSpecificTitle;
 	}
 
 	private boolean corroboratedByDifferentPublisher(
