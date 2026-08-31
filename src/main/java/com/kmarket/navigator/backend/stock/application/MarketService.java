@@ -116,9 +116,9 @@ public class MarketService {
 			: view.quote().currentPriceKrw()
 				.divide(rate.krwPerUnit(), 2, RoundingMode.HALF_UP);
 		ForeignLimitPolicy policy = policyByCode().get(view.stock().stockCode());
-		ForeignLimitPrediction prediction = policy == null || !predictionAllowed(view)
+		ForeignLimitPrediction prediction = policy == null
 			? null
-			: predict(view.stock().stockCode(), view.stock().securityId());
+			: predictionFor(view);
 		return new MarketStockDetail(view, usd, rate, policy, prediction);
 	}
 
@@ -142,9 +142,7 @@ public class MarketService {
 				view,
 				policy,
 				warning,
-				predictionAllowed(view)
-					? predict(view.stock().stockCode(), view.stock().securityId())
-					: null
+				predictionFor(view)
 			));
 		}
 		return List.copyOf(result);
@@ -213,6 +211,13 @@ public class MarketService {
 			.or(() -> predictionGateway.predict(stockCode, history))
 			.or(() -> predictionEngine.predict(history))
 			.orElse(null);
+	}
+
+	private ForeignLimitPrediction predictionFor(StockMarketView view) {
+		if (!predictionAllowed(view)) {
+			return repository.findLatestForeignLimitPrediction(view.stock().securityId()).orElse(null);
+		}
+		return predict(view.stock().stockCode(), view.stock().securityId());
 	}
 
 	private boolean predictionAllowed(StockMarketView view) {
