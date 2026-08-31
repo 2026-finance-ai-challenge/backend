@@ -125,6 +125,18 @@ class JdbcTranslationRepository implements TranslationRepository {
 	}
 
 	@Override
+	public void prioritize(UUID id, Instant now) {
+		jdbcClient.sql("""
+			UPDATE translation_job
+			SET priority = 0, available_at = LEAST(available_at, :now), updated_at = :now
+			WHERE translation_memory_id = :id AND status = 'PENDING'
+			""")
+			.param("id", id)
+			.param("now", atUtc(now))
+			.update();
+	}
+
+	@Override
 	@Transactional
 	public List<TranslationJob> claim(int limit, String workerId, Instant now, Instant staleBefore) {
 		jdbcClient.sql("""
@@ -154,7 +166,7 @@ class JdbcTranslationRepository implements TranslationRepository {
 			    JOIN translation_memory memory ON memory.id = job.translation_memory_id
 			    WHERE memory.content_kind IN ('NEWS_NARRATIVE', 'DISCLOSURE_SECTION')
 			      AND job.status = 'PENDING' AND job.available_at <= :now
-			    ORDER BY job.available_at, job.updated_at, job.translation_memory_id
+			    ORDER BY job.priority, job.available_at, job.updated_at, job.translation_memory_id
 			    FOR UPDATE OF job SKIP LOCKED LIMIT :limit
 			), claimed AS (
 			    UPDATE translation_job job
