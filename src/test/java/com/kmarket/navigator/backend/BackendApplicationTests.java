@@ -402,7 +402,7 @@ class BackendApplicationTests {
 			.getResponse()
 			.getContentAsString();
 		JsonNode openApi = objectMapper.readTree(body);
-		assertThat(openApi.path("openapi").asString()).startsWith("3.1.");
+		assertThat(openApi.path("openapi").asString()).startsWith("3.0.");
 
 		Set<String> applicationPaths = requestMappingHandlerMapping.getHandlerMethods().keySet().stream()
 			.flatMap(mapping -> mapping.getPatternValues().stream())
