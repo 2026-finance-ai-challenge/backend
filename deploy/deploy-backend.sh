@@ -98,8 +98,10 @@ if [[ -L "$legacy_model_runtime" ]]; then
 fi
 
 runtime_env_temporary=$(mktemp "$DEPLOY_ROOT/.runtime.env.XXXXXX")
-awk -F= '$1 != "KMARKET_AI_HANA_EXPECTED_COMMIT" { print }' "$RUNTIME_ENV" \
+awk -F= '$1 != "KMARKET_AI_HANA_EXPECTED_COMMIT" && $1 != "KMARKET_AI_TITLE_TRANSLATION_PROMPT_VERSION" { print }' "$RUNTIME_ENV" \
   >"$runtime_env_temporary"
+printf '%s\n' 'KMARKET_AI_TITLE_TRANSLATION_PROMPT_VERSION=financial-title-translation-v2' \
+  >>"$runtime_env_temporary"
 chmod 600 "$runtime_env_temporary"
 mv "$runtime_env_temporary" "$RUNTIME_ENV"
 docker image prune --force --filter until=168h >/dev/null

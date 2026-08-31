@@ -13,6 +13,7 @@ import com.kmarket.navigator.backend.disclosure.domain.DisclosureSignalJob;
 import com.kmarket.navigator.backend.disclosure.domain.DocumentStatus;
 import com.kmarket.navigator.backend.disclosure.domain.IndexStatus;
 import com.kmarket.navigator.backend.disclosure.domain.ListedCommonStock;
+import com.kmarket.navigator.backend.global.text.EnglishTextPolicy;
 
 public interface DisclosureRepository {
 
@@ -60,8 +61,7 @@ public interface DisclosureRepository {
 		return findByReceiptNumber(receiptNumber).filter(detail ->
 			detail.documentStatus() == DocumentStatus.READY
 				&& detail.indexStatus() == IndexStatus.READY
-				&& detail.titleEn() != null
-				&& !detail.titleEn().isBlank()
+				&& EnglishTextPolicy.isValid(detail.titleEn())
 				&& detail.eventType() != null
 				&& detail.sentiment() != null
 				&& detail.importance() != null

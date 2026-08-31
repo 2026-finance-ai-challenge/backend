@@ -2,6 +2,8 @@ package com.kmarket.navigator.backend.translation.domain;
 
 import java.util.UUID;
 
+import com.kmarket.navigator.backend.global.text.EnglishTextPolicy;
+
 public record GeneratedTitle(
 	UUID id,
 	String sourceHash,
@@ -11,4 +13,7 @@ public record GeneratedTitle(
 	String modelId,
 	String promptVersion
 ) {
+	public GeneratedTitle {
+		EnglishTextPolicy.requireValid(translatedText);
+	}
 }

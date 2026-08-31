@@ -766,6 +766,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			 AND translation.status = 'READY'
 			 AND translation.translated_text IS NOT NULL
 			 AND btrim(translation.translated_text) <> ''
+			 AND translation.translated_text !~ '[가-힣ㄱ-ㅎㅏ-ㅣ]'
 			WHERE s.active AND s.common_stock
 			  AND d.document_status = 'READY'
 			  AND d.index_status = 'READY'
