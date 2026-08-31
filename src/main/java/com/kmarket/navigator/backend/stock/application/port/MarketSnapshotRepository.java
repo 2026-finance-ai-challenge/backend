@@ -2,6 +2,7 @@ package com.kmarket.navigator.backend.stock.application.port;
 
 import java.util.List;
 
+import com.kmarket.navigator.backend.stock.domain.ForeignLimitPrediction;
 import com.kmarket.navigator.backend.stock.domain.MarketIndexSnapshot;
 import com.kmarket.navigator.backend.stock.domain.MarketQuoteSnapshot;
 import com.kmarket.navigator.backend.stock.domain.ForeignLimitCollectionTarget;
@@ -21,6 +22,10 @@ public interface MarketSnapshotRepository {
 	List<ForeignLimitCollectionTarget> findForeignLimitTargets();
 
 	void saveForeignOwnership(String stockCode, ForeignOwnershipSnapshot snapshot);
+
+	List<ForeignOwnershipSnapshot> findForeignOwnershipHistory(String stockCode, int limit);
+
+	void saveForeignLimitPrediction(String stockCode, ForeignLimitPrediction prediction);
 
 	void saveDailyPrices(String stockCode, List<MarketDailyPrice> prices);
 

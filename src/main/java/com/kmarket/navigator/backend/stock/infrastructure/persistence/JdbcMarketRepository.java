@@ -16,6 +16,7 @@ import org.springframework.stereotype.Repository;
 import com.kmarket.navigator.backend.stock.application.port.MarketRepository;
 import com.kmarket.navigator.backend.stock.domain.ExchangeRateSnapshot;
 import com.kmarket.navigator.backend.stock.domain.ForeignLimitPolicy;
+import com.kmarket.navigator.backend.stock.domain.ForeignLimitPrediction;
 import com.kmarket.navigator.backend.stock.domain.ForeignOwnershipSnapshot;
 import com.kmarket.navigator.backend.stock.domain.MarketDailyPrice;
 import com.kmarket.navigator.backend.stock.domain.MarketDataStatus;
@@ -177,6 +178,33 @@ class JdbcMarketRepository implements MarketRepository {
 			.param("limit", limit)
 			.query(this::mapForeignOwnership)
 			.list();
+	}
+
+	@Override
+	public Optional<ForeignLimitPrediction> findLatestForeignLimitPrediction(UUID securityId) {
+		return jdbcClient.sql("""
+			SELECT min_rate, base_rate, max_rate, observation_count,
+			       observation_window_days, confidence, model_version,
+			       base_date, calculated_at, source
+			FROM foreign_limit_prediction_snapshot
+			WHERE security_id = :securityId
+			ORDER BY base_date DESC
+			LIMIT 1
+			""")
+			.param("securityId", securityId)
+			.query((resultSet, rowNumber) -> new ForeignLimitPrediction(
+				resultSet.getBigDecimal("min_rate"),
+				resultSet.getBigDecimal("base_rate"),
+				resultSet.getBigDecimal("max_rate"),
+				resultSet.getInt("observation_count"),
+				resultSet.getInt("observation_window_days"),
+				resultSet.getBigDecimal("confidence"),
+				resultSet.getString("model_version"),
+				resultSet.getObject("base_date", LocalDate.class),
+				instant(resultSet, "calculated_at"),
+				resultSet.getString("source")
+			))
+			.optional();
 	}
 
 	@Override

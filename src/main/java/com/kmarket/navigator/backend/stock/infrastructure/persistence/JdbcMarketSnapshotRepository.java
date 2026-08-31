@@ -1,6 +1,7 @@
 package com.kmarket.navigator.backend.stock.infrastructure.persistence;
 
 import java.sql.Types;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -11,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.kmarket.navigator.backend.stock.application.port.MarketSnapshotRepository;
 import com.kmarket.navigator.backend.stock.domain.ForeignLimitCollectionTarget;
+import com.kmarket.navigator.backend.stock.domain.ForeignLimitPrediction;
 import com.kmarket.navigator.backend.stock.domain.ForeignOwnershipSnapshot;
 import com.kmarket.navigator.backend.stock.domain.ExchangeRateSnapshot;
 import com.kmarket.navigator.backend.stock.domain.MarketDailyPrice;
@@ -225,6 +227,76 @@ class JdbcMarketSnapshotRepository implements MarketSnapshotRepository {
 	}
 
 	@Override
+	public List<ForeignOwnershipSnapshot> findForeignOwnershipHistory(String stockCode, int limit) {
+		return jdbcClient.sql("""
+			SELECT snapshot.foreign_owned_quantity, snapshot.total_listed_quantity,
+			       snapshot.foreign_limit_quantity, snapshot.available_quantity,
+			       snapshot.ownership_rate, snapshot.limit_exhaustion_rate,
+			       snapshot.base_date, snapshot.collected_at, snapshot.source
+			FROM foreign_ownership_snapshot snapshot
+			JOIN security ON security.id = snapshot.security_id
+			WHERE security.stock_code = :stockCode
+			ORDER BY snapshot.base_date DESC
+			LIMIT :limit
+			""")
+			.param("stockCode", stockCode)
+			.param("limit", limit)
+			.query((resultSet, rowNumber) -> new ForeignOwnershipSnapshot(
+				resultSet.getLong("foreign_owned_quantity"),
+				nullableLong(resultSet, "total_listed_quantity"),
+				nullableLong(resultSet, "foreign_limit_quantity"),
+				nullableLong(resultSet, "available_quantity"),
+				resultSet.getBigDecimal("ownership_rate"),
+				resultSet.getBigDecimal("limit_exhaustion_rate"),
+				resultSet.getObject("base_date", LocalDate.class),
+				resultSet.getObject("collected_at", OffsetDateTime.class).toInstant(),
+				resultSet.getString("source")
+			))
+			.list();
+	}
+
+	@Override
+	@Transactional
+	public void saveForeignLimitPrediction(String stockCode, ForeignLimitPrediction prediction) {
+		jdbcClient.sql("""
+			INSERT INTO foreign_limit_prediction_snapshot (
+			    security_id, base_date, min_rate, base_rate, max_rate,
+			    observation_count, observation_window_days, confidence,
+			    model_version, calculated_at, source
+			)
+			SELECT security.id, :baseDate, :minRate, :baseRate, :maxRate,
+			       :observationCount, :observationWindowDays, :confidence,
+			       :modelVersion, :calculatedAt, :source
+			FROM security
+			JOIN foreign_limit_policy policy ON policy.stock_code = security.stock_code
+			WHERE security.stock_code = :stockCode
+			ON CONFLICT (security_id, base_date) DO UPDATE
+			SET min_rate = EXCLUDED.min_rate,
+			    base_rate = EXCLUDED.base_rate,
+			    max_rate = EXCLUDED.max_rate,
+			    observation_count = EXCLUDED.observation_count,
+			    observation_window_days = EXCLUDED.observation_window_days,
+			    confidence = EXCLUDED.confidence,
+			    model_version = EXCLUDED.model_version,
+			    calculated_at = EXCLUDED.calculated_at,
+			    source = EXCLUDED.source
+			WHERE EXCLUDED.calculated_at >= foreign_limit_prediction_snapshot.calculated_at
+			""")
+			.param("stockCode", stockCode)
+			.param("baseDate", prediction.baseDate())
+			.param("minRate", prediction.minRate())
+			.param("baseRate", prediction.baseRate())
+			.param("maxRate", prediction.maxRate())
+			.param("observationCount", prediction.observationCount())
+			.param("observationWindowDays", prediction.observationWindowDays())
+			.param("confidence", prediction.confidence())
+			.param("modelVersion", prediction.modelVersion())
+			.param("calculatedAt", atUtc(prediction.calculatedAt()))
+			.param("source", prediction.source())
+			.update();
+	}
+
+	@Override
 	@Transactional
 	public void saveDailyPrices(String stockCode, List<MarketDailyPrice> prices) {
 		for (MarketDailyPrice price : prices) {
@@ -314,6 +386,11 @@ class JdbcMarketSnapshotRepository implements MarketSnapshotRepository {
 		int sqlType
 	) {
 		return value == null ? statement.param(name, null, sqlType) : statement.param(name, value);
+	}
+
+	private Long nullableLong(java.sql.ResultSet resultSet, String column) throws java.sql.SQLException {
+		long value = resultSet.getLong(column);
+		return resultSet.wasNull() ? null : value;
 	}
 
 	private OffsetDateTime atUtc(java.time.Instant instant) {

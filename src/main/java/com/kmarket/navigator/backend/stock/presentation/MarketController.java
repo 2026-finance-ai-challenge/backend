@@ -274,7 +274,10 @@ public class MarketController {
 				ForeignOwnershipResponse.from(view.foreignOwnership()),
 				detail.foreignLimitPolicy() != null,
 				ForeignLimitPolicyResponse.from(detail.foreignLimitPolicy()),
-				ForeignLimitPredictionResponse.from(detail.foreignLimitPrediction())
+				ForeignLimitPredictionResponse.from(
+					detail.foreignLimitPrediction(),
+					view.quote() == null ? null : view.quote().marketSession()
+				)
 			);
 		}
 	}
@@ -404,10 +407,15 @@ public class MarketController {
 		Instant calculatedAt,
 		String source
 	) {
-		static ForeignLimitPredictionResponse from(ForeignLimitPrediction prediction) {
+		static ForeignLimitPredictionResponse from(
+			ForeignLimitPrediction prediction,
+			String marketSession
+		) {
 			return prediction == null
 				? new ForeignLimitPredictionResponse(
-					"UNAVAILABLE", null, null, null, 0, 0, null, null, null, null, "UNAVAILABLE"
+					"REGULAR".equals(marketSession) ? "UNAVAILABLE" : "MARKET_CLOSED",
+					null, null, null, 0, 0, null, null, null, null,
+					"REGULAR".equals(marketSession) ? "UNAVAILABLE" : "MARKET_CLOSED"
 				)
 				: new ForeignLimitPredictionResponse(
 					"AVAILABLE",
@@ -436,7 +444,10 @@ public class MarketController {
 				StockCardResponse.from(monitor.view()),
 				ForeignLimitPolicyResponse.from(monitor.policy()),
 				monitor.warning(),
-				ForeignLimitPredictionResponse.from(monitor.prediction())
+				ForeignLimitPredictionResponse.from(
+					monitor.prediction(),
+					monitor.view().quote() == null ? null : monitor.view().quote().marketSession()
+				)
 			);
 		}
 	}
