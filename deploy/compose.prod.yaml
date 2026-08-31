@@ -184,6 +184,7 @@ services:
       KMARKET_JWT_SECRET_BASE64: ${KMARKET_JWT_SECRET_BASE64:?required}
       KMARKET_JWT_ISSUER: k-market-navigator
       KMARKET_JWT_AUDIENCE: k-market-navigator-api
+      KMARKET_CORS_ALLOWED_ORIGINS: ${KMARKET_CORS_ALLOWED_ORIGINS:-https://kartkr.cloud,https://www.kartkr.cloud,http://localhost:5173,http://127.0.0.1:5173}
       KMARKET_TAX_DOCUMENT_ROOT: /app/data/tax-documents
       KMARKET_TAX_DOCUMENT_KEY_BASE64: ${KMARKET_TAX_DOCUMENT_KEY_BASE64:?required}
       KMARKET_NAVER_NEWS_ENABLED: ${KMARKET_NAVER_NEWS_ENABLED:-false}
