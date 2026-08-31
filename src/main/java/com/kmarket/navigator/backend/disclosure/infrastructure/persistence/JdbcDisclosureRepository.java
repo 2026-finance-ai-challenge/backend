@@ -308,8 +308,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			              AND job.locked_at < CURRENT_TIMESTAMP - INTERVAL '15 minutes'
 			          )
 			      )
-			    ORDER BY job.priority,
-			             disclosure.filed_date DESC, job.attempts, job.available_at
+			    ORDER BY job.priority, job.available_at, job.created_at
 			    FOR UPDATE OF job SKIP LOCKED
 			    LIMIT 1
 			)
