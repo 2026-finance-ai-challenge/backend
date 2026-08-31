@@ -411,13 +411,29 @@ public class MarketController {
 			ForeignLimitPrediction prediction,
 			String marketSession
 		) {
-			return prediction == null
-				? new ForeignLimitPredictionResponse(
+			if (prediction == null) {
+				return new ForeignLimitPredictionResponse(
 					"REGULAR".equals(marketSession) ? "UNAVAILABLE" : "MARKET_CLOSED",
 					null, null, null, 0, 0, null, null, null, null,
 					"REGULAR".equals(marketSession) ? "UNAVAILABLE" : "MARKET_CLOSED"
-				)
-				: new ForeignLimitPredictionResponse(
+				);
+			}
+			if (!"REGULAR".equals(marketSession)) {
+				return new ForeignLimitPredictionResponse(
+					"MARKET_CLOSED",
+					null,
+					null,
+					null,
+					prediction.observationCount(),
+					prediction.observationWindowDays(),
+					prediction.confidence(),
+					prediction.modelVersion(),
+					prediction.baseDate(),
+					prediction.calculatedAt(),
+					prediction.source()
+				);
+			}
+			return new ForeignLimitPredictionResponse(
 					"AVAILABLE",
 					prediction.minRate(),
 					prediction.baseRate(),
