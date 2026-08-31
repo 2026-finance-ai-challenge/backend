@@ -1244,7 +1244,8 @@ class BackendApplicationTests {
 			.andExpect(jsonPath("$[0].stock.stockCode").value("003490"))
 			.andExpect(jsonPath("$[0].warning").value(true))
 			.andExpect(jsonPath("$[0].prediction.status").value("AVAILABLE"))
-			.andExpect(jsonPath("$[0].prediction.observationCount").value(3));
+			.andExpect(jsonPath("$[0].prediction.observationCount").value(120))
+			.andExpect(jsonPath("$[1].prediction.status").value("MARKET_CLOSED"));
 		mockMvc.perform(get("/api/v1/market/indices"))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$[0].status").value("LIVE"))

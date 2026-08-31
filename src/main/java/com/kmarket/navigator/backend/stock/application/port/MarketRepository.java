@@ -7,6 +7,7 @@ import java.util.UUID;
 
 import com.kmarket.navigator.backend.stock.domain.ExchangeRateSnapshot;
 import com.kmarket.navigator.backend.stock.domain.ForeignLimitPolicy;
+import com.kmarket.navigator.backend.stock.domain.ForeignLimitPrediction;
 import com.kmarket.navigator.backend.stock.domain.ForeignOwnershipSnapshot;
 import com.kmarket.navigator.backend.stock.domain.MarketDailyPrice;
 import com.kmarket.navigator.backend.stock.domain.MarketIndexSnapshot;
@@ -25,6 +26,8 @@ public interface MarketRepository {
 	List<ForeignLimitPolicy> findForeignLimitPolicies();
 
 	List<ForeignOwnershipSnapshot> findForeignOwnershipHistory(UUID securityId, int limit);
+
+	Optional<ForeignLimitPrediction> findLatestForeignLimitPrediction(UUID securityId);
 
 	List<MarketIndexSnapshot> findMarketIndices();
 
