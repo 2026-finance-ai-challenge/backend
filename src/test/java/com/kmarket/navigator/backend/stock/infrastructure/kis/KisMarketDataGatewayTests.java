@@ -83,6 +83,44 @@ class KisMarketDataGatewayTests {
 	}
 
 	@Test
+	void mapsOfficialCurrentPriceForeignOwnershipFields() {
+		KisMarketProperties properties = configuredProperties();
+		RestClient.Builder builder = RestClient.builder();
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		KisAccessTokenProvider tokenProvider = mock(KisAccessTokenProvider.class);
+		when(tokenProvider.accessToken()).thenReturn("access-token");
+		KisMarketDataGateway gateway = new KisMarketDataGateway(
+			builder.baseUrl("https://example.test").build(),
+			properties,
+			tokenProvider,
+			new KisCircuitBreaker()
+		);
+
+		server.expect(header("tr_id", "FHKST01010100"))
+			.andExpect(queryParam("FID_INPUT_ISCD", "003490"))
+			.andRespond(withSuccess("""
+				{
+				  "rt_cd":"0",
+				  "output": {
+				    "frgn_hldn_qty":"61250000",
+				    "lstn_stcn":"250000000",
+				    "hts_frgn_ehrt":"50.0000"
+				  }
+				}
+				""", MediaType.APPLICATION_JSON));
+
+		var ownership = gateway.fetchForeignOwnership("003490").orElseThrow();
+		assertThat(ownership.foreignOwnedQuantity()).isEqualTo(61_250_000L);
+		assertThat(ownership.totalListedQuantity()).isEqualTo(250_000_000L);
+		assertThat(ownership.foreignLimitQuantity()).isEqualTo(122_500_000L);
+		assertThat(ownership.availableQuantity()).isEqualTo(61_250_000L);
+		assertThat(ownership.ownershipRate()).isEqualByComparingTo("24.5000");
+		assertThat(ownership.limitExhaustionRate()).isEqualByComparingTo("50.0000");
+		assertThat(ownership.source()).isEqualTo("KIS_REST_CURRENT_PRICE");
+		server.verify();
+	}
+
+	@Test
 	void retriesTransientServerErrorsAndReturnsTheRecoveredQuote() {
 		KisMarketProperties properties = configuredProperties();
 		properties.setRetryInitialDelay(java.time.Duration.ZERO);

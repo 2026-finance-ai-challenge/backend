@@ -1,6 +1,7 @@
 package com.kmarket.navigator.backend.stock.infrastructure.kis;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.DayOfWeek;
 import java.time.Duration;
@@ -26,6 +27,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
 import com.kmarket.navigator.backend.stock.application.port.MarketDataGateway;
+import com.kmarket.navigator.backend.stock.domain.ForeignOwnershipSnapshot;
 import com.kmarket.navigator.backend.stock.domain.MarketDataStatus;
 import com.kmarket.navigator.backend.stock.domain.MarketDailyPrice;
 import com.kmarket.navigator.backend.stock.domain.MarketForeignNetFlow;
@@ -112,6 +114,44 @@ class KisMarketDataGateway implements MarketDataGateway {
 			false,
 			marketDataStatus(),
 			now,
+			"KIS_REST_CURRENT_PRICE"
+		));
+	}
+
+	@Override
+	public Optional<ForeignOwnershipSnapshot> fetchForeignOwnership(String stockCode) {
+		if (!configured()) {
+			return Optional.empty();
+		}
+		JsonNode output = request(
+			"/uapi/domestic-stock/v1/quotations/inquire-price",
+			QUOTE_TRANSACTION_ID,
+			"J",
+			stockCode
+		);
+		Long foreignOwned = nullableLong(output, "frgn_hldn_qty");
+		Long totalListed = nullableLong(output, "lstn_stcn");
+		BigDecimal limitExhaustionRate = decimal(output, "hts_frgn_ehrt");
+		if (foreignOwned == null || totalListed == null || totalListed <= 0
+			|| limitExhaustionRate == null || limitExhaustionRate.signum() <= 0) {
+			return Optional.empty();
+		}
+		BigDecimal ownershipRate = BigDecimal.valueOf(foreignOwned)
+			.multiply(BigDecimal.valueOf(100))
+			.divide(BigDecimal.valueOf(totalListed), 4, RoundingMode.HALF_UP);
+		long foreignLimit = BigDecimal.valueOf(foreignOwned)
+			.multiply(BigDecimal.valueOf(100))
+			.divide(limitExhaustionRate, 0, RoundingMode.HALF_UP)
+			.longValueExact();
+		return Optional.of(new ForeignOwnershipSnapshot(
+			foreignOwned,
+			totalListed,
+			foreignLimit,
+			Math.max(0L, foreignLimit - foreignOwned),
+			ownershipRate,
+			limitExhaustionRate,
+			LocalDate.now(clock),
+			clock.instant(),
 			"KIS_REST_CURRENT_PRICE"
 		));
 	}
@@ -493,6 +533,18 @@ class KisMarketDataGateway implements MarketDataGateway {
 			return Long.parseLong(value);
 		} catch (NumberFormatException exception) {
 			return fallback;
+		}
+	}
+
+	private static Long nullableLong(JsonNode output, String field) {
+		String value = normalizeNumeric(text(output, field));
+		if (value.isBlank() || "-".equals(value)) {
+			return null;
+		}
+		try {
+			return Long.valueOf(value);
+		} catch (NumberFormatException exception) {
+			return null;
 		}
 	}
 
