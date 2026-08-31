@@ -22,6 +22,7 @@ class DisclosurePayloadCodecTests {
 			"report.xml",
 			"a".repeat(64),
 			repeated,
+			"<p>매출액 증가</p><script>alert(1)</script>",
 			List.of(new OpenDartSection(
 				0,
 				SectionKind.TEXT,
@@ -32,9 +33,11 @@ class DisclosurePayloadCodecTests {
 		);
 
 		var encoded = codec.encode(document);
-		var restored = codec.decode(encoded.compressed());
+		var payload = codec.decodePayload(encoded.compressed());
+		var restored = payload.sections();
 
 		assertThat(encoded.compressedBytes()).isLessThan(encoded.originalBytes());
+		assertThat(payload.sanitizedHtml()).contains("매출액 증가");
 		assertThat(restored).singleElement().satisfies(section -> {
 			assertThat(section.ordinal()).isZero();
 			assertThat(section.kind()).isEqualTo(SectionKind.TEXT);

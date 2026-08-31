@@ -87,7 +87,7 @@ kmarket:
     title-translation-interval: ${KMARKET_DISCLOSURE_TITLE_TRANSLATION_INTERVAL:5s}
 
   global-peer:
-    data-version: ${KMARKET_GLOBAL_PEER_DATA_VERSION:hana-global-peer-2026-07-21-openai-v1}
+    data-version: ${KMARKET_GLOBAL_PEER_DATA_VERSION:kmarket-global-peer-2026-09-01-openai-v2}
   tax:
     documents:
       root: ${KMARKET_TAX_DOCUMENT_ROOT:./data/tax-documents}
@@ -103,7 +103,7 @@ kmarket:
     purge-cron: ${KMARKET_CHAT_PURGE_CRON:0 20 4 * * *}
   news:
     maintenance-enabled: ${KMARKET_NEWS_MAINTENANCE_ENABLED:false}
-    collection-interval: ${KMARKET_NEWS_COLLECTION_INTERVAL:10m}
+    collection-interval: ${KMARKET_NEWS_COLLECTION_INTERVAL:2m}
     collection-initial-delay: ${KMARKET_NEWS_COLLECTION_INITIAL_DELAY:30s}
     reconciliation-interval: ${KMARKET_NEWS_RECONCILIATION_INTERVAL:6h}
     reconciliation-initial-delay: ${KMARKET_NEWS_RECONCILIATION_INITIAL_DELAY:1m}
@@ -116,12 +116,12 @@ kmarket:
       base-url: ${KMARKET_NAVER_NEWS_BASE_URL:https://openapi.naver.com}
       client-id: ${KMARKET_NAVER_NEWS_CLIENT_ID:}
       client-secret: ${KMARKET_NAVER_NEWS_CLIENT_SECRET:}
-      display: ${KMARKET_NAVER_NEWS_DISPLAY:20}
-      target-batch-size: ${KMARKET_NAVER_NEWS_TARGET_BATCH_SIZE:75}
+      display: ${KMARKET_NAVER_NEWS_DISPLAY:50}
+      target-batch-size: ${KMARKET_NAVER_NEWS_TARGET_BATCH_SIZE:8}
       connect-timeout: ${KMARKET_NAVER_NEWS_CONNECT_TIMEOUT:10s}
       read-timeout: ${KMARKET_NAVER_NEWS_READ_TIMEOUT:30s}
       request-delay: ${KMARKET_NAVER_NEWS_REQUEST_DELAY:125ms}
-      max-article-age: ${KMARKET_NEWS_MAX_ARTICLE_AGE:1h}
+      max-article-age: ${KMARKET_NEWS_MAX_ARTICLE_AGE:7d}
       queries: ${KMARKET_NAVER_NEWS_QUERIES:}
   market:
     collection-interval: ${KMARKET_MARKET_COLLECTION_INTERVAL:60s}

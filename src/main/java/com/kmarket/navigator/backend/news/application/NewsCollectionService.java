@@ -72,10 +72,10 @@ public class NewsCollectionService {
 	}
 
 	@Scheduled(
-		fixedDelayString = "${kmarket.news.collection-interval:10m}",
+		fixedDelayString = "${kmarket.news.collection-interval:2m}",
 		initialDelayString = "${kmarket.news.collection-initial-delay:30s}"
 	)
-	@SchedulerLock(name = "news-collection", lockAtMostFor = "PT9M", lockAtLeastFor = "PT1S")
+	@SchedulerLock(name = "news-collection", lockAtMostFor = "PT10M", lockAtLeastFor = "PT1S")
 	public void collect() {
 		if (!provider.configured()) {
 			return;

@@ -35,11 +35,29 @@ class OpenDartArchiveParserTests {
 			.getFirst();
 
 		assertThat(document.bodyText()).contains("영업이익 증가");
+		assertThat(document.sanitizedHtml())
+			.contains("<table>", "<th>항목</th>", "<td>금액</td>");
 		assertThat(document.sections()).anySatisfy(section -> {
 			if (section.kind() == SectionKind.TABLE) {
 				assertThat(section.tableData()).isEqualTo("[[\"항목\",\"금액\"]]");
 			}
 		});
+	}
+
+	@Test
+	void sanitizesExecutableMarkupAndPreservesMergedTableCells() {
+		String html = """
+			<html><body onload="steal()"><script>alert(1)</script>
+			<table><tr><th rowspan="2" colspan="3" onclick="steal()">항목</th></tr></table>
+			<a href="javascript:steal()">링크</a></body></html>
+			""";
+
+		var document = parser.parseDocuments(zip("filing.xml", html.getBytes(StandardCharsets.UTF_8)))
+			.getFirst();
+
+		assertThat(document.sanitizedHtml())
+			.contains("rowspan=\"2\"", "colspan=\"3\"")
+			.doesNotContain("script", "onclick", "onload", "javascript:");
 	}
 
 	@Test

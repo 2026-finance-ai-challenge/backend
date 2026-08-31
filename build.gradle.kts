@@ -63,6 +63,7 @@ tasks.withType<JavaCompile>().configureEach {
 
 tasks.withType<Test>().configureEach {
 	useJUnitPlatform()
+	maxHeapSize = "1g"
 	jvmArgs("--enable-native-access=ALL-UNNAMED")
 	finalizedBy(tasks.jacocoTestReport)
 }

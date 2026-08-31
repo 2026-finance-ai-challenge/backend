@@ -36,6 +36,8 @@ record DisclosureDetailResponse(
 	NewsImportance importance,
 	MarketImpact marketImpact,
 	String submitter,
+	String receiverKo,
+	String receiverEn,
 	LocalDate filedDate,
 	Instant detectedAt,
 	String remark,
@@ -62,6 +64,8 @@ record DisclosureDetailResponse(
 			detail.importance(),
 			detail.marketImpact(),
 			detail.submitter(),
+			"금융위원회",
+			"Financial Services Commission",
 			detail.filedDate(),
 			detail.detectedAt(),
 			detail.remark(),
@@ -94,13 +98,21 @@ record DisclosureDetailResponse(
 		}
 	}
 
-	record Document(UUID id, String sourceFilename, int version, String contentHash, List<Section> sections) {
+	record Document(
+		UUID id,
+		String sourceFilename,
+		int version,
+		String contentHash,
+		String originalHtml,
+		List<Section> sections
+	) {
 		private static Document from(DisclosureDocument document, ObjectMapper objectMapper) {
 			return new Document(
 				 document.id(),
 				document.sourceFilename(),
 				document.version(),
 				document.contentHash(),
+				document.originalHtml(),
 				document.sections().stream().map(section -> Section.from(section, objectMapper)).toList()
 			);
 		}

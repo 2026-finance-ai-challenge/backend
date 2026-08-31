@@ -6,6 +6,7 @@ public record OpenDartDocument(
 	String filename,
 	String contentHash,
 	String bodyText,
+	String sanitizedHtml,
 	List<OpenDartSection> sections
 ) {
 	public OpenDartDocument {

@@ -30,6 +30,7 @@ class DisclosurePayloadCodec {
 
 	EncodedPayload encode(OpenDartDocument document) {
 		StoredPayload payload = new StoredPayload(
+			document.sanitizedHtml(),
 			document.sections().stream()
 				.map(section -> new StoredSection(
 					UUID.randomUUID(),
@@ -47,6 +48,10 @@ class DisclosurePayloadCodec {
 	}
 
 	List<DisclosureSection> decode(byte[] compressed) {
+		return decodePayload(compressed).sections();
+	}
+
+	DecodedPayload decodePayload(byte[] compressed) {
 		byte[] source;
 		try (var input = new ZstdInputStream(new ByteArrayInputStream(compressed))) {
 			source = input.readNBytes(MAX_DECOMPRESSED_BYTES + 1);
@@ -58,7 +63,7 @@ class DisclosurePayloadCodec {
 			throw new IllegalStateException("Disclosure payload exceeds decompression limit");
 		}
 		StoredPayload payload = objectMapper.readValue(source, StoredPayload.class);
-		return payload.sections().stream()
+		List<DisclosureSection> sections = payload.sections().stream()
 			.map(section -> new DisclosureSection(
 				section.id(),
 				section.ordinal(),
@@ -68,6 +73,13 @@ class DisclosurePayloadCodec {
 				section.tableData()
 			))
 			.toList();
+		return new DecodedPayload(payload.sanitizedHtml(), sections);
+	}
+
+	record DecodedPayload(String sanitizedHtml, List<DisclosureSection> sections) {
+		DecodedPayload {
+			sections = List.copyOf(sections);
+		}
 	}
 
 	record EncodedPayload(byte[] compressed, int originalBytes, int compressedBytes) {
@@ -81,7 +93,7 @@ class DisclosurePayloadCodec {
 		}
 	}
 
-	private record StoredPayload(List<StoredSection> sections) {
+	private record StoredPayload(String sanitizedHtml, List<StoredSection> sections) {
 		private StoredPayload {
 			sections = List.copyOf(sections);
 		}
