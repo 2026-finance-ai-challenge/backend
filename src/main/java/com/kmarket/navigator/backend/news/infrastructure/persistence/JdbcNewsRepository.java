@@ -69,6 +69,22 @@ class JdbcNewsRepository implements NewsRepository {
 			  AND article.english_title IS NOT NULL
 			  AND btrim(article.english_title) <> ''
 			  AND article.english_title !~ '[가-힣ㄱ-ㅎㅏ-ㅣ]'
+			  AND article.english_body IS NOT NULL
+			  AND btrim(article.english_body) <> ''
+			  AND article.english_body !~ '[가-힣ㄱ-ㅎㅏ-ㅣ]'
+			  AND article.english_body !~* '\\y(eok|jo)([ -]?won)?\\y|\\yman[ -]?won\\y'
+			  AND article.what_summary IS NOT NULL
+			  AND btrim(article.what_summary) <> ''
+			  AND article.what_summary !~ '[가-힣ㄱ-ㅎㅏ-ㅣ]'
+			  AND article.what_summary !~* '\\y(eok|jo)([ -]?won)?\\y|\\yman[ -]?won\\y'
+			  AND article.why_summary IS NOT NULL
+			  AND btrim(article.why_summary) <> ''
+			  AND article.why_summary !~ '[가-힣ㄱ-ㅎㅏ-ㅣ]'
+			  AND article.why_summary !~* '\\y(eok|jo)([ -]?won)?\\y|\\yman[ -]?won\\y'
+			  AND article.impact_summary IS NOT NULL
+			  AND btrim(article.impact_summary) <> ''
+			  AND article.impact_summary !~ '[가-힣ㄱ-ㅎㅏ-ㅣ]'
+			  AND article.impact_summary !~* '\\y(eok|jo)([ -]?won)?\\y|\\yman[ -]?won\\y'
 			  AND (CAST(:query AS varchar) IS NULL
 			       OR article.original_title ILIKE '%%' || :query || '%%' ESCAPE '\\'
 			       OR article.original_body ILIKE '%%' || :query || '%%' ESCAPE '\\'
@@ -189,6 +205,44 @@ class JdbcNewsRepository implements NewsRepository {
 			.query(this::mapArticle)
 			.optional()
 			.map(this::withStocks);
+	}
+
+	@Override
+	public List<UUID> findNarrativeBackfillCandidates(int limit) {
+		return jdbcClient.sql("""
+			SELECT article.id
+			FROM news_article article
+			JOIN news_cluster story
+			  ON story.id = article.cluster_id
+			 AND story.representative_article_id = article.id
+			WHERE article.published_at >= CURRENT_TIMESTAMP - INTERVAL '1 hour'
+			  AND article.content_availability = 'FULL_ARTICLE'
+			  AND article.original_body IS NOT NULL
+			  AND btrim(article.original_body) <> ''
+			  AND article.analysis_status = 'READY'
+			  AND article.english_title IS NOT NULL
+			  AND btrim(article.english_title) <> ''
+			  AND article.english_title !~ '[가-힣ㄱ-ㅎㅏ-ㅣ]'
+			  AND (
+			    article.english_body IS NULL OR btrim(article.english_body) = ''
+			    OR article.english_body ~ '[가-힣ㄱ-ㅎㅏ-ㅣ]'
+			    OR article.english_body ~* '\\y(eok|jo)([ -]?won)?\\y|\\yman[ -]?won\\y'
+			    OR article.what_summary IS NULL OR btrim(article.what_summary) = ''
+			    OR article.what_summary ~ '[가-힣ㄱ-ㅎㅏ-ㅣ]'
+			    OR article.what_summary ~* '\\y(eok|jo)([ -]?won)?\\y|\\yman[ -]?won\\y'
+			    OR article.why_summary IS NULL OR btrim(article.why_summary) = ''
+			    OR article.why_summary ~ '[가-힣ㄱ-ㅎㅏ-ㅣ]'
+			    OR article.why_summary ~* '\\y(eok|jo)([ -]?won)?\\y|\\yman[ -]?won\\y'
+			    OR article.impact_summary IS NULL OR btrim(article.impact_summary) = ''
+			    OR article.impact_summary ~ '[가-힣ㄱ-ㅎㅏ-ㅣ]'
+			    OR article.impact_summary ~* '\\y(eok|jo)([ -]?won)?\\y|\\yman[ -]?won\\y'
+			  )
+			ORDER BY article.published_at DESC, article.id DESC
+			LIMIT :limit
+			""")
+			.param("limit", limit)
+			.query(UUID.class)
+			.list();
 	}
 
 	@Override

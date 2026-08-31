@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -12,6 +13,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.kmarket.navigator.backend.global.text.EnglishTextPolicy;
 import com.kmarket.navigator.backend.translation.application.port.TranslationRepository;
 import com.kmarket.navigator.backend.translation.domain.GeneratedTranslation;
 import com.kmarket.navigator.backend.translation.domain.GeneratedTitle;
@@ -240,6 +242,14 @@ class JdbcTranslationRepository implements TranslationRepository {
 	@Override
 	@Transactional
 	public void complete(UUID id, GeneratedTranslation generated, Instant now) {
+		TranslationKind kind = jdbcClient.sql("""
+			SELECT content_kind FROM translation_memory WHERE id = :id
+			""")
+			.param("id", id)
+			.query(String.class)
+			.optional()
+			.map(TranslationKind::valueOf)
+			.orElseThrow(() -> new IllegalStateException("Claimed translation no longer exists"));
 		int updated = jdbcClient.sql("""
 			UPDATE translation_memory
 			SET result_payload = CAST(:result AS jsonb), status = 'READY',
@@ -260,6 +270,9 @@ class JdbcTranslationRepository implements TranslationRepository {
 		if (updated != 1) {
 			throw new IllegalStateException("Claimed translation changed before completion");
 		}
+		if (kind == TranslationKind.NEWS_NARRATIVE) {
+			copyNewsNarrative(id, generated);
+		}
 		jdbcClient.sql("""
 			UPDATE translation_job
 			SET status = 'READY', locked_at = NULL, locked_by = NULL,
@@ -269,6 +282,36 @@ class JdbcTranslationRepository implements TranslationRepository {
 			.param("id", id)
 			.param("now", atUtc(now))
 			.update();
+	}
+
+	private void copyNewsNarrative(UUID id, GeneratedTranslation generated) {
+		JsonNode result = generated.result();
+		JsonNode paragraphNodes = result.path("translatedParagraphs");
+		if (!paragraphNodes.isArray() || paragraphNodes.isEmpty()) {
+			throw new IllegalArgumentException("News translation paragraphs must not be empty");
+		}
+		List<String> paragraphs = new ArrayList<>();
+		paragraphNodes.forEach(node -> paragraphs.add(EnglishTextPolicy.requireValid(node.stringValue())));
+		int updated = jdbcClient.sql("""
+			UPDATE news_article article
+			SET english_body = :englishBody,
+			    what_summary = :whatSummary,
+			    why_summary = :whySummary,
+			    impact_summary = :impactSummary
+			FROM translation_memory memory
+			WHERE memory.id = :id
+			  AND memory.content_kind = 'NEWS_NARRATIVE'
+			  AND article.id = CAST(memory.request_context ->> 'article_id' AS uuid)
+			""")
+			.param("id", id)
+			.param("englishBody", String.join("\n\n", paragraphs))
+			.param("whatSummary", EnglishTextPolicy.requireValid(result.path("what").stringValue()))
+			.param("whySummary", EnglishTextPolicy.requireValid(result.path("why").stringValue()))
+			.param("impactSummary", EnglishTextPolicy.requireValid(result.path("impact").stringValue()))
+			.update();
+		if (updated != 1) {
+			throw new IllegalStateException("News narrative target no longer exists");
+		}
 	}
 
 	@Override
