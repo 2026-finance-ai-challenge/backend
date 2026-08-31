@@ -2,6 +2,7 @@ package com.kmarket.navigator.backend.translation.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Clock;
@@ -25,6 +26,7 @@ import com.kmarket.navigator.backend.news.application.port.NewsRepository;
 import com.kmarket.navigator.backend.translation.application.port.TranslationRepository;
 import com.kmarket.navigator.backend.translation.domain.TranslationKind;
 import com.kmarket.navigator.backend.translation.domain.TranslationStatus;
+import com.kmarket.navigator.backend.translation.domain.TranslationView;
 
 import tools.jackson.databind.json.JsonMapper;
 
@@ -78,6 +80,29 @@ class OnDemandTranslationServiceTests {
 			.isInstanceOfSatisfying(BusinessException.class, exception ->
 				assertThat(exception.errorCode()).isEqualTo(ErrorCode.DISCLOSURE_SECTION_NOT_FOUND)
 			);
+	}
+
+	@Test
+	void prioritizesAFirstViewDisclosureTranslation() {
+		UUID sectionId = UUID.randomUUID();
+		UUID translationId = UUID.randomUUID();
+		when(disclosureQueryHandler.findOne(RECEIPT_NUMBER)).thenReturn(detail(sectionId));
+		when(translationRepository.request(
+			Mockito.eq(TranslationKind.DISCLOSURE_SECTION),
+			Mockito.anyString(), Mockito.anyString(), Mockito.any(),
+			Mockito.eq(OnDemandTranslationService.DISCLOSURE_SECTION_VERSION),
+			Mockito.any()
+		)).thenReturn(new TranslationView(
+			translationId, "source-hash", "en",
+			OnDemandTranslationService.DISCLOSURE_SECTION_VERSION,
+			TranslationStatus.PENDING, null, null, null, null, null
+		));
+
+		service.requestDisclosureSection(RECEIPT_NUMBER, sectionId, "client-hash");
+
+		verify(translationRepository).prioritize(
+			Mockito.eq(translationId), Mockito.eq(Instant.parse("2026-08-25T00:00:00Z"))
+		);
 	}
 
 	private static DisclosureDetail detail(UUID sectionId) {

@@ -28,6 +28,8 @@ public interface TranslationRepository {
 		Instant now
 	);
 
+	void prioritize(UUID id, Instant now);
+
 	List<TranslationJob> claim(int limit, String workerId, Instant now, Instant staleBefore);
 
 	List<TitleTranslationJob> claimNewsTitles(
