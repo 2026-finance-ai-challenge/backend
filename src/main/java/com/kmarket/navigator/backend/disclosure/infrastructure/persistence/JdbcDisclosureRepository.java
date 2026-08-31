@@ -49,7 +49,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 	private static final String EMBEDDING_JOB = "DISCLOSURE_EMBEDDING";
 	private static final String METADATA_EMBEDDING_JOB = "DISCLOSURE_METADATA_EMBEDDING";
 	private static final String SIGNAL_JOB = "DISCLOSURE_SIGNAL";
-	private static final String DOCUMENT_PARSER_VERSION = "opendart-html-v3";
+	private static final String DOCUMENT_PARSER_VERSION = "opendart-html-v4";
 	private static final String OPEN_DART_DOCUMENT_PROVIDER = "OPEN_DART_DOCUMENT";
 
 	private final JdbcClient jdbcClient;
@@ -308,8 +308,8 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			              AND job.locked_at < CURRENT_TIMESTAMP - INTERVAL '15 minutes'
 			          )
 			      )
-			    ORDER BY (job.priority <> 0), job.stock_code, job.priority,
-			             job.attempts DESC, job.available_at, job.created_at
+			    ORDER BY job.priority,
+			             disclosure.filed_date DESC, job.attempts, job.available_at
 			    FOR UPDATE OF job SKIP LOCKED
 			    LIMIT 1
 			)
@@ -758,19 +758,12 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			JOIN issuer i ON i.id = d.issuer_id
 			JOIN security s ON s.id = d.security_id
 			JOIN service_stock_universe universe ON universe.stock_code = s.stock_code
-			JOIN translation_memory translation
+			LEFT JOIN translation_memory translation
 			  ON translation.content_kind = 'DISCLOSURE_TITLE'
 			 AND translation.source_hash = d.title_source_hash
 			 AND translation.target_locale = 'en'
 			 AND translation.translation_version = :translationVersion
-			 AND translation.status = 'READY'
-			 AND translation.translated_text IS NOT NULL
-			 AND btrim(translation.translated_text) <> ''
-			 AND translation.translated_text !~ '[가-힣ㄱ-ㅎㅏ-ㅣ]'
 			WHERE s.active AND s.common_stock
-			  AND d.document_status = 'READY'
-			  AND d.index_status = 'READY'
-			  AND d.analysis_status = 'READY'
 			""");
 		Map<String, Object> parameters = new LinkedHashMap<>();
 		parameters.put("translationVersion", DisclosureTitlePolicy.TRANSLATION_VERSION);
@@ -801,11 +794,11 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			JOIN issuer i ON i.id = d.issuer_id
 			JOIN security s ON s.id = d.security_id
 			JOIN service_stock_universe universe ON universe.stock_code = s.stock_code
-			JOIN translation_memory translation
+			LEFT JOIN translation_memory translation
 			  ON translation.content_kind = 'DISCLOSURE_TITLE'
 			 AND translation.source_hash = d.title_source_hash
 			 AND translation.target_locale = 'en'
-				 AND translation.translation_version = :translationVersion
+			 AND translation.translation_version = :translationVersion
 			WHERE d.receipt_number = :receiptNumber
 			  AND s.active AND s.common_stock
 			""")
@@ -975,17 +968,19 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 				resultSet.getBytes("payload_zstd")
 			))
 			.list();
-		List<DisclosureDocument> documents = rows.stream()
-			.map(document -> new DisclosureDocument(
-				document.id(),
-				document.sourceFilename(),
-				document.version(),
-				document.contentHash(),
-				document.payload() == null
-					? findSections(document.id())
-					: payloadCodec.decode(document.payload())
-			))
-			.toList();
+		List<DisclosureDocument> documents = rows.stream().map(document -> {
+			if (document.payload() == null) {
+				return new DisclosureDocument(
+					document.id(), document.sourceFilename(), document.version(),
+					document.contentHash(), null, findSections(document.id())
+				);
+			}
+			DisclosurePayloadCodec.DecodedPayload payload = payloadCodec.decodePayload(document.payload());
+			return new DisclosureDocument(
+				document.id(), document.sourceFilename(), document.version(),
+				document.contentHash(), payload.sanitizedHtml(), payload.sections()
+			);
+		}).toList();
 		List<DisclosureVersion> versions = jdbcClient.sql("""
 			SELECT version.receipt_number, version.title_ko, version.filed_date,
 			       version.correction,

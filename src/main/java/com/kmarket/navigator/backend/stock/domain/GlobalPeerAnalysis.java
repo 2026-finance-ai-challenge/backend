@@ -48,6 +48,7 @@ public record GlobalPeerAnalysis(
 		int rank,
 		String ticker,
 		String companyName,
+		String logoUrl,
 		String exchange,
 		String country,
 		BigDecimal similarityScore,

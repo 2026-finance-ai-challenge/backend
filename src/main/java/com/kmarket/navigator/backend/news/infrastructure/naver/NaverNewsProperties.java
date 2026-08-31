@@ -14,12 +14,12 @@ public class NaverNewsProperties {
 	private URI baseUrl = URI.create("https://openapi.naver.com");
 	private String clientId = "";
 	private String clientSecret = "";
-	private int display = 20;
-	private int targetBatchSize = 75;
+	private int display = 50;
+	private int targetBatchSize = 8;
 	private Duration connectTimeout = Duration.ofSeconds(10);
 	private Duration readTimeout = Duration.ofSeconds(30);
 	private Duration requestDelay = Duration.ofMillis(125);
-	private Duration maxArticleAge = Duration.ofHours(1);
+	private Duration maxArticleAge = Duration.ofDays(7);
 	private List<String> queries = new ArrayList<>();
 
 	public boolean configured() {
@@ -71,7 +71,7 @@ public class NaverNewsProperties {
 	}
 
 	public void setTargetBatchSize(int targetBatchSize) {
-		this.targetBatchSize = Math.max(1, Math.min(targetBatchSize, 75));
+		this.targetBatchSize = Math.max(1, Math.min(targetBatchSize, 15));
 	}
 
 	public Duration getConnectTimeout() {

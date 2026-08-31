@@ -66,25 +66,6 @@ class JdbcNewsRepository implements NewsRepository {
 			  AND article.original_body IS NOT NULL
 			  AND btrim(article.original_body) <> ''
 			  AND article.analysis_status = 'READY'
-			  AND article.english_title IS NOT NULL
-			  AND btrim(article.english_title) <> ''
-			  AND article.english_title !~ '[가-힣ㄱ-ㅎㅏ-ㅣ]'
-			  AND article.english_body IS NOT NULL
-			  AND btrim(article.english_body) <> ''
-			  AND article.english_body !~ '[가-힣ㄱ-ㅎㅏ-ㅣ]'
-			  AND article.english_body !~* '\\y(eok|jo)([ -]?won)?\\y|\\yman[ -]?won\\y'
-			  AND article.what_summary IS NOT NULL
-			  AND btrim(article.what_summary) <> ''
-			  AND article.what_summary !~ '[가-힣ㄱ-ㅎㅏ-ㅣ]'
-			  AND article.what_summary !~* '\\y(eok|jo)([ -]?won)?\\y|\\yman[ -]?won\\y'
-			  AND article.why_summary IS NOT NULL
-			  AND btrim(article.why_summary) <> ''
-			  AND article.why_summary !~ '[가-힣ㄱ-ㅎㅏ-ㅣ]'
-			  AND article.why_summary !~* '\\y(eok|jo)([ -]?won)?\\y|\\yman[ -]?won\\y'
-			  AND article.impact_summary IS NOT NULL
-			  AND btrim(article.impact_summary) <> ''
-			  AND article.impact_summary !~ '[가-힣ㄱ-ㅎㅏ-ㅣ]'
-			  AND article.impact_summary !~* '\\y(eok|jo)([ -]?won)?\\y|\\yman[ -]?won\\y'
 			  AND (CAST(:query AS varchar) IS NULL
 			       OR article.original_title ILIKE '%%' || :query || '%%' ESCAPE '\\'
 			       OR article.original_body ILIKE '%%' || :query || '%%' ESCAPE '\\'

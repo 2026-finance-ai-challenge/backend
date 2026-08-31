@@ -28,6 +28,7 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.nodes.Node;
 import org.jsoup.nodes.TextNode;
+import org.jsoup.safety.Safelist;
 import org.springframework.stereotype.Component;
 
 import com.kmarket.navigator.backend.disclosure.application.port.OpenDartCorporation;
@@ -47,6 +48,15 @@ class OpenDartArchiveParser {
 	private static final int MAX_TOTAL_BYTES = 128 * 1024 * 1024;
 	private static final Charset KOREAN_CHARSET = Charset.forName("MS949");
 	private static final byte[] XML_ENTITY_MARKER = "<!ENTITY".getBytes(StandardCharsets.US_ASCII);
+	private static final Safelist DISCLOSURE_HTML_SAFELIST = Safelist.relaxed()
+		.addTags("article", "section", "main", "header", "footer", "figure", "figcaption",
+			"table", "caption", "colgroup", "col", "thead", "tbody", "tfoot", "tr", "th", "td")
+		.addAttributes(":all", "class")
+		.addAttributes("table", "summary", "width", "border", "cellpadding", "cellspacing")
+		.addAttributes("col", "span", "width")
+		.addAttributes("th", "colspan", "rowspan", "scope", "headers", "align", "valign", "width")
+		.addAttributes("td", "colspan", "rowspan", "headers", "align", "valign", "width")
+		.addProtocols("a", "href", "http", "https");
 
 	private final ObjectMapper objectMapper;
 
@@ -221,8 +231,15 @@ class OpenDartArchiveParser {
 			entry.filename(),
 			sha256(entry.content()),
 			document.body() == null ? visibleText(document) : visibleText(document.body()),
+			sanitizeHtml(document),
 			sections
 		);
+	}
+
+	private static String sanitizeHtml(Document document) {
+		String source = document.body() == null ? document.html() : document.body().html();
+		Document.OutputSettings outputSettings = new Document.OutputSettings().prettyPrint(false);
+		return Jsoup.clean(source, "", DISCLOSURE_HTML_SAFELIST, outputSettings);
 	}
 
 	private List<OpenDartSection> extractSections(Document document) {

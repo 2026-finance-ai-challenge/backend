@@ -209,8 +209,8 @@ class BackendApplicationTests {
 		assertThat(aiServiceProperties.readTimeout()).isEqualTo(Duration.ofSeconds(120));
 		assertThat(naverNewsProperties.getConnectTimeout()).isEqualTo(Duration.ofSeconds(10));
 		assertThat(naverNewsProperties.getReadTimeout()).isEqualTo(Duration.ofSeconds(30));
-		assertThat(naverNewsProperties.getMaxArticleAge()).isEqualTo(Duration.ofHours(1));
-		assertThat(naverNewsProperties.getTargetBatchSize()).isEqualTo(75);
+		assertThat(naverNewsProperties.getMaxArticleAge()).isEqualTo(Duration.ofDays(7));
+		assertThat(naverNewsProperties.getTargetBatchSize()).isEqualTo(8);
 		assertThat(naverNewsProperties.getQueries()).isEmpty();
 		assertThat(openDartProperties.connectTimeout()).isEqualTo(Duration.ofSeconds(5));
 		assertThat(openDartProperties.readTimeout()).isEqualTo(Duration.ofSeconds(150));
@@ -1690,7 +1690,7 @@ class BackendApplicationTests {
 			""")
 			.param("receiptNumber", filing.receiptNumber())
 			.query(String.class)
-			.single()).isEqualTo("opendart-html-v3");
+			.single()).isEqualTo("opendart-html-v4");
 		assertThat(jdbcClient.sql("""
 			SELECT status FROM ingestion_job
 			WHERE job_type = 'DISCLOSURE_EMBEDDING' AND business_key = :receiptNumber
@@ -1839,7 +1839,7 @@ class BackendApplicationTests {
 	}
 
 	@Test
-	void publishesNewsOnlyAfterTranslationAndThreeLineSummaryComplete() throws Exception {
+	void publishesOriginalNewsWhileTranslationAndThreeLineSummaryComplete() throws Exception {
 		UUID articleId = insertReadyNews(
 			"Samsung Electronics investment update",
 			"The company announced a new semiconductor investment.",
@@ -1856,7 +1856,8 @@ class BackendApplicationTests {
 			.update();
 
 		mockMvc.perform(get("/api/v1/news/{articleId}", articleId))
-			.andExpect(status().isNotFound());
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.originalBody").isNotEmpty());
 		mockMvc.perform(post("/api/v1/news/{articleId}/translation", articleId))
 			.andExpect(status().isAccepted());
 		when(translationAiGateway.translateNews(any(), any(), any(), any(), any()))
@@ -1873,7 +1874,7 @@ class BackendApplicationTests {
 					invocation.getArgument(4),
 					result,
 					"translation-test-model",
-					"news-narrative-v1"
+					"news-narrative-v2"
 				);
 			});
 
@@ -1921,7 +1922,7 @@ class BackendApplicationTests {
 				true,
 				null,
 				"gpt-5-mini",
-				"filing-summary-v1"
+					"filing-summary-v2"
 			);
 		});
 
@@ -1939,7 +1940,7 @@ class BackendApplicationTests {
 			))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.sufficientEvidence").value(true))
-			.andExpect(jsonPath("$.promptVersion").value("filing-summary-v1"));
+				.andExpect(jsonPath("$.promptVersion").value("filing-summary-v2"));
 		verify(disclosureInsightGateway, times(1)).summarize(
 			eq(filing.receiptNumber()),
 			eq(filing.reportName()),
@@ -2000,6 +2001,7 @@ class BackendApplicationTests {
 			rank,
 			ticker,
 			companyName,
+			"https://financialmodelingprep.com/image-stock/" + ticker + ".png",
 			"NASDAQ",
 			"US",
 			new BigDecimal(similarity),
@@ -2093,6 +2095,7 @@ class BackendApplicationTests {
 			"filing.xml",
 			hashCharacter.repeat(64),
 			text,
+			"<p>" + text + "</p>",
 			List.of(new OpenDartSection(0, SectionKind.TEXT, null, text, null))
 		);
 	}

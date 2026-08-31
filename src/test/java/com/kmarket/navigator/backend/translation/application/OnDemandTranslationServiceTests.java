@@ -85,7 +85,7 @@ class OnDemandTranslationServiceTests {
 			sectionId, 1, SectionKind.TEXT, "제목", "본문", "{\"항목\":\"값\"}"
 		);
 		DisclosureDocument document = new DisclosureDocument(
-			UUID.randomUUID(), "report.xml", 7, "content-hash", List.of(section)
+			UUID.randomUUID(), "report.xml", 7, "content-hash", "<p>본문</p>", List.of(section)
 		);
 		return new DisclosureDetail(
 			RECEIPT_NUMBER,

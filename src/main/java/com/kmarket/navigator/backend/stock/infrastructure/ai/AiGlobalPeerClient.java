@@ -105,6 +105,7 @@ class AiGlobalPeerClient implements GlobalPeerGateway {
 		int rank,
 		String ticker,
 		String companyName,
+		String logoUrl,
 		String exchange,
 		String country,
 		BigDecimal similarityScore,
@@ -123,7 +124,7 @@ class AiGlobalPeerClient implements GlobalPeerGateway {
 	) {
 		GlobalPeerAnalysis.GlobalPeer toDomain() {
 			return new GlobalPeerAnalysis.GlobalPeer(
-				dimension, rank, ticker, companyName, exchange, country, similarityScore,
+				dimension, rank, ticker, companyName, logoUrl, exchange, country, similarityScore,
 				businessTags, sector, industry, businessModel, scaleBucket, fiscalYear,
 				marketCapUsd, revenueUsd, operatingIncomeUsd, netIncomeUsd,
 				financialDataSource, financialSimilarityScore
