@@ -38,7 +38,7 @@ public class DisclosureQueryHandler {
 	}
 
 	public DisclosureDetail findOne(String receiptNumber) {
-		return disclosureRepository.findPublishedByReceiptNumber(receiptNumber)
+		return disclosureRepository.findByReceiptNumber(receiptNumber)
 			.orElseThrow(() -> new BusinessException(ErrorCode.DISCLOSURE_NOT_FOUND));
 	}
 
