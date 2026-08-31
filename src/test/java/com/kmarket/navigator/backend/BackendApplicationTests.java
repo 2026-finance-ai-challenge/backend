@@ -1241,6 +1241,12 @@ class BackendApplicationTests {
 			.andExpect(jsonPath("$[0].status").value("LIVE"))
 			.andExpect(jsonPath("$[1].status").value("UNAVAILABLE"))
 			.andExpect(jsonPath("$[2].indexName").value("KOSPI 200"));
+		mockMvc.perform(get("/api/v1/market/exchange-rates/{currency}", "USD"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.currency").value("USD"))
+			.andExpect(jsonPath("$.krwPerUnit").value(1300))
+			.andExpect(jsonPath("$.status").value("LIVE"))
+			.andExpect(jsonPath("$.source").value("TEST_FX"));
 		mockMvc.perform(get("/api/v1/market/stocks/{stockCode}/history", "005930"))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.status").value("CLOSED"))
