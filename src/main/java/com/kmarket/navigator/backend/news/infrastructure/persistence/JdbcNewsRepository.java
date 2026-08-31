@@ -822,6 +822,9 @@ class JdbcNewsRepository implements NewsRepository {
 			.map(String::trim)
 			.filter(value -> !value.isBlank())
 			.toList();
+		if (paragraphs.isEmpty()) {
+			paragraphs = List.of(article.originalTitle());
+		}
 		List<String> companies = article.relatedStocks().stream()
 			.flatMap(stock -> java.util.stream.Stream.of(stock.nameKo(), stock.nameEn()))
 			.filter(java.util.Objects::nonNull)
