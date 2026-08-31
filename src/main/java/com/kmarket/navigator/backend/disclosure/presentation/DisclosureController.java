@@ -1,6 +1,7 @@
 package com.kmarket.navigator.backend.disclosure.presentation;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
@@ -98,7 +99,7 @@ class DisclosureController {
 		@DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
 		LocalDate to,
 		@RequestParam(required = false)
-		Set<DisclosureType> types,
+		List<DisclosureType> types,
 		@RequestParam(required = false)
 		Boolean correction,
 		@RequestParam(required = false)
@@ -119,7 +120,7 @@ class DisclosureController {
 			stockCode,
 			from,
 			to,
-			types,
+			types == null ? null : Set.copyOf(types),
 			correction,
 			decodedCursor,
 			limit
