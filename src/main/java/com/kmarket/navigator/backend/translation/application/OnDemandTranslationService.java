@@ -77,6 +77,10 @@ public class OnDemandTranslationService {
 
 	public TranslationView requestNews(UUID articleId, String clientHash) {
 		rateLimiter.check(clientHash);
+		return ensureNewsRequested(articleId);
+	}
+
+	public TranslationView ensureNewsRequested(UUID articleId) {
 		NewsSource source = newsSource(articleId);
 		ObjectNode context = objectMapper.createObjectNode();
 		context.put("article_id", articleId.toString());

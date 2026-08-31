@@ -92,6 +92,9 @@ import com.kmarket.navigator.backend.tax.domain.TaxDocumentVerification;
 import com.kmarket.navigator.backend.tax.infrastructure.storage.TaxDocumentProperties;
 import com.kmarket.navigator.backend.stock.application.port.GlobalPeerGateway;
 import com.kmarket.navigator.backend.stock.domain.GlobalPeerAnalysis;
+import com.kmarket.navigator.backend.translation.application.TranslationWorker;
+import com.kmarket.navigator.backend.translation.application.port.TranslationAiGateway;
+import com.kmarket.navigator.backend.translation.domain.GeneratedTranslation;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -172,11 +175,17 @@ class BackendApplicationTests {
 	@MockitoBean
 	GlobalPeerGateway globalPeerGateway;
 
+	@MockitoBean
+	TranslationAiGateway translationAiGateway;
+
 	@Autowired
 	ChatGenerationWorker chatGenerationWorker;
 
 	@Autowired
 	TaxDocumentWorker taxDocumentWorker;
+
+	@Autowired
+	TranslationWorker translationWorker;
 
 	@Autowired
 	TaxDocumentProperties taxDocumentProperties;
@@ -1829,6 +1838,61 @@ class BackendApplicationTests {
 	}
 
 	@Test
+	void publishesNewsOnlyAfterTranslationAndThreeLineSummaryComplete() throws Exception {
+		UUID articleId = insertReadyNews(
+			"Samsung Electronics investment update",
+			"The company announced a new semiconductor investment.",
+			Instant.now().minusSeconds(60),
+			"HIGH"
+		);
+		jdbcClient.sql("""
+			UPDATE news_article
+			SET english_body = NULL, what_summary = NULL, why_summary = NULL,
+			    impact_summary = NULL
+			WHERE id = :articleId
+			""")
+			.param("articleId", articleId)
+			.update();
+
+		mockMvc.perform(get("/api/v1/news/{articleId}", articleId))
+			.andExpect(status().isNotFound());
+		mockMvc.perform(post("/api/v1/news/{articleId}/translation", articleId))
+			.andExpect(status().isAccepted());
+		when(translationAiGateway.translateNews(any(), any(), any(), any(), any()))
+			.thenAnswer(invocation -> {
+				var result = objectMapper.createObjectNode();
+				result.putArray("translatedParagraphs")
+					.add("The company announced a new semiconductor investment.");
+				result.put("what", "The company announced a semiconductor investment.");
+				result.put("why", "The filing cites capacity expansion.");
+				result.put("impact", "The investment may increase future capacity.");
+				return new GeneratedTranslation(
+					invocation.getArgument(0),
+					"en",
+					invocation.getArgument(4),
+					result,
+					"translation-test-model",
+					"news-narrative-v1"
+				);
+			});
+
+		translationWorker.process();
+
+		mockMvc.perform(get("/api/v1/news/{articleId}", articleId))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.englishBody").value(
+				"The company announced a new semiconductor investment."
+			))
+			.andExpect(jsonPath("$.what").value(
+				"The company announced a semiconductor investment."
+			))
+			.andExpect(jsonPath("$.why").value("The filing cites capacity expansion."))
+			.andExpect(jsonPath("$.impact").value(
+				"The investment may increase future capacity."
+			));
+	}
+
+	@Test
 	void generatesAndCachesEvidenceBoundDisclosureInsightForCurrentDocumentVersion() throws Exception {
 		OpenDartFiling filing = filing("20260823800002");
 		disclosureRepository.saveFiling(filing);
@@ -2118,7 +2182,8 @@ class BackendApplicationTests {
 			VALUES (
 			    :id, :clusterId, 'NAVER_NEWS', :providerId, :title,
 			    encode(digest(regexp_replace(btrim(:title), '[[:space:]]+', ' ', 'g'), 'sha256'), 'hex'),
-				    NULL, :excerpt, :englishTitle, :excerpt, 'A market event occurred.',
+				    NULL, :excerpt, :englishTitle, 'This is a complete English article body.',
+				    'A market event occurred.',
 			    'The article states the reason.', 'The event may affect future operations.',
 			    'CORPORATE_ACTION', 'POSITIVE', :importance, 'POSITIVE',
 			    :importance, 0.55, 0.90, 0.85, 0.80, 0.75,
@@ -2171,7 +2236,7 @@ class BackendApplicationTests {
 			)
 			SELECT :id, source.cluster_id, source.provider, :providerId, :title,
 			       encode(digest(regexp_replace(btrim(:title), '[[:space:]]+', ' ', 'g'), 'sha256'), 'hex'),
-			       :excerpt, source.original_body, :title, :excerpt,
+				       :excerpt, source.original_body, source.english_title, source.english_body,
 			       source.what_summary, source.why_summary, source.impact_summary,
 			       source.event_type, source.sentiment, source.importance,
 			       source.market_impact, source.market_impact_importance,

@@ -73,7 +73,11 @@ public class NewsService {
 			&& article.originalBody() != null
 			&& !article.originalBody().isBlank()
 			&& article.analysisStatus() == NewsAnalysisStatus.READY
-			&& EnglishTextPolicy.isValid(article.englishTitle());
+			&& EnglishTextPolicy.isValid(article.englishTitle())
+			&& EnglishTextPolicy.isValid(article.englishBody())
+			&& EnglishTextPolicy.isValid(article.what())
+			&& EnglishTextPolicy.isValid(article.why())
+			&& EnglishTextPolicy.isValid(article.impact());
 	}
 
 	public TermExplanation explainTerm(

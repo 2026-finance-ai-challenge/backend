@@ -16,6 +16,23 @@ import com.kmarket.navigator.backend.news.domain.NewsStockMapping;
 
 @Component
 public class NewsStockMatcher {
+	private static final List<String> FINANCIAL_CONTEXT = List.of(
+		"주가", "증권", "주식", "상장", "코스피", "코스닥", "공시", "배당", "실적",
+		"매출", "영업이익", "순이익", "시가총액", "목표가", "투자", "수주", "사업",
+		"경영", "인수", "합병", "지분", "생산", "공급", "반도체", "배터리", "금융",
+		"stock", "share", "listed", "kospi", "kosdaq", "dividend", "earnings",
+		"revenue", "profit", "investment", "acquisition", "merger", "stake"
+	);
+	private static final List<String> STRONG_FINANCIAL_CONTEXT = List.of(
+		"주가", "증권", "주식", "상장", "코스피", "코스닥", "공시", "배당", "실적",
+		"매출", "영업이익", "순이익", "시가총액", "목표가", "stock", "share",
+		"listed", "kospi", "kosdaq", "dividend", "earnings", "revenue", "profit"
+	);
+	private static final List<String> SPORTS_CONTEXT = List.of(
+		"야구", "축구", "농구", "배구", "선수", "감독", "투수", "타자", "경기", "시즌",
+		"홈런", "지명할당", "fa 선택", "복귀", "승리", "패배", "kbo", "mlb", "soccer",
+		"football", "baseball", "basketball", "player", "coach", "pitcher"
+	);
 
 	public Map<String, BigDecimal> match(
 		String text,
@@ -39,6 +56,14 @@ public class NewsStockMatcher {
 				matches.merge(mapping.stockCode(), confidence, BigDecimal::max);
 			}
 		}
+		String articleText = ((title == null ? "" : title) + " "
+			+ (excerpt == null ? "" : excerpt)).toLowerCase(Locale.ROOT);
+		matches.entrySet().removeIf(match -> mappingList.stream()
+			.filter(mapping -> mapping.stockCode().equals(match.getKey()))
+			.findFirst()
+			.filter(mapping -> !isUnambiguous(mapping))
+			.filter(mapping -> !hasFinancialContext(articleText))
+			.isPresent());
 		return Map.copyOf(matches);
 	}
 
@@ -71,7 +96,19 @@ public class NewsStockMatcher {
 	private boolean isUnambiguous(NewsStockMapping mapping) {
 		String nameKo = mapping.nameKo() == null ? "" : mapping.nameKo().strip();
 		long koreanLetters = nameKo.codePoints().filter(this::isKorean).count();
-		return koreanLetters >= 3;
+		if (koreanLetters > 0) {
+			return koreanLetters >= 3;
+		}
+		long asciiLetters = nameKo.codePoints()
+			.filter(codePoint -> codePoint < 128 && Character.isLetter(codePoint))
+			.count();
+		return asciiLetters >= 4;
+	}
+
+	private boolean hasFinancialContext(String text) {
+		boolean sports = SPORTS_CONTEXT.stream().anyMatch(text::contains);
+		List<String> required = sports ? STRONG_FINANCIAL_CONTEXT : FINANCIAL_CONTEXT;
+		return required.stream().anyMatch(text::contains);
 	}
 
 	private void addEvidence(

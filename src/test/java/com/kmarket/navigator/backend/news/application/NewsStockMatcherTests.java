@@ -78,6 +78,36 @@ class NewsStockMatcherTests {
 	}
 
 	@Test
+	void rejectsAmbiguousCompanyNameInSportsTitle() {
+		var mappings = List.of(
+			mapping("003550", "LG", "LG Corp."),
+			mapping("000150", "두산", "DOOSAN CO.,LTD")
+		);
+
+		assertThat(matcher.matchArticle(
+			"고우석 LG 복귀 현실이 되나, 지명할당 후 FA 선택",
+			"프로야구 선수의 다음 팀 결정이 남았다.",
+			mappings
+		)).isEmpty();
+		assertThat(matcher.matchArticle(
+			"다승왕은 나중에, 두산의 새 보물 선발",
+			"신인 투수가 시즌 첫 경기에 나선다.",
+			mappings
+		)).isEmpty();
+	}
+
+	@Test
+	void acceptsAmbiguousCompanyNameWithFinancialEvidence() {
+		var mappings = List.of(mapping("003550", "LG", "LG Corp."));
+
+		assertThat(matcher.matchArticle(
+			"LG, 2분기 영업이익 증가",
+			"자회사 실적 개선으로 연결 영업이익이 늘었다.",
+			mappings
+		)).containsOnlyKeys("003550");
+	}
+
+	@Test
 	void acceptsUnambiguousCompanyNameInExcerpt() {
 		var mappings = List.of(mapping("005930", "삼성전자", "Samsung Electronics"));
 
