@@ -117,8 +117,9 @@ public class NewsStockMatcher {
 			return boundaryBefore(text, start) && boundaryAfter(text, end);
 		}
 		long koreanLetters = term.codePoints().filter(this::isKorean).count();
-		if (koreanLetters > 2) {
-			return true;
+		if (koreanLetters > 0) {
+			return boundaryBefore(text, start)
+				&& (boundaryAfter(text, end) || followedByStandaloneParticle(text, end));
 		}
 		return boundaryBefore(text, start)
 			&& (boundaryAfter(text, end) || followedByStandaloneParticle(text, end));
