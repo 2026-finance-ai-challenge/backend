@@ -74,6 +74,7 @@ kmarket:
   translation:
     generation-interval: ${KMARKET_TRANSLATION_GENERATION_INTERVAL:2s}
     generation-initial-delay: ${KMARKET_TRANSLATION_GENERATION_INITIAL_DELAY:30s}
+    provider-failure-cooldown: ${KMARKET_TRANSLATION_PROVIDER_FAILURE_COOLDOWN:15m}
     per-client-minute-limit: ${KMARKET_TRANSLATION_PER_CLIENT_MINUTE_LIMIT:12}
     global-daily-limit: ${KMARKET_TRANSLATION_GLOBAL_DAILY_LIMIT:5000}
 
@@ -102,7 +103,7 @@ kmarket:
     reconciliation-interval: ${KMARKET_NEWS_RECONCILIATION_INTERVAL:6h}
     reconciliation-initial-delay: ${KMARKET_NEWS_RECONCILIATION_INITIAL_DELAY:1m}
     maintenance-interval: ${KMARKET_NEWS_MAINTENANCE_INTERVAL:1h}
-    maintenance-initial-delay: ${KMARKET_NEWS_MAINTENANCE_INITIAL_DELAY:30s}
+    maintenance-initial-delay: ${KMARKET_NEWS_MAINTENANCE_INITIAL_DELAY:5s}
     analysis-interval: ${KMARKET_NEWS_ANALYSIS_INTERVAL:5s}
     analysis-initial-delay: ${KMARKET_NEWS_ANALYSIS_INITIAL_DELAY:30s}
     naver:

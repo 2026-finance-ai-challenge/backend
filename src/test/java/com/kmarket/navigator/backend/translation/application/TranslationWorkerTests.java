@@ -4,10 +4,12 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.times;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 
@@ -18,6 +20,8 @@ import com.kmarket.navigator.backend.translation.application.port.TranslationAiG
 import com.kmarket.navigator.backend.translation.application.port.TranslationRepository;
 import com.kmarket.navigator.backend.translation.domain.GeneratedTitle;
 import com.kmarket.navigator.backend.translation.domain.TitleTranslationJob;
+import com.kmarket.navigator.backend.global.error.BusinessException;
+import com.kmarket.navigator.backend.global.error.ErrorCode;
 
 import tools.jackson.databind.json.JsonMapper;
 
@@ -50,9 +54,41 @@ class TranslationWorkerTests {
 
 		new TranslationWorker(
 			repository, gateway, guard, JsonMapper.builder().build(),
-			Clock.fixed(NOW, ZoneOffset.UTC)
+			Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(15)
 		).process();
 
 		verify(repository).completeNewsTitle(generated, NOW);
+	}
+
+	@Test
+	void pausesTitleClaimsAfterProviderFailure() {
+		TranslationRepository repository = Mockito.mock(TranslationRepository.class);
+		TranslationAiGateway gateway = Mockito.mock(TranslationAiGateway.class);
+		TranslationGenerationGuard guard = Mockito.mock(TranslationGenerationGuard.class);
+		TitleTranslationJob job = new TitleTranslationJob(
+			UUID.randomUUID(),
+			"4bf85830b94228184e8234c14e92c8c9eee79847867458ba624b29d3ce359677",
+			"삼성전자 투자 확대", "news-title-v1", 1
+		);
+		when(repository.claimNewsTitles(eq(10), anyString(), eq(NOW), eq(NOW.minusSeconds(300))))
+			.thenReturn(List.of(job));
+		when(repository.claim(eq(10), anyString(), eq(NOW), eq(NOW.minusSeconds(300))))
+			.thenReturn(List.of());
+		when(gateway.translateTitles(List.of(job)))
+			.thenThrow(new BusinessException(ErrorCode.AI_SERVICE_UNAVAILABLE));
+		TranslationWorker worker = new TranslationWorker(
+			repository, gateway, guard, JsonMapper.builder().build(),
+			Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(15)
+		);
+
+		worker.process();
+		worker.process();
+
+		verify(repository, times(1)).claimNewsTitles(
+			eq(10), anyString(), eq(NOW), eq(NOW.minusSeconds(300))
+		);
+		verify(repository).fail(
+			eq(job.id()), eq(1), eq("AI_SERVICE_UNAVAILABLE"), eq(NOW), eq(Duration.ofMinutes(15))
+		);
 	}
 }
