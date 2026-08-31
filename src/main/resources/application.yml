@@ -47,6 +47,8 @@ springdoc:
   paths-to-match: /api/v1/**
   api-docs:
     path: /v3/api-docs
+    # Springdoc 3.1.0의 OpenAPI 3.1 스키마 복제 회귀를 피한다.
+    version: OPENAPI_3_0
   swagger-ui:
     path: /swagger-ui.html
     disable-swagger-default-url: true
