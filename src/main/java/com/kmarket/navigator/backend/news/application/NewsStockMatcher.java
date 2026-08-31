@@ -29,9 +29,9 @@ public class NewsStockMatcher {
 		"listed", "kospi", "kosdaq", "dividend", "earnings", "revenue", "profit"
 	);
 	private static final List<String> SPORTS_CONTEXT = List.of(
-		"야구", "축구", "농구", "배구", "선수", "감독", "투수", "타자", "경기", "시즌",
-		"홈런", "지명할당", "fa 선택", "복귀", "승리", "패배", "kbo", "mlb", "soccer",
-		"football", "baseball", "basketball", "player", "coach", "pitcher"
+		"야구", "축구", "농구", "배구", "양궁", "배드민턴", "선수", "감독", "투수", "타자",
+		"홈런", "지명할당", "fa 선택", "다승왕", "올림픽", "kbo", "mlb", "soccer",
+		"football", "baseball", "basketball", "badminton", "player", "coach", "pitcher"
 	);
 
 	public Map<String, BigDecimal> match(
@@ -58,6 +58,9 @@ public class NewsStockMatcher {
 		}
 		String articleText = ((title == null ? "" : title) + " "
 			+ (excerpt == null ? "" : excerpt)).toLowerCase(Locale.ROOT);
+		if (isNonFinancialSportsArticle(articleText)) {
+			return Map.of();
+		}
 		matches.entrySet().removeIf(match -> mappingList.stream()
 			.filter(mapping -> mapping.stockCode().equals(match.getKey()))
 			.findFirst()
@@ -109,6 +112,11 @@ public class NewsStockMatcher {
 		boolean sports = SPORTS_CONTEXT.stream().anyMatch(text::contains);
 		List<String> required = sports ? STRONG_FINANCIAL_CONTEXT : FINANCIAL_CONTEXT;
 		return required.stream().anyMatch(text::contains);
+	}
+
+	private boolean isNonFinancialSportsArticle(String text) {
+		return SPORTS_CONTEXT.stream().anyMatch(text::contains)
+			&& STRONG_FINANCIAL_CONTEXT.stream().noneMatch(text::contains);
 	}
 
 	private void addEvidence(

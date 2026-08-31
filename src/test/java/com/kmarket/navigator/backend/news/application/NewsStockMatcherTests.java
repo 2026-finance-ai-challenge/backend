@@ -97,6 +97,30 @@ class NewsStockMatcherTests {
 	}
 
 	@Test
+	void rejectsUnambiguousCompanyNameInSportsArticle() {
+		var mappings = List.of(mapping(
+			"012330", "현대모비스", "HYUNDAI MOBIS CO.,LTD"
+		));
+
+		assertThat(matcher.matchArticle(
+			"현대모비스 여자양궁단 공식 SNS 개설",
+			"소속 선수와 대회 소식을 전하는 채널을 열었다.",
+			mappings
+		)).isEmpty();
+	}
+
+	@Test
+	void doesNotTreatGyeonggiProvinceAsSportsContext() {
+		var mappings = List.of(mapping("005930", "삼성전자", "Samsung Electronics"));
+
+		assertThat(matcher.matchArticle(
+			"경기도 산업단지 투자 확대",
+			"삼성전자는 신규 생산라인 구축 계획을 발표했다.",
+			mappings
+		)).containsOnlyKeys("005930");
+	}
+
+	@Test
 	void acceptsAmbiguousCompanyNameWithFinancialEvidence() {
 		var mappings = List.of(mapping("003550", "LG", "LG Corp."));
 
