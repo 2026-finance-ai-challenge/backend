@@ -1,6 +1,6 @@
 # OpenAPI·Swagger UI
 
-Backend의 실행 가능한 API 계약은 Spring MVC 컨트롤러와 DTO에서 OpenAPI 3.1 문서로 자동 생성한다. 수동 문서는 기능 배경과 운영 정책을 설명하고, 요청·응답 스키마와 현재 경로는 OpenAPI 문서를 기준으로 연동한다.
+Backend의 실행 가능한 API 계약은 Spring MVC 컨트롤러와 DTO에서 OpenAPI 3.0 문서로 자동 생성한다. 수동 문서는 기능 배경과 운영 정책을 설명하고, 요청·응답 스키마와 현재 경로는 OpenAPI 문서를 기준으로 연동한다. Springdoc 3.1.0의 OpenAPI 3.1 스키마 복제 회귀가 해결된 정식 버전이 나오기 전까지 Swagger UI와 클라이언트 생성기 호환성이 안정적인 3.0 계약을 사용한다.
 
 ## 운영 URL
 
@@ -47,5 +47,6 @@ Swagger UI는 브라우저 저장소에 인증 값을 보존하지 않는다. �
 2. 모든 HTTP 작업에 고유한 `operationId`, 한글 요약과 기능 태그가 존재한다.
 3. JWT 필수 API와 공개 API의 보안 정의가 구분된다.
 4. Swagger UI와 JSON·YAML 문서가 인증 없이 제공된다.
+5. 생성되는 계약 버전이 경고 없는 OpenAPI 3.0 형식이다.
 
 API를 추가하거나 경로를 변경할 때 `OpenApiConfig`의 요약·태그·인증 수준을 함께 갱신하지 않으면 검증이 실패한다.
