@@ -10,6 +10,7 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -18,6 +19,7 @@ import com.kmarket.navigator.backend.translation.application.port.TranslationRep
 import com.kmarket.navigator.backend.translation.domain.GeneratedTranslation;
 import com.kmarket.navigator.backend.translation.domain.TranslationJob;
 import com.kmarket.navigator.backend.translation.domain.TitleTranslationJob;
+import com.kmarket.navigator.backend.global.error.BusinessException;
 
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import tools.jackson.databind.JsonNode;
@@ -34,16 +36,19 @@ public class TranslationWorker {
 	private final TranslationGenerationGuard guard;
 	private final ObjectMapper objectMapper;
 	private final Clock clock;
+	private final Duration providerFailureCooldown;
 	private final String workerId = UUID.randomUUID().toString();
+	private volatile Instant nextTitleAttemptAt = Instant.EPOCH;
 
 	@Autowired
 	public TranslationWorker(
 		TranslationRepository repository,
 		TranslationAiGateway aiGateway,
 		TranslationGenerationGuard guard,
-		ObjectMapper objectMapper
+		ObjectMapper objectMapper,
+		@Value("${kmarket.translation.provider-failure-cooldown:15m}") Duration providerFailureCooldown
 	) {
-		this(repository, aiGateway, guard, objectMapper, Clock.systemUTC());
+		this(repository, aiGateway, guard, objectMapper, Clock.systemUTC(), providerFailureCooldown);
 	}
 
 	TranslationWorker(
@@ -51,13 +56,15 @@ public class TranslationWorker {
 		TranslationAiGateway aiGateway,
 		TranslationGenerationGuard guard,
 		ObjectMapper objectMapper,
-		Clock clock
+		Clock clock,
+		Duration providerFailureCooldown
 	) {
 		this.repository = repository;
 		this.aiGateway = aiGateway;
 		this.guard = guard;
 		this.objectMapper = objectMapper;
 		this.clock = clock;
+		this.providerFailureCooldown = providerFailureCooldown;
 	}
 
 	@Scheduled(
@@ -77,6 +84,9 @@ public class TranslationWorker {
 	}
 
 	private void processTitles(Instant now) {
+		if (now.isBefore(nextTitleAttemptAt)) {
+			return;
+		}
 		List<TitleTranslationJob> jobs = repository.claimNewsTitles(
 			TITLE_BATCH_SIZE, workerId, now, now.minus(Duration.ofMinutes(5))
 		);
@@ -86,15 +96,20 @@ public class TranslationWorker {
 		try {
 			var generated = aiGateway.translateTitles(jobs);
 			generated.forEach(title -> repository.completeNewsTitle(title, Instant.now(clock)));
+			nextTitleAttemptAt = Instant.EPOCH;
 		}
 		catch (RuntimeException exception) {
+			nextTitleAttemptAt = now.plus(providerFailureCooldown);
+			String errorCode = errorCode(exception);
 			for (TitleTranslationJob job : jobs) {
-				Duration delay = Duration.ofSeconds(Math.min(3_600, 15L << Math.min(job.attempts(), 7)));
-				repository.fail(job.id(), job.attempts(), exception.getClass().getSimpleName(),
+				Duration backoff = Duration.ofSeconds(Math.min(3_600, 15L << Math.min(job.attempts(), 7)));
+				Duration delay = backoff.compareTo(providerFailureCooldown) >= 0
+					? backoff : providerFailureCooldown;
+				repository.fail(job.id(), job.attempts(), errorCode,
 					Instant.now(clock), delay);
 			}
-			log.warn("News title translation batch failed size={} type={}",
-				jobs.size(), exception.getClass().getSimpleName());
+			log.warn("News title translation batch failed size={} error={} cooldownSeconds={}",
+				jobs.size(), errorCode, providerFailureCooldown.toSeconds());
 		}
 	}
 
@@ -144,5 +159,12 @@ public class TranslationWorker {
 
 	private static String nullableText(JsonNode value) {
 		return value == null || value.isNull() ? null : value.asString();
+	}
+
+	private static String errorCode(RuntimeException exception) {
+		if (exception instanceof BusinessException businessException) {
+			return businessException.errorCode().code();
+		}
+		return exception.getClass().getSimpleName();
 	}
 }
