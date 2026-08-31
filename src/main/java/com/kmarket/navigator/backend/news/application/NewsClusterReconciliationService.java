@@ -50,8 +50,11 @@ public class NewsClusterReconciliationService {
 		fixedDelayString = "${kmarket.news.reconciliation-interval:6h}",
 		initialDelayString = "${kmarket.news.reconciliation-initial-delay:1m}"
 	)
-	@SchedulerLock(name = "news-cluster-reconciliation", lockAtMostFor = "PT15M", lockAtLeastFor = "PT1S")
+	@SchedulerLock(name = "news-collection", lockAtMostFor = "PT15M", lockAtLeastFor = "PT1S")
 	public void reconcile() {
+		if (repository.newsMaintenanceApplied(NewsDataMaintenanceService.VERSION)) {
+			return;
+		}
 		Instant now = Instant.now(clock);
 		List<NewsDuplicateCandidate> articles = new ArrayList<>(repository.findDuplicateCandidates(
 			now.minus(Duration.ofHours(72)),

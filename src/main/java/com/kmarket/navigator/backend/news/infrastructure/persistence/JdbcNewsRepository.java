@@ -8,9 +8,11 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,6 +32,7 @@ import com.kmarket.navigator.backend.news.domain.NewsDuplicateCandidate;
 import com.kmarket.navigator.backend.news.domain.NewsImportance;
 import com.kmarket.navigator.backend.news.domain.NewsPage;
 import com.kmarket.navigator.backend.news.domain.NewsQuery;
+import com.kmarket.navigator.backend.news.domain.NewsRetention;
 import com.kmarket.navigator.backend.news.domain.NewsRanks;
 import com.kmarket.navigator.backend.news.domain.NewsSentiment;
 import com.kmarket.navigator.backend.news.domain.NewsSort;
@@ -41,9 +44,11 @@ import com.kmarket.navigator.backend.news.domain.TermReference;
 class JdbcNewsRepository implements NewsRepository {
 
 	private final JdbcClient jdbcClient;
+	private final JdbcTemplate jdbcTemplate;
 
-	JdbcNewsRepository(JdbcClient jdbcClient) {
+	JdbcNewsRepository(JdbcClient jdbcClient, JdbcTemplate jdbcTemplate) {
 		this.jdbcClient = jdbcClient;
+		this.jdbcTemplate = jdbcTemplate;
 	}
 
 	@Override
@@ -58,21 +63,15 @@ class JdbcNewsRepository implements NewsRepository {
 			  ON story.id = article.cluster_id
 			 AND story.representative_article_id = article.id
 			WHERE (CAST(:query AS varchar) IS NULL
-			       OR EXISTS (
-			         SELECT 1 FROM news_article searchable
-			         WHERE searchable.cluster_id = article.cluster_id
-			           AND (searchable.original_title ILIKE '%%' || :query || '%%' ESCAPE '\\'
-			             OR searchable.original_excerpt ILIKE '%%' || :query || '%%' ESCAPE '\\'
-			             OR COALESCE(searchable.english_title, '') ILIKE '%%' || :query || '%%' ESCAPE '\\'
-			             OR COALESCE(searchable.english_body, '') ILIKE '%%' || :query || '%%' ESCAPE '\\')
-			       ))
+			       OR article.original_title ILIKE '%%' || :query || '%%' ESCAPE '\\'
+			       OR article.original_excerpt ILIKE '%%' || :query || '%%' ESCAPE '\\'
+			       OR COALESCE(article.english_title, '') ILIKE '%%' || :query || '%%' ESCAPE '\\'
+			       OR COALESCE(article.english_body, '') ILIKE '%%' || :query || '%%' ESCAPE '\\')
 			  AND (CAST(:stockCode AS varchar) IS NULL OR EXISTS (
 			    SELECT 1
-			    FROM news_article related_article
-			    JOIN news_article_security article_security
-			      ON article_security.article_id = related_article.id
+			    FROM news_article_security article_security
 			    JOIN security security_filter ON security_filter.id = article_security.security_id
-			    WHERE related_article.cluster_id = article.cluster_id
+			    WHERE article_security.article_id = article.id
 			      AND security_filter.stock_code = :stockCode
 			))
 			  AND (CAST(:sentiment AS varchar) IS NULL OR article.sentiment = :sentiment)
@@ -82,12 +81,10 @@ class JdbcNewsRepository implements NewsRepository {
 			       OR article.market_impact_importance = :marketImpactImportance)
 			  AND (CAST(:watchlistOnly AS boolean) = FALSE OR EXISTS (
 			    SELECT 1
-			    FROM news_article related_article
-			    JOIN news_article_security watched_article
-			      ON watched_article.article_id = related_article.id
+			    FROM news_article_security watched_article
 			    JOIN watchlist_item watched
 			      ON watched.security_id = watched_article.security_id
-			    WHERE related_article.cluster_id = article.cluster_id
+			    WHERE watched_article.article_id = article.id
 			      AND watched.user_id = :watchlistUserId
 			  ))
 			  AND (CAST(:fromTime AS timestamptz) IS NULL OR article.published_at >= :fromTime)
@@ -422,6 +419,191 @@ class JdbcNewsRepository implements NewsRepository {
 		return true;
 	}
 
+	@Override
+	@Transactional
+	public void addClusterStockMappings(UUID clusterId, Map<String, BigDecimal> stockConfidences) {
+		for (var match : stockConfidences.entrySet()) {
+			jdbcClient.sql("""
+				INSERT INTO news_article_security (article_id, security_id, match_confidence)
+				SELECT cluster.representative_article_id, security.id, :confidence
+				FROM news_cluster cluster
+				JOIN security ON security.stock_code = :stockCode
+				JOIN service_stock_universe universe ON universe.stock_code = security.stock_code
+				WHERE cluster.id = :clusterId AND cluster.representative_article_id IS NOT NULL
+				ON CONFLICT (article_id, security_id) DO UPDATE
+				SET match_confidence = GREATEST(
+				    news_article_security.match_confidence,
+				    EXCLUDED.match_confidence
+				)
+				""")
+				.param("clusterId", clusterId)
+				.param("stockCode", match.getKey())
+				.param("confidence", match.getValue())
+				.update();
+		}
+	}
+
+	@Override
+	public boolean newsMaintenanceApplied(String version) {
+		return jdbcClient.sql("""
+			SELECT EXISTS (
+			    SELECT 1 FROM news_pipeline_maintenance WHERE version = :version
+			)
+			""")
+			.param("version", version)
+			.query(Boolean.class)
+			.single();
+	}
+
+	@Override
+	@Transactional
+	public void applyNewsMaintenance(
+		String version,
+		List<NewsRetention> retained,
+		List<UUID> deletedArticleIds,
+		Instant appliedAt
+	) {
+		jdbcTemplate.execute("""
+			CREATE TEMP TABLE news_retention_stage (
+			    article_id UUID PRIMARY KEY,
+			    cluster_id UUID NOT NULL,
+			    signature_hash CHAR(64) NOT NULL,
+			    normalized_title VARCHAR(1000) NOT NULL
+			) ON COMMIT DROP
+			""");
+		jdbcTemplate.execute("""
+			CREATE TEMP TABLE news_mapping_stage (
+			    article_id UUID NOT NULL,
+			    stock_code VARCHAR(6) NOT NULL,
+			    confidence NUMERIC(5,4) NOT NULL,
+			    PRIMARY KEY (article_id, stock_code)
+			) ON COMMIT DROP
+			""");
+		jdbcTemplate.execute("""
+			CREATE TEMP TABLE news_deletion_stage (
+			    article_id UUID PRIMARY KEY
+			) ON COMMIT DROP
+			""");
+		jdbcTemplate.batchUpdate(
+			"""
+			INSERT INTO news_retention_stage (
+			    article_id, cluster_id, signature_hash, normalized_title
+			) VALUES (?, ?, ?, ?)
+			""",
+			retained,
+			500,
+			(statement, retention) -> {
+				statement.setObject(1, retention.articleId());
+				statement.setObject(2, retention.clusterId());
+				statement.setString(3, retention.signatureHash());
+				statement.setString(4, retention.normalizedTitle());
+			}
+		);
+		List<StagedStockMapping> stagedMappings = retained.stream()
+			.flatMap(retention -> retention.stockConfidences().entrySet().stream()
+				.map(entry -> new StagedStockMapping(
+					retention.articleId(),
+					entry.getKey(),
+					entry.getValue()
+				)))
+			.toList();
+		jdbcTemplate.batchUpdate(
+			"INSERT INTO news_mapping_stage (article_id, stock_code, confidence) VALUES (?, ?, ?)",
+			stagedMappings,
+			500,
+			(statement, mapping) -> {
+				statement.setObject(1, mapping.articleId());
+				statement.setString(2, mapping.stockCode());
+				statement.setBigDecimal(3, mapping.confidence());
+			}
+		);
+		jdbcTemplate.batchUpdate(
+			"INSERT INTO news_deletion_stage (article_id) VALUES (?)",
+			deletedArticleIds,
+			500,
+			(statement, articleId) -> statement.setObject(1, articleId)
+		);
+		jdbcClient.sql("""
+			INSERT INTO news_cluster (
+			    id, signature_hash, normalized_title, created_at, updated_at
+			)
+			SELECT stage.cluster_id, stage.signature_hash, stage.normalized_title, :now, :now
+			FROM news_retention_stage stage
+			ON CONFLICT (signature_hash) DO NOTHING
+			""")
+			.param("now", atUtc(appliedAt))
+			.update();
+		jdbcClient.sql("""
+			UPDATE news_article article
+			SET cluster_id = stage.cluster_id
+			FROM news_retention_stage stage
+			WHERE article.id = stage.article_id
+			""").update();
+		jdbcClient.sql("""
+			UPDATE news_cluster cluster
+			SET representative_article_id = stage.article_id, updated_at = :now
+			FROM news_retention_stage stage
+			WHERE cluster.id = stage.cluster_id
+			""")
+			.param("now", atUtc(appliedAt))
+			.update();
+		jdbcTemplate.execute(
+			"ALTER TABLE news_article_security DISABLE TRIGGER news_watchlist_notification_trigger"
+		);
+		jdbcClient.sql("""
+			DELETE FROM news_article_security link
+			USING news_retention_stage retained
+			WHERE link.article_id = retained.article_id
+			  AND NOT EXISTS (
+			    SELECT 1
+			    FROM news_mapping_stage desired
+			    JOIN security ON security.stock_code = desired.stock_code
+			    WHERE desired.article_id = link.article_id
+			      AND security.id = link.security_id
+			  )
+			""").update();
+		jdbcClient.sql("""
+			INSERT INTO news_article_security (article_id, security_id, match_confidence)
+			SELECT desired.article_id, security.id, desired.confidence
+			FROM news_mapping_stage desired
+			JOIN security ON security.stock_code = desired.stock_code
+			ON CONFLICT (article_id, security_id) DO UPDATE
+			SET match_confidence = EXCLUDED.match_confidence
+			""").update();
+		jdbcTemplate.execute(
+			"ALTER TABLE news_article_security ENABLE TRIGGER news_watchlist_notification_trigger"
+		);
+		jdbcClient.sql("""
+			DELETE FROM news_article article
+			USING news_deletion_stage deletion
+			WHERE article.id = deletion.article_id
+			""").update();
+		jdbcClient.sql("""
+			DELETE FROM news_cluster cluster
+			WHERE NOT EXISTS (
+			    SELECT 1 FROM news_article article WHERE article.cluster_id = cluster.id
+			)
+			""").update();
+		jdbcClient.sql("""
+			DELETE FROM translation_memory memory
+			WHERE memory.content_kind = 'NEWS_TITLE'
+			  AND NOT EXISTS (
+			    SELECT 1 FROM news_article article
+			    WHERE article.title_source_hash = memory.source_hash
+			  )
+			""").update();
+		jdbcClient.sql("""
+			INSERT INTO news_pipeline_maintenance (
+			    version, retained_count, deleted_count, applied_at
+			) VALUES (:version, :retainedCount, :deletedCount, :appliedAt)
+			""")
+			.param("version", version)
+			.param("retainedCount", retained.size())
+			.param("deletedCount", deletedArticleIds.size())
+			.param("appliedAt", atUtc(appliedAt))
+			.update();
+	}
+
 	private void queueTitleTranslation(String title, Instant now) {
 		jdbcClient.sql("""
 			WITH source AS (
@@ -673,13 +855,10 @@ class JdbcNewsRepository implements NewsRepository {
 		return jdbcClient.sql("""
 			SELECT s.stock_code, issuer.name_ko, issuer.name_en, s.market,
 			       MAX(link.match_confidence) AS match_confidence
-			FROM news_article source_article
-			JOIN news_article related_article
-			  ON related_article.cluster_id = source_article.cluster_id
-			JOIN news_article_security link ON link.article_id = related_article.id
+			FROM news_article_security link
 			JOIN security s ON s.id = link.security_id
 			JOIN issuer ON issuer.id = s.issuer_id
-			WHERE source_article.id = :articleId
+			WHERE link.article_id = :articleId
 			GROUP BY s.stock_code, issuer.name_ko, issuer.name_en, s.market
 			ORDER BY MAX(link.match_confidence) DESC, s.stock_code
 			""")
@@ -771,5 +950,12 @@ class JdbcNewsRepository implements NewsRepository {
 	}
 
 	private record ClaimedJob(UUID articleId, int attempts) {
+	}
+
+	private record StagedStockMapping(
+		UUID articleId,
+		String stockCode,
+		BigDecimal confidence
+	) {
 	}
 }

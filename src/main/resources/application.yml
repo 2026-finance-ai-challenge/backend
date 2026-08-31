@@ -96,10 +96,13 @@ kmarket:
     generation-initial-delay: ${KMARKET_CHAT_GENERATION_INITIAL_DELAY:30s}
     purge-cron: ${KMARKET_CHAT_PURGE_CRON:0 20 4 * * *}
   news:
+    maintenance-enabled: ${KMARKET_NEWS_MAINTENANCE_ENABLED:false}
     collection-interval: ${KMARKET_NEWS_COLLECTION_INTERVAL:10m}
     collection-initial-delay: ${KMARKET_NEWS_COLLECTION_INITIAL_DELAY:30s}
     reconciliation-interval: ${KMARKET_NEWS_RECONCILIATION_INTERVAL:6h}
     reconciliation-initial-delay: ${KMARKET_NEWS_RECONCILIATION_INITIAL_DELAY:1m}
+    maintenance-interval: ${KMARKET_NEWS_MAINTENANCE_INTERVAL:1h}
+    maintenance-initial-delay: ${KMARKET_NEWS_MAINTENANCE_INITIAL_DELAY:30s}
     analysis-interval: ${KMARKET_NEWS_ANALYSIS_INTERVAL:5s}
     analysis-initial-delay: ${KMARKET_NEWS_ANALYSIS_INITIAL_DELAY:30s}
     naver:
@@ -108,12 +111,12 @@ kmarket:
       client-id: ${KMARKET_NAVER_NEWS_CLIENT_ID:}
       client-secret: ${KMARKET_NAVER_NEWS_CLIENT_SECRET:}
       display: ${KMARKET_NAVER_NEWS_DISPLAY:20}
-      target-batch-size: ${KMARKET_NAVER_NEWS_TARGET_BATCH_SIZE:8}
+      target-batch-size: ${KMARKET_NAVER_NEWS_TARGET_BATCH_SIZE:75}
       connect-timeout: ${KMARKET_NAVER_NEWS_CONNECT_TIMEOUT:10s}
       read-timeout: ${KMARKET_NAVER_NEWS_READ_TIMEOUT:30s}
       request-delay: ${KMARKET_NAVER_NEWS_REQUEST_DELAY:125ms}
       max-article-age: ${KMARKET_NEWS_MAX_ARTICLE_AGE:72h}
-      queries: ${KMARKET_NAVER_NEWS_QUERIES:코스피,코스닥,한국 증시}
+      queries: ${KMARKET_NAVER_NEWS_QUERIES:}
   market:
     collection-interval: ${KMARKET_MARKET_COLLECTION_INTERVAL:60s}
     collection-initial-delay: ${KMARKET_MARKET_COLLECTION_INITIAL_DELAY:15s}

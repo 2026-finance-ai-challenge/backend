@@ -81,4 +81,30 @@ class NewsDuplicateIndexTests {
 
 		assertThat(match.targetClusterId()).isEqualTo(crossPublisherClusterId);
 	}
+
+	@Test
+	void keepsDifferentPhotoArticlesFromSamePublisherSeparate() {
+		Instant publishedAt = Instant.parse("2026-08-29T00:00:00Z");
+		NewsDuplicateIndex index = new NewsDuplicateIndex(fingerprint);
+		index.add(
+			UUID.randomUUID(),
+			fingerprint.profile(
+				"[mhn포토] 임희정 티는 견고하게",
+				"임희정이 대회 첫날 1번 홀에서 티샷을 준비하고 있다"
+			),
+			publishedAt,
+			"mhnse.com"
+		);
+
+		NewsDuplicateIndex.Match match = index.findBest(
+			fingerprint.profile(
+				"[mhn포토] 박결 시즌 첫 우승 향해 날린다",
+				"박결이 대회 첫날 1번 홀에서 힘차게 티샷하고 있다"
+			),
+			publishedAt.plusSeconds(60),
+			"www.mhnse.com"
+		);
+
+		assertThat(match.targetClusterId()).isNull();
+	}
 }
