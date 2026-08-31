@@ -7,6 +7,8 @@ readonly RUNTIME_ENV="$DEPLOY_ROOT/runtime.env"
 readonly IMAGE_ENV="$DEPLOY_ROOT/image.env"
 readonly NGINX_SOURCE="$DEPLOY_ROOT/nginx-https.conf"
 readonly NGINX_TARGET=/etc/nginx/conf.d/kmarket.conf
+readonly TLS_CERTIFICATE=/etc/letsencrypt/live/api.kartkr.cloud/fullchain.pem
+readonly TLS_PRIVATE_KEY=/etc/letsencrypt/live/api.kartkr.cloud/privkey.pem
 
 if [[ $# -ne 1 || ! "$1" =~ ^[0-9a-f]{40}$ ]]; then
   echo "40자 Git 커밋 SHA가 필요합니다." >&2
@@ -42,6 +44,12 @@ mv "$temporary" "$IMAGE_ENV"
 reload_edge_nginx() {
   local backup
   backup=$(mktemp "$DEPLOY_ROOT/.nginx.conf.backup.XXXXXX")
+
+  if ! sudo -n test -r "$TLS_CERTIFICATE" || ! sudo -n test -r "$TLS_PRIVATE_KEY"; then
+    echo "api.kartkr.cloud TLS 인증서가 없습니다." >&2
+    rm -f "$backup"
+    return 1
+  fi
 
   if sudo -n test -f "$NGINX_TARGET"; then
     sudo -n cp "$NGINX_TARGET" "$backup"

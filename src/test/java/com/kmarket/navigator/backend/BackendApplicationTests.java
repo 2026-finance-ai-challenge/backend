@@ -9,8 +9,10 @@ import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -100,6 +102,7 @@ import tools.jackson.databind.ObjectMapper;
 @Transactional
 @SpringBootTest(properties = {
 	"opendart.api-keys=0000000000000000000000000000000000000000",
+	"kmarket.cors.allowed-origins=https://kartkr.cloud,http://localhost:5173",
 	"kmarket.tax.documents.encryption-key-base64=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
 })
 class BackendApplicationTests {
@@ -472,6 +475,20 @@ class BackendApplicationTests {
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.items").isArray())
 			.andExpect(jsonPath("$.nextCursor").doesNotExist());
+	}
+
+	@Test
+	void permitsOnlyConfiguredFrontendOrigins() throws Exception {
+		mockMvc.perform(options("/api/v1/news")
+				.header("Origin", "https://kartkr.cloud")
+				.header("Access-Control-Request-Method", "GET"))
+			.andExpect(status().isOk())
+			.andExpect(header().string("Access-Control-Allow-Origin", "https://kartkr.cloud"))
+			.andExpect(header().string("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS"));
+
+		mockMvc.perform(get("/api/v1/news").header("Origin", "https://attacker.example"))
+			.andExpect(status().isForbidden())
+			.andExpect(header().doesNotExist("Access-Control-Allow-Origin"));
 	}
 
 	@Test
