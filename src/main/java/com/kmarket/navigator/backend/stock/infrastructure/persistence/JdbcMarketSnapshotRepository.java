@@ -12,6 +12,9 @@ import org.springframework.transaction.annotation.Transactional;
 import com.kmarket.navigator.backend.stock.application.port.MarketSnapshotRepository;
 import com.kmarket.navigator.backend.stock.domain.ForeignLimitCollectionTarget;
 import com.kmarket.navigator.backend.stock.domain.ForeignOwnershipSnapshot;
+import com.kmarket.navigator.backend.stock.domain.ExchangeRateSnapshot;
+import com.kmarket.navigator.backend.stock.domain.MarketDailyPrice;
+import com.kmarket.navigator.backend.stock.domain.MarketForeignNetFlow;
 import com.kmarket.navigator.backend.stock.domain.MarketIndexSnapshot;
 import com.kmarket.navigator.backend.stock.domain.MarketQuoteSnapshot;
 
@@ -219,6 +222,89 @@ class JdbcMarketSnapshotRepository implements MarketSnapshotRepository {
 			Types.NUMERIC
 		);
 		statement.update();
+	}
+
+	@Override
+	@Transactional
+	public void saveDailyPrices(String stockCode, List<MarketDailyPrice> prices) {
+		for (MarketDailyPrice price : prices) {
+			jdbcClient.sql("""
+				INSERT INTO market_daily_price (
+				    security_id, trading_date, open_price_krw, high_price_krw,
+				    low_price_krw, close_price_krw, volume, source, collected_at
+				)
+				SELECT security.id, :tradingDate, :openPrice, :highPrice,
+				       :lowPrice, :closePrice, :volume, :source, CURRENT_TIMESTAMP
+				FROM security
+				JOIN service_stock_universe universe ON universe.stock_code = security.stock_code
+				WHERE security.stock_code = :stockCode
+				ON CONFLICT (security_id, trading_date) DO UPDATE
+				SET open_price_krw = EXCLUDED.open_price_krw,
+				    high_price_krw = EXCLUDED.high_price_krw,
+				    low_price_krw = EXCLUDED.low_price_krw,
+				    close_price_krw = EXCLUDED.close_price_krw,
+				    volume = EXCLUDED.volume,
+				    source = EXCLUDED.source,
+				    collected_at = EXCLUDED.collected_at
+				""")
+				.param("stockCode", stockCode)
+				.param("tradingDate", price.tradingDate())
+				.param("openPrice", price.openPriceKrw())
+				.param("highPrice", price.highPriceKrw())
+				.param("lowPrice", price.lowPriceKrw())
+				.param("closePrice", price.closePriceKrw())
+				.param("volume", price.volume())
+				.param("source", price.source())
+				.update();
+		}
+	}
+
+	@Override
+	@Transactional
+	public void saveExchangeRate(ExchangeRateSnapshot snapshot) {
+		jdbcClient.sql("""
+			INSERT INTO exchange_rate_snapshot (
+			    currency, krw_per_unit, data_status, as_of, source
+			)
+			VALUES (:currency, :rate, :status, :asOf, :source)
+			ON CONFLICT (currency) DO UPDATE
+			SET krw_per_unit = EXCLUDED.krw_per_unit,
+			    data_status = EXCLUDED.data_status,
+			    as_of = EXCLUDED.as_of,
+			    source = EXCLUDED.source
+			WHERE EXCLUDED.as_of >= exchange_rate_snapshot.as_of
+			""")
+			.param("currency", snapshot.currency())
+			.param("rate", snapshot.krwPerUnit())
+			.param("status", snapshot.dataStatus().name())
+			.param("asOf", atUtc(snapshot.asOf()))
+			.param("source", snapshot.source())
+			.update();
+	}
+
+	@Override
+	@Transactional
+	public void saveForeignNetFlows(List<MarketForeignNetFlow> flows) {
+		for (MarketForeignNetFlow flow : flows) {
+			jdbcClient.sql("""
+				INSERT INTO market_foreign_net_flow (
+				    market_code, trading_date, net_purchase_amount_krw,
+				    collected_at, source
+				)
+				VALUES (:marketCode, :tradingDate, :amount, :collectedAt, :source)
+				ON CONFLICT (market_code, trading_date) DO UPDATE
+				SET net_purchase_amount_krw = EXCLUDED.net_purchase_amount_krw,
+				    collected_at = EXCLUDED.collected_at,
+				    source = EXCLUDED.source
+				WHERE EXCLUDED.collected_at >= market_foreign_net_flow.collected_at
+				""")
+				.param("marketCode", flow.marketCode())
+				.param("tradingDate", flow.tradingDate())
+				.param("amount", flow.netPurchaseAmountKrw())
+				.param("collectedAt", atUtc(flow.collectedAt()))
+				.param("source", flow.source())
+				.update();
+		}
 	}
 
 	private JdbcClient.StatementSpec nullable(

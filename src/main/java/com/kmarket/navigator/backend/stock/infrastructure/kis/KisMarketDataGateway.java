@@ -5,11 +5,17 @@ import java.time.Clock;
 import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.concurrent.ThreadLocalRandom;
 
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -21,6 +27,8 @@ import org.springframework.web.client.RestClientResponseException;
 
 import com.kmarket.navigator.backend.stock.application.port.MarketDataGateway;
 import com.kmarket.navigator.backend.stock.domain.MarketDataStatus;
+import com.kmarket.navigator.backend.stock.domain.MarketDailyPrice;
+import com.kmarket.navigator.backend.stock.domain.MarketForeignNetFlow;
 import com.kmarket.navigator.backend.stock.domain.MarketIndexSnapshot;
 import com.kmarket.navigator.backend.stock.domain.MarketQuoteSnapshot;
 import com.kmarket.navigator.backend.stock.domain.PriceLimitState;
@@ -32,6 +40,9 @@ class KisMarketDataGateway implements MarketDataGateway {
 
 	private static final String QUOTE_TRANSACTION_ID = "FHKST01010100";
 	private static final String INDEX_TRANSACTION_ID = "FHPUP02100000";
+	private static final String DAILY_PRICE_TRANSACTION_ID = "FHKST03010100";
+	private static final String FOREIGN_FLOW_TRANSACTION_ID = "FHPTJ04040000";
+	private static final DateTimeFormatter KIS_DATE = DateTimeFormatter.BASIC_ISO_DATE;
 	private static final ZoneId KOREA_ZONE = ZoneId.of("Asia/Seoul");
 	private static final Map<String, String> INDEX_NAMES = Map.of(
 		"0001", "KOSPI",
@@ -134,18 +145,126 @@ class KisMarketDataGateway implements MarketDataGateway {
 		));
 	}
 
-	private JsonNode request(String path, String transactionId, String marketCode, String code) {
-		String token = tokenProvider.accessToken();
-		JsonNode root = circuitBreaker.execute(() -> requestWithRetry(
-			path,
-			transactionId,
-			marketCode,
-			code,
-			token
-		));
-		if (root == null || !"0".equals(text(root, "rt_cd"))) {
-			throw new KisProviderException("KIS market response was rejected");
+	@Override
+	public List<MarketDailyPrice> fetchDailyPrices(
+		String stockCode,
+		LocalDate from,
+		LocalDate to
+	) {
+		if (!configured()) {
+			return List.of();
 		}
+		Map<LocalDate, MarketDailyPrice> collected = new TreeMap<>();
+		LocalDate pageEnd = to;
+		for (int page = 0; page < 8 && !pageEnd.isBefore(from); page++) {
+			List<MarketDailyPrice> prices = fetchDailyPricePage(stockCode, from, pageEnd);
+			if (prices.isEmpty()) {
+				break;
+			}
+			prices.forEach(price -> collected.put(price.tradingDate(), price));
+			LocalDate oldest = prices.stream()
+				.map(MarketDailyPrice::tradingDate)
+				.min(LocalDate::compareTo)
+				.orElse(from);
+			if (!oldest.isAfter(from)) {
+				break;
+			}
+			LocalDate nextEnd = oldest.minusDays(1);
+			if (!nextEnd.isBefore(pageEnd)) {
+				break;
+			}
+			pageEnd = nextEnd;
+			pauseBetweenRequests();
+		}
+		return List.copyOf(collected.values());
+	}
+
+	private List<MarketDailyPrice> fetchDailyPricePage(
+		String stockCode,
+		LocalDate from,
+		LocalDate to
+	) {
+		Map<String, String> parameters = new LinkedHashMap<>();
+		parameters.put("FID_COND_MRKT_DIV_CODE", "J");
+		parameters.put("FID_INPUT_ISCD", stockCode);
+		parameters.put("FID_INPUT_DATE_1", KIS_DATE.format(from));
+		parameters.put("FID_INPUT_DATE_2", KIS_DATE.format(to));
+		parameters.put("FID_PERIOD_DIV_CODE", "D");
+		parameters.put("FID_ORG_ADJ_PRC", "1");
+		JsonNode root = requestRoot(
+			"/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice",
+			DAILY_PRICE_TRANSACTION_ID,
+			parameters
+		);
+		JsonNode output = root.path("output2");
+		if (!output.isArray()) {
+			return List.of();
+		}
+		List<MarketDailyPrice> prices = new ArrayList<>();
+		for (JsonNode row : output) {
+			LocalDate tradingDate = date(row, "stck_bsop_date");
+			BigDecimal open = decimal(row, "stck_oprc");
+			BigDecimal high = decimal(row, "stck_hgpr");
+			BigDecimal low = decimal(row, "stck_lwpr");
+			BigDecimal close = decimal(row, "stck_clpr");
+			if (tradingDate == null || open == null || high == null || low == null || close == null) {
+				continue;
+			}
+			prices.add(new MarketDailyPrice(
+				tradingDate, open, high, low, close,
+				longValue(row, "acml_vol", 0L), "KIS_REST_DAILY_PRICE"
+			));
+		}
+		return List.copyOf(prices);
+	}
+
+	@Override
+	public List<MarketForeignNetFlow> fetchForeignNetFlows(LocalDate tradingDate) {
+		if (!configured()) {
+			return List.of();
+		}
+		List<MarketForeignNetFlow> flows = new ArrayList<>();
+		for (MarketFlowRequest market : List.of(
+			new MarketFlowRequest("KOSPI", "0001", "KSP", "0001"),
+			new MarketFlowRequest("KOSDAQ", "1001", "KSQ", "1001")
+		)) {
+			Map<String, String> parameters = new LinkedHashMap<>();
+			parameters.put("FID_COND_MRKT_DIV_CODE", "U");
+			parameters.put("FID_INPUT_ISCD", market.indexCode());
+			parameters.put("FID_INPUT_DATE_1", KIS_DATE.format(tradingDate));
+			parameters.put("FID_INPUT_ISCD_1", market.marketInputCode());
+			parameters.put("FID_INPUT_DATE_2", KIS_DATE.format(tradingDate));
+			parameters.put("FID_INPUT_ISCD_2", market.secondaryCode());
+			JsonNode root = requestRoot(
+				"/uapi/domestic-stock/v1/quotations/inquire-investor-daily-by-market",
+				FOREIGN_FLOW_TRANSACTION_ID,
+				parameters
+			);
+			JsonNode output = root.path("output");
+			if (!output.isArray()) {
+				continue;
+			}
+			for (JsonNode row : output) {
+				LocalDate rowDate = date(row, "stck_bsop_date");
+				BigDecimal amountMillions = decimal(row, "frgn_ntby_tr_pbmn");
+				if (rowDate == null || amountMillions == null) {
+					continue;
+				}
+				flows.add(new MarketForeignNetFlow(
+					market.marketCode(), rowDate,
+					amountMillions.multiply(BigDecimal.valueOf(1_000_000L)),
+					clock.instant(), "KIS_REST_INVESTOR_DAILY_BY_MARKET"
+				));
+			}
+		}
+		return List.copyOf(flows);
+	}
+
+	private JsonNode request(String path, String transactionId, String marketCode, String code) {
+		Map<String, String> parameters = new LinkedHashMap<>();
+		parameters.put("FID_COND_MRKT_DIV_CODE", marketCode);
+		parameters.put("FID_INPUT_ISCD", code);
+		JsonNode root = requestRoot(path, transactionId, parameters);
 		JsonNode output = root.path("output");
 		if (output.isMissingNode() || output.isNull()) {
 			throw new KisProviderException("KIS market response has no output");
@@ -153,17 +272,27 @@ class KisMarketDataGateway implements MarketDataGateway {
 		return output;
 	}
 
+	private JsonNode requestRoot(String path, String transactionId, Map<String, String> parameters) {
+		String token = tokenProvider.accessToken();
+		JsonNode root = circuitBreaker.execute(() -> requestWithRetry(
+			path, transactionId, parameters, token
+		));
+		if (root == null || !"0".equals(text(root, "rt_cd"))) {
+			throw new KisProviderException("KIS market response was rejected");
+		}
+		return root;
+	}
+
 	private JsonNode requestWithRetry(
 		String path,
 		String transactionId,
-		String marketCode,
-		String code,
+		Map<String, String> parameters,
 		String token
 	) {
 		int maxAttempts = Math.max(1, properties.getRetryMaxAttempts());
 		for (int attempt = 1; ; attempt++) {
 			try {
-				return exchange(path, transactionId, marketCode, code, token);
+				return exchange(path, transactionId, parameters, token);
 			} catch (RuntimeException exception) {
 				if (attempt >= maxAttempts || !isTransient(exception)) {
 					throw exception;
@@ -176,16 +305,15 @@ class KisMarketDataGateway implements MarketDataGateway {
 	private JsonNode exchange(
 		String path,
 		String transactionId,
-		String marketCode,
-		String code,
+		Map<String, String> parameters,
 		String token
 	) {
 		return restClient.get()
-			.uri(uriBuilder -> uriBuilder
-				.path(path)
-				.queryParam("FID_COND_MRKT_DIV_CODE", marketCode)
-				.queryParam("FID_INPUT_ISCD", code)
-				.build())
+			.uri(uriBuilder -> {
+				uriBuilder.path(path);
+				parameters.forEach(uriBuilder::queryParam);
+				return uriBuilder.build();
+			})
 			.header("Content-Type", "application/json; charset=utf-8")
 			.header("authorization", "Bearer " + token)
 			.header("appkey", properties.getAppKey())
@@ -216,6 +344,19 @@ class KisMarketDataGateway implements MarketDataGateway {
 		}
 	}
 
+	private void pauseBetweenRequests() {
+		Duration delay = nonNegative(properties.getCollectionDelay());
+		if (delay.isZero()) {
+			return;
+		}
+		try {
+			Thread.sleep(delay);
+		} catch (InterruptedException exception) {
+			Thread.currentThread().interrupt();
+			throw new KisProviderException("KIS market request was interrupted", exception);
+		}
+	}
+
 	private static boolean isTransient(RuntimeException exception) {
 		if (exception instanceof ResourceAccessException) {
 			return true;
@@ -243,7 +384,7 @@ class KisMarketDataGateway implements MarketDataGateway {
 	}
 
 	private String marketSession() {
-		LocalDateTime now = LocalDateTime.now(clock);
+		LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), KOREA_ZONE);
 		DayOfWeek day = now.getDayOfWeek();
 		if (day == DayOfWeek.SATURDAY || day == DayOfWeek.SUNDAY) {
 			return "CLOSED";
@@ -331,6 +472,18 @@ class KisMarketDataGateway implements MarketDataGateway {
 		}
 	}
 
+	private static LocalDate date(JsonNode output, String field) {
+		String value = text(output, field);
+		if (value.length() != 8) {
+			return null;
+		}
+		try {
+			return LocalDate.parse(value, KIS_DATE);
+		} catch (java.time.format.DateTimeParseException exception) {
+			return null;
+		}
+	}
+
 	private static long longValue(JsonNode output, String field, long fallback) {
 		String value = normalizeNumeric(text(output, field));
 		if (value.isBlank() || "-".equals(value)) {
@@ -357,5 +510,13 @@ class KisMarketDataGateway implements MarketDataGateway {
 
 	private static String normalizeNumeric(String value) {
 		return value.replace(",", "").replace("%", "").trim();
+	}
+
+	private record MarketFlowRequest(
+		String marketCode,
+		String indexCode,
+		String marketInputCode,
+		String secondaryCode
+	) {
 	}
 }

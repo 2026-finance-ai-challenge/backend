@@ -26,6 +26,7 @@ import com.kmarket.navigator.backend.stock.domain.ForeignLimitPolicy;
 import com.kmarket.navigator.backend.stock.domain.ForeignLimitPrediction;
 import com.kmarket.navigator.backend.stock.domain.MarketDataStatus;
 import com.kmarket.navigator.backend.stock.domain.MarketIndexSnapshot;
+import com.kmarket.navigator.backend.stock.domain.MarketForeignNetFlowSummary;
 import com.kmarket.navigator.backend.stock.domain.MarketQuoteSnapshot;
 import com.kmarket.navigator.backend.stock.domain.ScreenerQuery;
 import com.kmarket.navigator.backend.stock.domain.ScreenerSort;
@@ -98,7 +99,7 @@ public class MarketService {
 			: view.quote().currentPriceKrw()
 				.divide(rate.krwPerUnit(), 2, RoundingMode.HALF_UP);
 		ForeignLimitPolicy policy = policyByCode().get(view.stock().stockCode());
-		ForeignLimitPrediction prediction = policy == null
+		ForeignLimitPrediction prediction = policy == null || !predictionAllowed(view)
 			? null
 			: predict(view.stock().securityId());
 		return new MarketStockDetail(view, usd, rate, policy, prediction);
@@ -124,7 +125,7 @@ public class MarketService {
 				view,
 				policy,
 				warning,
-				predict(view.stock().securityId())
+				predictionAllowed(view) ? predict(view.stock().securityId()) : null
 			));
 		}
 		return List.copyOf(result);
@@ -158,6 +159,11 @@ public class MarketService {
 	}
 
 	@Transactional(readOnly = true)
+	public MarketForeignNetFlowSummary foreignNetFlow() {
+		return repository.findLatestForeignNetFlow().orElse(null);
+	}
+
+	@Transactional(readOnly = true)
 	public MarketHistory history(
 		String stockCode,
 		LocalDate from,
@@ -181,6 +187,10 @@ public class MarketService {
 		return predictionEngine.predict(
 			repository.findForeignOwnershipHistory(securityId, FOREIGN_HISTORY_LIMIT)
 		).orElse(null);
+	}
+
+	private boolean predictionAllowed(StockMarketView view) {
+		return view.quote() != null && "REGULAR".equals(view.quote().marketSession());
 	}
 
 	private Map<String, ForeignLimitPolicy> policyByCode() {

@@ -18,18 +18,21 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import com.kmarket.navigator.backend.news.application.port.NewsProviderGateway;
+import com.kmarket.navigator.backend.news.application.port.NewsOriginalArticleGateway;
 import com.kmarket.navigator.backend.news.application.port.NewsRepository;
 import com.kmarket.navigator.backend.news.domain.CollectedNewsArticle;
 import com.kmarket.navigator.backend.news.domain.NewsCollectionTarget;
 import com.kmarket.navigator.backend.news.domain.NewsDraft;
 import com.kmarket.navigator.backend.news.domain.NewsDuplicateCandidate;
 import com.kmarket.navigator.backend.news.domain.NewsStockMapping;
+import com.kmarket.navigator.backend.news.domain.OriginalNewsArticle;
 import com.kmarket.navigator.backend.news.infrastructure.naver.NaverNewsProperties;
 
 class NewsCollectionServiceTests {
 
 	private static final Instant NOW = Instant.parse("2026-08-31T02:00:00Z");
 	private final NewsProviderGateway provider = mock(NewsProviderGateway.class);
+	private final NewsOriginalArticleGateway originalArticleGateway = mock(NewsOriginalArticleGateway.class);
 	private final NewsRepository repository = mock(NewsRepository.class);
 	private final NewsFingerprint fingerprint = new NewsFingerprint();
 	private final NewsStockMatcher stockMatcher = new NewsStockMatcher();
@@ -49,6 +52,7 @@ class NewsCollectionServiceTests {
 		when(repository.findDuplicateCandidates(any(), anyInt())).thenReturn(List.of());
 		service = new NewsCollectionService(
 			provider,
+			originalArticleGateway,
 			repository,
 			fingerprint,
 			stockMatcher,
@@ -90,6 +94,10 @@ class NewsCollectionServiceTests {
 			excerpt,
 			"second.example.com"
 		)));
+		when(originalArticleGateway.fetch(any())).thenReturn(java.util.Optional.of(
+			new OriginalNewsArticle(excerpt, "https://second.example.com/second-example-com", null,
+				"publisher_public_article_v1")
+		));
 
 		service.collect();
 

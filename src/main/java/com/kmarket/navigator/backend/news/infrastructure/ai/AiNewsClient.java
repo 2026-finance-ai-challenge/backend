@@ -41,11 +41,12 @@ class AiNewsClient implements NewsAiGateway {
 	public NewsAnalysis analyze(
 		String title,
 		List<String> paragraphs,
-		List<String> candidateCompanies
+		List<String> candidateCompanies,
+		String sourceType
 	) {
 		SignalResponse signals = post(
 			"/internal/v1/news/signals",
-			new AnalysisRequest(title, paragraphs, candidateCompanies),
+			new AnalysisRequest(title, paragraphs, candidateCompanies, sourceType),
 			SignalResponse.class
 		);
 		return signals.toDomain(null, "news-signals-v1");
@@ -95,7 +96,8 @@ class AiNewsClient implements NewsAiGateway {
 	private record AnalysisRequest(
 		String title,
 		List<String> paragraphs,
-		List<String> candidateCompanies
+		List<String> candidateCompanies,
+		String sourceType
 	) {
 	}
 
