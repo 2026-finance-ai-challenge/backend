@@ -27,6 +27,8 @@ public interface NewsRepository {
 
 	Optional<NewsArticle> findById(UUID articleId);
 
+	List<UUID> findNarrativeBackfillCandidates(int limit);
+
 	List<NewsDuplicateCandidate> findDuplicateCandidates(Instant since, int limit);
 
 	int replaceClusterAssignments(List<NewsClusterAssignment> assignments, Instant reconciledAt);
