@@ -88,8 +88,11 @@ class OnDemandTranslationServiceTests {
 			UUID.randomUUID(), "report.xml", 7, "content-hash", List.of(section)
 		);
 		return new DisclosureDetail(
-			RECEIPT_NUMBER, null, null, null, null, null, null, null, null, null,
-			null, null, null, false, null, null, null, List.of(document), List.of()
+			RECEIPT_NUMBER,
+			null, null, null, null, null, null, null, null,
+			null, null, null, null,
+			null, null, null, null, false, null, null, null,
+			List.of(document), List.of()
 		);
 	}
 }

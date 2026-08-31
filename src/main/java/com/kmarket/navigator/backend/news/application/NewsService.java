@@ -20,6 +20,8 @@ import com.kmarket.navigator.backend.global.error.ErrorCode;
 import com.kmarket.navigator.backend.news.application.port.NewsAiGateway;
 import com.kmarket.navigator.backend.news.application.port.NewsRepository;
 import com.kmarket.navigator.backend.news.domain.NewsArticle;
+import com.kmarket.navigator.backend.news.domain.NewsAnalysisStatus;
+import com.kmarket.navigator.backend.news.domain.NewsContentAvailability;
 import com.kmarket.navigator.backend.news.domain.NewsPage;
 import com.kmarket.navigator.backend.news.domain.NewsQuery;
 import com.kmarket.navigator.backend.news.domain.TermExplanation;
@@ -61,7 +63,17 @@ public class NewsService {
 
 	public NewsArticle findOne(UUID articleId) {
 		return repository.findById(articleId)
+			.filter(this::isPublished)
 			.orElseThrow(() -> new BusinessException(ErrorCode.NEWS_NOT_FOUND));
+	}
+
+	private boolean isPublished(NewsArticle article) {
+		return article.contentAvailability() == NewsContentAvailability.FULL_ARTICLE
+			&& article.originalBody() != null
+			&& !article.originalBody().isBlank()
+			&& article.analysisStatus() == NewsAnalysisStatus.READY
+			&& article.englishTitle() != null
+			&& !article.englishTitle().isBlank();
 	}
 
 	public TermExplanation explainTerm(

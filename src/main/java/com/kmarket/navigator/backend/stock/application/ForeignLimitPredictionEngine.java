@@ -30,7 +30,7 @@ public class ForeignLimitPredictionEngine {
 
 	public Optional<ForeignLimitPrediction> predict(List<ForeignOwnershipSnapshot> snapshots) {
 		List<ForeignOwnershipSnapshot> history = snapshots.stream()
-			.filter(snapshot -> snapshot.limitExhaustionRate() != null)
+			.filter(snapshot -> snapshot.ownershipRate() != null)
 			.sorted(Comparator.comparing(ForeignOwnershipSnapshot::baseDate))
 			.toList();
 		if (history.size() < 2) {
@@ -40,10 +40,10 @@ public class ForeignLimitPredictionEngine {
 		ForeignOwnershipSnapshot first = history.getFirst();
 		ForeignOwnershipSnapshot latest = history.getLast();
 		long windowDays = Math.max(1, ChronoUnit.DAYS.between(first.baseDate(), latest.baseDate()));
-		BigDecimal dailyTrend = latest.limitExhaustionRate()
-			.subtract(first.limitExhaustionRate())
+		BigDecimal dailyTrend = latest.ownershipRate()
+			.subtract(first.ownershipRate())
 			.divide(BigDecimal.valueOf(windowDays), 6, RoundingMode.HALF_UP);
-		BigDecimal base = clamp(latest.limitExhaustionRate().add(dailyTrend));
+		BigDecimal base = clamp(latest.ownershipRate().add(dailyTrend));
 		BigDecimal uncertainty = averageAbsoluteDailyChange(history).min(MAX_UNCERTAINTY);
 		BigDecimal confidence = new BigDecimal("0.5500")
 			.add(BigDecimal.valueOf(Math.min(history.size(), 30))
@@ -71,8 +71,8 @@ public class ForeignLimitPredictionEngine {
 			ForeignOwnershipSnapshot previous = history.get(index - 1);
 			ForeignOwnershipSnapshot current = history.get(index);
 			long days = Math.max(1, ChronoUnit.DAYS.between(previous.baseDate(), current.baseDate()));
-			sum = sum.add(current.limitExhaustionRate()
-				.subtract(previous.limitExhaustionRate())
+			sum = sum.add(current.ownershipRate()
+				.subtract(previous.ownershipRate())
 				.abs()
 				.divide(BigDecimal.valueOf(days), 6, RoundingMode.HALF_UP));
 		}

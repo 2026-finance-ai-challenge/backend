@@ -17,6 +17,7 @@
 | `GET` | `/api/v1/market/indices` | KOSPI·KOSDAQ·KOSPI 200 스냅샷 |
 | `GET` | `/api/v1/market/exchange-rates/USD` | 원/달러 환율 스냅샷과 데이터 상태 |
 | `GET` | `/api/v1/market/foreign-limits` | 4개 종목 한도 게이지와 Min/Base/Max 예측 |
+| `GET` | `/api/v1/market/foreign-net-flow` | KOSPI·KOSDAQ 합산 외국인 순매수와 동일 방향 연속 일수 |
 | `GET` | `/api/v1/market/stocks/{stockCode}/history` | 일별 OHLCV 차트 데이터 |
 | `GET` | `/api/v1/market/stocks/{stockCode}/global-peers` | 데이터 랭커와 OpenAI 구조화 설명 기반 글로벌 피어 분석 |
 
@@ -34,11 +35,13 @@
 | `STALE` | 실시간·지연으로 표시됐지만 기준 시각이 2분을 넘긴 값 |
 | `UNAVAILABLE` | 제공자 응답 또는 저장된 스냅샷이 없는 상태 |
 
-KIS REST 현재가는 실시간 WebSocket과 구분해 `DELAYED`로 표시한다. VI·단일가 등 실시간 상태를 확인할 수 없는 응답은 `tradingStatusAvailable=false`로 내려가며 정상으로 추정하지 않는다.
+KIS REST 현재가는 실시간 WebSocket과 구분해 `DELAYED`로 표시한다. VI·단일가 등 실시간 상태를 확인할 수 없는 응답은 `tradingStatusAvailable=false`로 내려가며 정상으로 추정하지 않는다. 외국인 한도 예측의 Min/Base/Max 단위는 한도 소진율이 아니라 외국인 보유율 `%`이며 정규장에만 노출한다. 장외에는 최신 실제 보유율을 사용하고, 법정 한도 대상이 아닌 종목에는 예측을 제공하지 않는다.
 
 ## KIS 수집
 
-서버는 [한국투자증권 공식 Open API 예제](https://github.com/koreainvestment/open-trading-api/tree/main/examples_llm/domestic_stock/inquire_price)의 현재가 계약을 사용한다. Access Token은 Redis에 유효기간보다 60초 짧게 저장하고 분산 잠금으로 중복 발급을 억제한다. 5회 연속 실패 시 1분 회로 차단을 적용한다.
+서버는 [한국투자증권 공식 Open API 예제](https://github.com/koreainvestment/open-trading-api/tree/main/examples_llm/domestic_stock)의 현재가·일별 시세·시장별 투자자 매매동향 계약을 사용한다. Access Token은 Redis에 유효기간보다 60초 짧게 저장하고 분산 잠금으로 중복 발급을 억제한다. 5회 연속 실패 시 1분 회로 차단을 적용한다. 일별 OHLCV는 시작 후와 평일 장 마감 후 갱신하고, KOSPI·KOSDAQ 외국인 순매수는 10분마다 멱등 저장한다.
+
+원/달러 환율은 Frankfurter v2의 `USD/KRW` 공식 일별 기준값을 10분마다 확인해 저장한다. 제공일 기준 종가 데이터이므로 `CLOSED` 상태로 반환한다.
 
 | 환경 변수 | 설명 |
 | --- | --- |

@@ -9,6 +9,8 @@ import com.kmarket.navigator.backend.disclosure.domain.DisclosureDetail;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureListQuery;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureInsight;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureSummary;
+import com.kmarket.navigator.backend.disclosure.domain.DisclosureSignalJob;
+import com.kmarket.navigator.backend.disclosure.domain.DocumentStatus;
 import com.kmarket.navigator.backend.disclosure.domain.IndexStatus;
 import com.kmarket.navigator.backend.disclosure.domain.ListedCommonStock;
 
@@ -44,9 +46,28 @@ public interface DisclosureRepository {
 
 	void markDocumentUnavailable(String receiptNumber, String errorCode);
 
+	Optional<DisclosureSignalJob> claimSignalJob(String workerId);
+
+	void completeSignalJob(String receiptNumber, com.kmarket.navigator.backend.news.domain.NewsAnalysis analysis);
+
+	void retrySignalJob(String receiptNumber, String errorCode, Duration delay);
+
 	List<DisclosureSummary> findAll(DisclosureListQuery query, int fetchSize);
 
 	Optional<DisclosureDetail> findByReceiptNumber(String receiptNumber);
+
+	default Optional<DisclosureDetail> findPublishedByReceiptNumber(String receiptNumber) {
+		return findByReceiptNumber(receiptNumber).filter(detail ->
+			detail.documentStatus() == DocumentStatus.READY
+				&& detail.indexStatus() == IndexStatus.READY
+				&& detail.titleEn() != null
+				&& !detail.titleEn().isBlank()
+				&& detail.eventType() != null
+				&& detail.sentiment() != null
+				&& detail.importance() != null
+				&& detail.marketImpact() != null
+		);
+	}
 
 	Optional<DisclosureInsight> findInsight(String receiptNumber, String contentVersionHash);
 

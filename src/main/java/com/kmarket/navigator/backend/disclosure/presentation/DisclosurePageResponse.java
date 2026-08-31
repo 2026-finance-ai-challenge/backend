@@ -10,6 +10,9 @@ import com.kmarket.navigator.backend.disclosure.domain.DisclosureType;
 import com.kmarket.navigator.backend.disclosure.domain.DocumentStatus;
 import com.kmarket.navigator.backend.disclosure.domain.IndexStatus;
 import com.kmarket.navigator.backend.disclosure.domain.Market;
+import com.kmarket.navigator.backend.news.domain.MarketImpact;
+import com.kmarket.navigator.backend.news.domain.NewsImportance;
+import com.kmarket.navigator.backend.news.domain.NewsSentiment;
 
 record DisclosurePageResponse(List<Item> items, String nextCursor) {
 
@@ -27,6 +30,10 @@ record DisclosurePageResponse(List<Item> items, String nextCursor) {
 		DisclosureType type,
 		String titleKo,
 		String titleEn,
+		String eventType,
+		NewsSentiment sentiment,
+		NewsImportance importance,
+		MarketImpact marketImpact,
 		LocalDate filedDate,
 		Instant detectedAt,
 		boolean correction,
@@ -45,6 +52,10 @@ record DisclosurePageResponse(List<Item> items, String nextCursor) {
 				summary.type(),
 				summary.titleKo(),
 				summary.titleEn(),
+				summary.eventType(),
+				summary.sentiment(),
+				summary.importance(),
+				summary.marketImpact(),
 				summary.filedDate(),
 				summary.detectedAt(),
 				summary.correction(),

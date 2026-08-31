@@ -8,7 +8,16 @@ import com.kmarket.navigator.backend.news.domain.TermReference;
 
 public interface NewsAiGateway {
 
-	NewsAnalysis analyze(String title, List<String> paragraphs, List<String> candidateCompanies);
+	default NewsAnalysis analyze(String title, List<String> paragraphs, List<String> candidateCompanies) {
+		return analyze(title, paragraphs, candidateCompanies, "NEWS");
+	}
+
+	NewsAnalysis analyze(
+		String title,
+		List<String> paragraphs,
+		List<String> candidateCompanies,
+		String sourceType
+	);
 
 	TermExplanation explainTerm(
 		String selectedText,

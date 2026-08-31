@@ -31,6 +31,7 @@ import com.kmarket.navigator.backend.disclosure.domain.DisclosureDocument;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureListQuery;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureInsight;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureSection;
+import com.kmarket.navigator.backend.disclosure.domain.DisclosureSignalJob;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureSummary;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureType;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureVersion;
@@ -39,6 +40,7 @@ import com.kmarket.navigator.backend.disclosure.domain.IndexStatus;
 import com.kmarket.navigator.backend.disclosure.domain.ListedCommonStock;
 import com.kmarket.navigator.backend.disclosure.domain.Market;
 import com.kmarket.navigator.backend.disclosure.domain.SectionKind;
+import com.kmarket.navigator.backend.news.domain.NewsAnalysis;
 
 @Repository
 class JdbcDisclosureRepository implements DisclosureRepository {
@@ -46,6 +48,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 	private static final String DOCUMENT_JOB = "DISCLOSURE_DOCUMENT";
 	private static final String EMBEDDING_JOB = "DISCLOSURE_EMBEDDING";
 	private static final String METADATA_EMBEDDING_JOB = "DISCLOSURE_METADATA_EMBEDDING";
+	private static final String SIGNAL_JOB = "DISCLOSURE_SIGNAL";
 	private static final String DOCUMENT_PARSER_VERSION = "opendart-html-v3";
 	private static final String OPEN_DART_DOCUMENT_PROVIDER = "OPEN_DART_DOCUMENT";
 
@@ -492,6 +495,24 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			.param("jobType", DOCUMENT_JOB)
 			.param("businessKey", receiptNumber)
 			.update();
+		jdbcClient.sql("""
+			INSERT INTO ingestion_job (
+			    id, job_type, business_key, status, attempts,
+			    available_at, created_at, updated_at
+			)
+			VALUES (
+			    :id, :jobType, :businessKey, 'PENDING', 0,
+			    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+			)
+			ON CONFLICT (job_type, business_key) DO UPDATE
+			SET status = 'PENDING', attempts = 0, available_at = CURRENT_TIMESTAMP,
+			    locked_at = NULL, locked_by = NULL, last_error_code = NULL,
+			    updated_at = CURRENT_TIMESTAMP
+			""")
+			.param("id", UUID.randomUUID())
+			.param("jobType", SIGNAL_JOB)
+			.param("businessKey", receiptNumber)
+			.update();
 	}
 
 	@Override
@@ -617,12 +638,120 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 	}
 
 	@Override
+	@Transactional
+	public Optional<DisclosureSignalJob> claimSignalJob(String workerId) {
+		Optional<SignalClaim> claim = jdbcClient.sql("""
+			WITH candidate AS (
+			    SELECT job.id
+			    FROM ingestion_job job
+			    JOIN disclosure disclosure ON disclosure.receipt_number = job.business_key
+			    WHERE job.job_type = :jobType
+			      AND job.available_at <= CURRENT_TIMESTAMP
+			      AND (
+			          job.status = 'PENDING'
+			          OR (job.status = 'PROCESSING'
+			              AND job.locked_at < CURRENT_TIMESTAMP - INTERVAL '15 minutes')
+			      )
+			    ORDER BY disclosure.filed_date DESC, disclosure.receipt_number DESC
+			    FOR UPDATE OF job SKIP LOCKED
+			    LIMIT 1
+			)
+			UPDATE ingestion_job job
+			SET status = 'PROCESSING', attempts = attempts + 1,
+			    locked_at = CURRENT_TIMESTAMP, locked_by = :workerId,
+			    updated_at = CURRENT_TIMESTAMP
+			FROM candidate
+			WHERE job.id = candidate.id
+			RETURNING job.business_key, job.attempts
+			""")
+			.param("jobType", SIGNAL_JOB)
+			.param("workerId", workerId)
+			.query((resultSet, rowNumber) -> new SignalClaim(
+				resultSet.getString("business_key"), resultSet.getInt("attempts")
+			))
+			.optional();
+		return claim.map(this::loadSignalJob);
+	}
+
+	@Override
+	@Transactional
+	public void completeSignalJob(String receiptNumber, NewsAnalysis analysis) {
+		jdbcClient.sql("""
+			UPDATE disclosure
+			SET event_type = :eventType, sentiment = :sentiment, importance = :importance,
+			    market_impact = :marketImpact,
+			    market_impact_importance = :marketImpactImportance,
+			    market_impact_score = :marketImpactScore,
+			    event_confidence = :eventConfidence,
+			    sentiment_confidence = :sentimentConfidence,
+			    importance_confidence = :importanceConfidence,
+			    market_impact_confidence = :marketImpactConfidence,
+			    analysis_status = 'READY', analysis_model_id = :modelId,
+			    analyzed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+			WHERE receipt_number = :receiptNumber
+			""")
+			.param("receiptNumber", receiptNumber)
+			.param("eventType", analysis.eventType())
+			.param("sentiment", analysis.sentiment().name())
+			.param("importance", analysis.importance().name())
+			.param("marketImpact", analysis.marketImpact().name())
+			.param("marketImpactImportance", analysis.marketImpactImportance().name())
+			.param("marketImpactScore", analysis.marketImpactScore())
+			.param("eventConfidence", analysis.eventConfidence())
+			.param("sentimentConfidence", analysis.sentimentConfidence())
+			.param("importanceConfidence", analysis.importanceConfidence())
+			.param("marketImpactConfidence", analysis.marketImpactConfidence())
+			.param("modelId", analysis.model())
+			.update();
+		jdbcClient.sql("""
+			UPDATE ingestion_job
+			SET status = 'COMPLETED', locked_at = NULL, locked_by = NULL,
+			    last_error_code = NULL, updated_at = CURRENT_TIMESTAMP
+			WHERE job_type = :jobType AND business_key = :businessKey
+			""")
+			.param("jobType", SIGNAL_JOB)
+			.param("businessKey", receiptNumber)
+			.update();
+	}
+
+	@Override
+	@Transactional
+	public void retrySignalJob(String receiptNumber, String errorCode, Duration delay) {
+		jdbcClient.sql("""
+			UPDATE ingestion_job
+			SET status = CASE WHEN attempts >= 5 THEN 'FAILED' ELSE 'PENDING' END,
+			    available_at = CURRENT_TIMESTAMP + (:delayMillis * INTERVAL '1 millisecond'),
+			    locked_at = NULL, locked_by = NULL, last_error_code = :errorCode,
+			    updated_at = CURRENT_TIMESTAMP
+			WHERE job_type = :jobType AND business_key = :businessKey
+			""")
+			.param("delayMillis", delay.toMillis())
+			.param("errorCode", abbreviate(errorCode, 100))
+			.param("jobType", SIGNAL_JOB)
+			.param("businessKey", receiptNumber)
+			.update();
+		jdbcClient.sql("""
+			UPDATE disclosure
+			SET analysis_status = CASE
+			        WHEN (SELECT attempts FROM ingestion_job
+			              WHERE job_type = :jobType AND business_key = :businessKey) >= 5
+			          THEN 'FAILED' ELSE 'PENDING' END,
+			    updated_at = CURRENT_TIMESTAMP
+			WHERE receipt_number = :businessKey
+			""")
+			.param("jobType", SIGNAL_JOB)
+			.param("businessKey", receiptNumber)
+			.update();
+	}
+
+	@Override
 	public List<DisclosureSummary> findAll(DisclosureListQuery query, int fetchSize) {
 		StringBuilder sql = new StringBuilder("""
 			SELECT d.receipt_number, i.dart_corp_code, i.name_ko, i.name_en,
 			       s.stock_code, COALESCE(s.market, 'UNKNOWN') AS market,
 			       d.disclosure_type, d.title_ko,
 			       CASE WHEN translation.status = 'READY' THEN translation.translated_text END AS title_en,
+			       d.event_type, d.sentiment, d.importance, d.market_impact,
 			       d.filed_date,
 			       d.detected_at, d.correction, d.document_status, d.index_status, d.official_url
 			FROM disclosure d
@@ -634,7 +763,13 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			 AND translation.source_hash = d.title_source_hash
 			 AND translation.target_locale = 'en'
 			 AND translation.translation_version = :translationVersion
+			 AND translation.status = 'READY'
+			 AND translation.translated_text IS NOT NULL
+			 AND btrim(translation.translated_text) <> ''
 			WHERE s.active AND s.common_stock
+			  AND d.document_status = 'READY'
+			  AND d.index_status = 'READY'
+			  AND d.analysis_status = 'READY'
 			""");
 		Map<String, Object> parameters = new LinkedHashMap<>();
 		parameters.put("translationVersion", DisclosureTitlePolicy.TRANSLATION_VERSION);
@@ -656,7 +791,8 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			       i.dart_corp_code, i.name_ko, i.name_en,
 			       s.stock_code, COALESCE(s.market, 'UNKNOWN') AS market,
 			       d.disclosure_type, d.title_ko,
-			       CASE WHEN translation.status = 'READY' THEN translation.translated_text END AS title_en,
+			       translation.translated_text AS title_en,
+			       d.event_type, d.sentiment, d.importance, d.market_impact,
 			       d.submitter,
 			       d.filed_date, d.detected_at, d.remark, d.correction,
 			       d.document_status, d.index_status, d.official_url
@@ -664,11 +800,11 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			JOIN issuer i ON i.id = d.issuer_id
 			JOIN security s ON s.id = d.security_id
 			JOIN service_stock_universe universe ON universe.stock_code = s.stock_code
-			LEFT JOIN translation_memory translation
+			JOIN translation_memory translation
 			  ON translation.content_kind = 'DISCLOSURE_TITLE'
 			 AND translation.source_hash = d.title_source_hash
 			 AND translation.target_locale = 'en'
-			 AND translation.translation_version = :translationVersion
+				 AND translation.translation_version = :translationVersion
 			WHERE d.receipt_number = :receiptNumber
 			  AND s.active AND s.common_stock
 			""")
@@ -936,6 +1072,68 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			.list();
 	}
 
+	private DisclosureSignalJob loadSignalJob(SignalClaim claim) {
+		SignalSource source = jdbcClient.sql("""
+			SELECT disclosure.title_ko, issuer.name_ko, issuer.name_en
+			FROM disclosure
+			JOIN issuer ON issuer.id = disclosure.issuer_id
+			WHERE disclosure.receipt_number = :receiptNumber
+			""")
+			.param("receiptNumber", claim.receiptNumber())
+			.query((resultSet, rowNumber) -> new SignalSource(
+				resultSet.getString("title_ko"),
+				resultSet.getString("name_ko"),
+				resultSet.getString("name_en")
+			))
+			.single();
+		List<byte[]> payloads = jdbcClient.sql("""
+			SELECT payload_zstd
+			FROM disclosure_document document
+			JOIN disclosure ON disclosure.id = document.disclosure_id
+			WHERE disclosure.receipt_number = :receiptNumber
+			  AND document.is_current = TRUE
+			  AND document.payload_zstd IS NOT NULL
+			ORDER BY document.created_at, document.source_filename
+			""")
+			.param("receiptNumber", claim.receiptNumber())
+			.query(byte[].class)
+			.list();
+		List<String> paragraphs = new ArrayList<>();
+		int totalChars = 0;
+		for (byte[] payload : payloads) {
+			for (DisclosureSection section : payloadCodec.decode(payload)) {
+				String value = String.join("\n",
+					java.util.stream.Stream.of(section.heading(), section.text(), section.tableData())
+						.filter(java.util.Objects::nonNull)
+						.filter(text -> !text.isBlank())
+						.toList()
+				).strip();
+				if (value.isBlank()) {
+					continue;
+				}
+				String bounded = value.substring(0, Math.min(value.length(), 12_000));
+				if (totalChars + bounded.length() > 120_000 || paragraphs.size() >= 200) {
+					break;
+				}
+				paragraphs.add(bounded);
+				totalChars += bounded.length();
+			}
+			if (totalChars >= 120_000 || paragraphs.size() >= 200) {
+				break;
+			}
+		}
+		if (paragraphs.isEmpty()) {
+			paragraphs.add(source.title());
+		}
+		List<String> companies = java.util.stream.Stream.of(source.nameKo(), source.nameEn())
+			.filter(java.util.Objects::nonNull)
+			.filter(value -> !value.isBlank())
+			.toList();
+		return new DisclosureSignalJob(
+			claim.receiptNumber(), source.title(), paragraphs, companies, claim.attempts()
+		);
+	}
+
 	private UUID upsertIssuer(String corpCode, String nameKo, String nameEn, String corporationClass) {
 		return jdbcClient.sql("""
 			INSERT INTO issuer (
@@ -1129,6 +1327,13 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			DisclosureType.fromCode(resultSet.getString("disclosure_type")),
 			resultSet.getString("title_ko"),
 			resultSet.getString("title_en"),
+			resultSet.getString("event_type"),
+			enumValue(com.kmarket.navigator.backend.news.domain.NewsSentiment.class,
+				resultSet.getString("sentiment")),
+			enumValue(com.kmarket.navigator.backend.news.domain.NewsImportance.class,
+				resultSet.getString("importance")),
+			enumValue(com.kmarket.navigator.backend.news.domain.MarketImpact.class,
+				resultSet.getString("market_impact")),
 			resultSet.getObject("filed_date", java.time.LocalDate.class),
 			resultSet.getObject("detected_at", OffsetDateTime.class).toInstant(),
 			resultSet.getBoolean("correction"),
@@ -1152,6 +1357,13 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			DisclosureType.fromCode(resultSet.getString("disclosure_type")),
 			resultSet.getString("title_ko"),
 			resultSet.getString("title_en"),
+			resultSet.getString("event_type"),
+			enumValue(com.kmarket.navigator.backend.news.domain.NewsSentiment.class,
+				resultSet.getString("sentiment")),
+			enumValue(com.kmarket.navigator.backend.news.domain.NewsImportance.class,
+				resultSet.getString("importance")),
+			enumValue(com.kmarket.navigator.backend.news.domain.MarketImpact.class,
+				resultSet.getString("market_impact")),
 			resultSet.getString("submitter"),
 			resultSet.getObject("filed_date", java.time.LocalDate.class),
 			resultSet.getObject("detected_at", OffsetDateTime.class).toInstant(),
@@ -1172,6 +1384,10 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 		return java.util.Arrays.stream(values)
 			.map(value -> value instanceof UUID id ? id : UUID.fromString(value.toString()))
 			.toList();
+	}
+
+	private <E extends Enum<E>> E enumValue(Class<E> type, String value) {
+		return value == null ? null : Enum.valueOf(type, value);
 	}
 
 	private static boolean isCorrection(OpenDartFiling filing) {
@@ -1205,6 +1421,10 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 		DisclosureType type,
 		String titleKo,
 		String titleEn,
+		String eventType,
+		com.kmarket.navigator.backend.news.domain.NewsSentiment sentiment,
+		com.kmarket.navigator.backend.news.domain.NewsImportance importance,
+		com.kmarket.navigator.backend.news.domain.MarketImpact marketImpact,
 		String submitter,
 		java.time.LocalDate filedDate,
 		Instant detectedAt,
@@ -1228,6 +1448,10 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 				type,
 				titleKo,
 				titleEn,
+				eventType,
+				sentiment,
+				importance,
+				marketImpact,
 				submitter,
 				filedDate,
 				detectedAt,
@@ -1249,5 +1473,11 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 		String contentHash,
 		byte[] payload
 	) {
+	}
+
+	private record SignalClaim(String receiptNumber, int attempts) {
+	}
+
+	private record SignalSource(String title, String nameKo, String nameEn) {
 	}
 }

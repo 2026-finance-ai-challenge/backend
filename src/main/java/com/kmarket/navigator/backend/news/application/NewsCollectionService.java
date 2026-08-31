@@ -17,6 +17,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import com.kmarket.navigator.backend.news.application.port.NewsOriginalArticleGateway;
 import com.kmarket.navigator.backend.news.application.port.NewsProviderGateway;
 import com.kmarket.navigator.backend.news.application.port.NewsRepository;
 import com.kmarket.navigator.backend.news.domain.CollectedNewsArticle;
@@ -33,6 +34,7 @@ public class NewsCollectionService {
 	private static final Logger log = LoggerFactory.getLogger(NewsCollectionService.class);
 	private static final int DUPLICATE_CANDIDATE_LIMIT = 50_000;
 	private final NewsProviderGateway provider;
+	private final NewsOriginalArticleGateway originalArticleGateway;
 	private final NewsRepository repository;
 	private final NewsFingerprint fingerprint;
 	private final NewsStockMatcher stockMatcher;
@@ -42,16 +44,18 @@ public class NewsCollectionService {
 	@Autowired
 	public NewsCollectionService(
 		NewsProviderGateway provider,
+		NewsOriginalArticleGateway originalArticleGateway,
 		NewsRepository repository,
 		NewsFingerprint fingerprint,
 		NewsStockMatcher stockMatcher,
 		NaverNewsProperties properties
 	) {
-		this(provider, repository, fingerprint, stockMatcher, properties, Clock.systemUTC());
+		this(provider, originalArticleGateway, repository, fingerprint, stockMatcher, properties, Clock.systemUTC());
 	}
 
 	NewsCollectionService(
 		NewsProviderGateway provider,
+		NewsOriginalArticleGateway originalArticleGateway,
 		NewsRepository repository,
 		NewsFingerprint fingerprint,
 		NewsStockMatcher stockMatcher,
@@ -59,6 +63,7 @@ public class NewsCollectionService {
 		Clock clock
 	) {
 		this.provider = provider;
+		this.originalArticleGateway = originalArticleGateway;
 		this.repository = repository;
 		this.fingerprint = fingerprint;
 		this.stockMatcher = stockMatcher;
@@ -122,9 +127,22 @@ public class NewsCollectionService {
 			|| article.publishedAt().isAfter(now.plus(Duration.ofMinutes(15)))) {
 			return;
 		}
-		String canonicalUrl = fingerprint.canonicalizeUrl(article.canonicalUrl());
+		Map<String, BigDecimal> preliminaryMatches = stockMatcher.matchArticle(
+			article.title(),
+			article.excerpt(),
+			mappings
+		);
+		if (preliminaryMatches.isEmpty()
+			|| (queryStockCode != null && !preliminaryMatches.containsKey(queryStockCode))) {
+			return;
+		}
+		var original = originalArticleGateway.fetch(article.originalUrl()).orElse(null);
+		if (original == null || original.body() == null || original.body().isBlank()) {
+			return;
+		}
+		String canonicalUrl = fingerprint.canonicalizeUrl(original.canonicalUrl());
 		String normalizedTitle = fingerprint.normalize(article.title());
-		NewsFingerprint.Profile incoming = fingerprint.profile(article.title(), article.excerpt());
+		NewsFingerprint.Profile incoming = fingerprint.profile(article.title(), original.body());
 		NewsDuplicateIndex.Match duplicate = duplicateIndex.findBest(
 			incoming,
 			article.publishedAt(),
@@ -136,7 +154,7 @@ public class NewsCollectionService {
 			: UUID.randomUUID();
 		Map<String, BigDecimal> stockMatches = stockMatcher.matchArticle(
 			article.title(),
-			article.excerpt(),
+			original.body(),
 			mappings
 		);
 		if (stockMatches.isEmpty()
@@ -156,12 +174,13 @@ public class NewsCollectionService {
 			normalizedTitle,
 			article.providerArticleId(),
 			article.title(),
-			article.excerpt(),
+			original.body(),
 			article.originalUrl(),
 			canonicalUrl,
 			fingerprint.sha256(canonicalUrl),
 			article.publisher(),
-			article.thumbnailUrl(),
+			original.thumbnailUrl(),
+			original.sourcePolicy(),
 			article.publishedAt(),
 			now,
 			BigDecimal.valueOf(bestScore),

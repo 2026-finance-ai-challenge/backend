@@ -3,6 +3,10 @@ package com.kmarket.navigator.backend.disclosure.domain;
 import java.time.Instant;
 import java.time.LocalDate;
 
+import com.kmarket.navigator.backend.news.domain.MarketImpact;
+import com.kmarket.navigator.backend.news.domain.NewsImportance;
+import com.kmarket.navigator.backend.news.domain.NewsSentiment;
+
 public record DisclosureSummary(
 	String receiptNumber,
 	String corpCode,
@@ -13,6 +17,10 @@ public record DisclosureSummary(
 	DisclosureType type,
 	String titleKo,
 	String titleEn,
+	String eventType,
+	NewsSentiment sentiment,
+	NewsImportance importance,
+	MarketImpact marketImpact,
 	LocalDate filedDate,
 	Instant detectedAt,
 	boolean correction,
