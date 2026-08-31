@@ -20,6 +20,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -74,6 +75,7 @@ import com.kmarket.navigator.backend.news.application.port.NewsAiGateway;
 import com.kmarket.navigator.backend.news.application.port.NewsRepository;
 import com.kmarket.navigator.backend.news.domain.TermExplanation;
 import com.kmarket.navigator.backend.news.domain.TermReference;
+import com.kmarket.navigator.backend.news.domain.NewsRetention;
 import com.kmarket.navigator.backend.news.infrastructure.naver.NaverNewsProperties;
 import com.kmarket.navigator.backend.chat.application.ChatGenerationWorker;
 import com.kmarket.navigator.backend.chat.application.port.AgentGateway;
@@ -196,6 +198,8 @@ class BackendApplicationTests {
 		assertThat(naverNewsProperties.getConnectTimeout()).isEqualTo(Duration.ofSeconds(10));
 		assertThat(naverNewsProperties.getReadTimeout()).isEqualTo(Duration.ofSeconds(30));
 		assertThat(naverNewsProperties.getMaxArticleAge()).isEqualTo(Duration.ofHours(72));
+		assertThat(naverNewsProperties.getTargetBatchSize()).isEqualTo(75);
+		assertThat(naverNewsProperties.getQueries()).isEmpty();
 		assertThat(openDartProperties.connectTimeout()).isEqualTo(Duration.ofSeconds(5));
 		assertThat(openDartProperties.readTimeout()).isEqualTo(Duration.ofSeconds(150));
 	}
@@ -1294,8 +1298,7 @@ class BackendApplicationTests {
 		mockMvc.perform(get("/api/v1/news")
 				.param("query", "second publisher"))
 			.andExpect(status().isOk())
-			.andExpect(jsonPath("$.items.length()").value(1))
-			.andExpect(jsonPath("$.items[0].id").value(firstArticleId.toString()));
+			.andExpect(jsonPath("$.items.length()").value(0));
 
 		mockMvc.perform(get("/api/v1/news")
 				.param("stockCode", "005930")
@@ -1352,6 +1355,9 @@ class BackendApplicationTests {
 			publishedAt.plusSeconds(600),
 			"HIGH"
 		);
+		jdbcClient.sql("UPDATE news_article SET publisher = 'wire.example.com' WHERE id = :id")
+			.param("id", duplicateArticleId)
+			.update();
 		jdbcClient.sql("""
 			UPDATE news_article SET collected_at = CURRENT_TIMESTAMP
 			WHERE id IN (:first, :second)
@@ -1374,6 +1380,48 @@ class BackendApplicationTests {
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.items.length()").value(1))
 			.andExpect(jsonPath("$.items[0].relatedCoverageCount").value(2));
+	}
+
+	@Test
+	void appliesNewsMaintenanceWithPhysicalDeletionAndExactStockMappings() {
+		UUID retainedArticleId = insertReadyNews(
+			"삼성전자 HBM 생산 투자 확대",
+			"삼성전자는 평택 생산라인의 차세대 HBM 설비 투자를 확대한다고 발표했다.",
+			Instant.now().minusSeconds(120),
+			"HIGH"
+		);
+		UUID deletedArticleId = insertReadyNews(
+			"유럽 축구 리그 결승전 결과",
+			"우승팀이 연장전 끝에 승리했다.",
+			Instant.now().minusSeconds(60),
+			"LOW"
+		);
+		UUID clusterId = UUID.randomUUID();
+		String version = "test-maintenance-" + UUID.randomUUID();
+
+		newsRepository.applyNewsMaintenance(
+			version,
+			List.of(new NewsRetention(
+				retainedArticleId,
+				clusterId,
+				clusterId.toString().replace("-", "").repeat(2),
+				"삼성전자 hbm 생산 투자 확대",
+				Map.of("005930", new BigDecimal("0.95"))
+			)),
+			List.of(deletedArticleId),
+			Instant.now()
+		);
+
+		assertThat(newsRepository.newsMaintenanceApplied(version)).isTrue();
+		assertThat(jdbcClient.sql("SELECT COUNT(*) FROM news_article WHERE id = :id")
+			.param("id", deletedArticleId)
+			.query(Long.class)
+			.single()).isZero();
+		var retained = newsRepository.findById(retainedArticleId).orElseThrow();
+		assertThat(retained.clusterId()).isEqualTo(clusterId);
+		assertThat(retained.relatedStocks())
+			.extracting(stock -> stock.stockCode())
+			.containsExactly("005930");
 	}
 
 	@Test

@@ -15,12 +15,12 @@ public class NaverNewsProperties {
 	private String clientId = "";
 	private String clientSecret = "";
 	private int display = 20;
-	private int targetBatchSize = 8;
+	private int targetBatchSize = 75;
 	private Duration connectTimeout = Duration.ofSeconds(10);
 	private Duration readTimeout = Duration.ofSeconds(30);
 	private Duration requestDelay = Duration.ofMillis(125);
 	private Duration maxArticleAge = Duration.ofHours(72);
-	private List<String> queries = new ArrayList<>(List.of("코스피", "코스닥", "한국 증시"));
+	private List<String> queries = new ArrayList<>();
 
 	public boolean configured() {
 		return enabled && !clientId.isBlank() && !clientSecret.isBlank();
@@ -114,6 +114,12 @@ public class NaverNewsProperties {
 	}
 
 	public void setQueries(List<String> queries) {
-		this.queries = queries == null ? new ArrayList<>() : new ArrayList<>(queries);
+		this.queries = queries == null
+			? new ArrayList<>()
+			: queries.stream()
+				.filter(query -> query != null && !query.isBlank())
+				.map(String::strip)
+				.distinct()
+				.collect(java.util.stream.Collectors.toCollection(ArrayList::new));
 	}
 }

@@ -5,10 +5,9 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.locks.LockSupport;
 
@@ -87,15 +86,13 @@ public class NewsCollectionService {
 			candidate.publishedAt(),
 			candidate.publisher()
 		));
-		Set<String> queries = new LinkedHashSet<>(properties.getQueries());
+		Map<String, String> queries = new LinkedHashMap<>();
+		properties.getQueries().forEach(query -> queries.put(query, null));
 		List<NewsCollectionTarget> targets = repository.findCollectionTargets(properties.getTargetBatchSize());
-		targets.forEach(target -> queries.add(target.nameKo()));
-		for (String query : queries) {
-			String queryStockCode = targets.stream()
-				.filter(target -> target.nameKo().equals(query))
-				.map(NewsCollectionTarget::stockCode)
-				.findFirst()
-				.orElse(null);
+		targets.forEach(target -> queries.put(target.nameKo(), target.stockCode()));
+		for (var queryEntry : queries.entrySet()) {
+			String query = queryEntry.getKey();
+			String queryStockCode = queryEntry.getValue();
 			try {
 				for (CollectedNewsArticle article : provider.search(query, properties.getDisplay())) {
 					store(article, queryStockCode, mappings, duplicateIndex);
@@ -139,9 +136,16 @@ public class NewsCollectionService {
 			: UUID.randomUUID();
 		Map<String, BigDecimal> stockMatches = stockMatcher.match(
 			article.title() + " " + article.excerpt(),
-			mappings,
-			queryStockCode
+			mappings
 		);
+		if (stockMatches.isEmpty()
+			|| (queryStockCode != null && !stockMatches.containsKey(queryStockCode))) {
+			return;
+		}
+		if (duplicate.targetClusterId() != null) {
+			repository.addClusterStockMappings(duplicate.targetClusterId(), stockMatches);
+			return;
+		}
 		NewsDraft draft = new NewsDraft(
 			UUID.randomUUID(),
 			clusterId,
