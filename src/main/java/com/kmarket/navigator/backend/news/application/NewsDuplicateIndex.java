@@ -85,13 +85,17 @@ final class NewsDuplicateIndex {
 		Entry candidate,
 		NewsFingerprint.DuplicateMatch match
 	) {
+		boolean exactTitleInSameEdition = profile.normalizedTitle().length() >= 12
+			&& profile.normalizedTitle().equals(candidate.profile().normalizedTitle())
+			&& Duration.between(publishedAt, candidate.publishedAt()).abs()
+				.compareTo(Duration.ofHours(12)) <= 0;
 		boolean exactExcerpt = profile.normalizedExcerpt().length() >= 80
 			&& profile.normalizedExcerpt().equals(candidate.profile().normalizedExcerpt());
 		boolean exactSpecificTitle = profile.titleTokens().size() >= 5
 			&& profile.normalizedTitle().equals(candidate.profile().normalizedTitle())
 			&& match.excerptScore() >= 0.75
 			&& Duration.between(publishedAt, candidate.publishedAt()).abs().compareTo(Duration.ofHours(12)) <= 0;
-		return exactExcerpt || exactSpecificTitle;
+		return exactTitleInSameEdition || exactExcerpt || exactSpecificTitle;
 	}
 
 	private boolean corroboratedByDifferentPublisher(
@@ -107,10 +111,8 @@ final class NewsDuplicateIndex {
 		}
 		boolean exactExcerpt = profile.normalizedExcerpt().length() >= 80
 			&& profile.normalizedExcerpt().equals(candidate.profile().normalizedExcerpt());
-		boolean exactSpecificTitle = Math.min(
-			profile.titleTokens().size(),
-			candidate.profile().titleTokens().size()
-		) >= 5 && profile.normalizedTitle().equals(candidate.profile().normalizedTitle());
+		boolean exactSpecificTitle = profile.normalizedTitle().length() >= 12
+			&& profile.normalizedTitle().equals(candidate.profile().normalizedTitle());
 		return exactExcerpt || exactSpecificTitle;
 	}
 

@@ -55,6 +55,39 @@ class NewsStockMatcherTests {
 			.containsOnlyKeys("005930", "000660");
 	}
 
+	@Test
+	void rejectsAmbiguousShortEnglishNameFoundOnlyInSportsExcerpt() {
+		var mappings = List.of(mapping("034730", "SK", "SK Inc."));
+
+		assertThat(matcher.matchArticle(
+			"NORWAY SOCCER",
+			"Football match between SK Brann and PAOK at Brann Stadium",
+			mappings
+		)).isEmpty();
+	}
+
+	@Test
+	void acceptsAmbiguousShortNameInArticleTitle() {
+		var mappings = List.of(mapping("034730", "SK", "SK Inc."));
+
+		assertThat(matcher.matchArticle(
+			"SK, 반도체 투자 확대 검토",
+			"그룹은 장기 성장 계획을 공개했다",
+			mappings
+		)).containsOnlyKeys("034730");
+	}
+
+	@Test
+	void acceptsUnambiguousCompanyNameInExcerpt() {
+		var mappings = List.of(mapping("005930", "삼성전자", "Samsung Electronics"));
+
+		assertThat(matcher.matchArticle(
+			"반도체 업계 설비 투자 확대",
+			"삼성전자는 신규 생산라인 구축 계획을 발표했다",
+			mappings
+		)).containsOnlyKeys("005930");
+	}
+
 	private NewsStockMapping mapping(String stockCode, String nameKo, String nameEn) {
 		return new NewsStockMapping(stockCode, nameKo, nameEn, "KOSPI", List.of(
 			stockCode,

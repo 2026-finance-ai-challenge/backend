@@ -21,6 +21,31 @@ public class NewsStockMatcher {
 		String text,
 		Iterable<NewsStockMapping> mappings
 	) {
+		return matchText(text, mappings);
+	}
+
+	public Map<String, BigDecimal> matchArticle(
+		String title,
+		String excerpt,
+		Iterable<NewsStockMapping> mappings
+	) {
+		List<NewsStockMapping> mappingList = new ArrayList<>();
+		mappings.forEach(mappingList::add);
+		Map<String, BigDecimal> matches = new LinkedHashMap<>(matchText(title, mappingList));
+		Map<String, BigDecimal> excerptMatches = matchText(excerpt, mappingList);
+		for (NewsStockMapping mapping : mappingList) {
+			BigDecimal confidence = excerptMatches.get(mapping.stockCode());
+			if (confidence != null && isUnambiguous(mapping)) {
+				matches.merge(mapping.stockCode(), confidence, BigDecimal::max);
+			}
+		}
+		return Map.copyOf(matches);
+	}
+
+	private Map<String, BigDecimal> matchText(
+		String text,
+		Iterable<NewsStockMapping> mappings
+	) {
 		String lower = text == null ? "" : text.toLowerCase(Locale.ROOT);
 		List<Evidence> evidence = new ArrayList<>();
 		for (NewsStockMapping mapping : mappings) {
@@ -41,6 +66,12 @@ public class NewsStockMatcher {
 			matches.merge(candidate.stockCode(), candidate.confidence(), BigDecimal::max);
 		}
 		return Map.copyOf(matches);
+	}
+
+	private boolean isUnambiguous(NewsStockMapping mapping) {
+		String nameKo = mapping.nameKo() == null ? "" : mapping.nameKo().strip();
+		long koreanLetters = nameKo.codePoints().filter(this::isKorean).count();
+		return koreanLetters >= 3;
 	}
 
 	private void addEvidence(

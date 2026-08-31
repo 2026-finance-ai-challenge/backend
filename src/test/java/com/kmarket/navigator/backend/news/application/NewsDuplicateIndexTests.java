@@ -107,4 +107,31 @@ class NewsDuplicateIndexTests {
 
 		assertThat(match.targetClusterId()).isNull();
 	}
+
+	@Test
+	void mergesSamePublisherSameHeadlineWithinOneEdition() {
+		UUID clusterId = UUID.randomUUID();
+		Instant publishedAt = Instant.parse("2026-08-29T00:00:00Z");
+		NewsDuplicateIndex index = new NewsDuplicateIndex(fingerprint);
+		index.add(
+			clusterId,
+			fingerprint.profile(
+				"삼전닉스 성장과 주주환원 효과 더 누리는 투자법",
+				"삼성전자 실적과 배당 정책을 분석한 첫 번째 기사 요약"
+			),
+			publishedAt,
+			"same.example.com"
+		);
+
+		NewsDuplicateIndex.Match match = index.findBest(
+			fingerprint.profile(
+				"삼전닉스 성장과 주주환원 효과 더 누리는 투자법",
+				"동일 기사에 포함된 다른 문단을 노출한 두 번째 기사 요약"
+			),
+			publishedAt.plusSeconds(60),
+			"www.same.example.com"
+		);
+
+		assertThat(match.targetClusterId()).isEqualTo(clusterId);
+	}
 }
