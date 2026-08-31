@@ -25,7 +25,7 @@ import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 public class NewsDataMaintenanceService {
 
 	private static final Logger log = LoggerFactory.getLogger(NewsDataMaintenanceService.class);
-	static final String VERSION = "news-relevance-dedup-v2";
+	static final String VERSION = "news-relevance-dedup-v3";
 	private static final int ARTICLE_LIMIT = 100_000;
 	private final NewsRepository repository;
 	private final NewsFingerprint fingerprint;
@@ -78,8 +78,9 @@ public class NewsDataMaintenanceService {
 		NewsDuplicateIndex duplicateIndex = new NewsDuplicateIndex(fingerprint);
 		var mappings = repository.findStockMappings();
 		for (NewsDuplicateCandidate candidate : candidates) {
-			var stockMatches = stockMatcher.match(
-				candidate.title() + " " + candidate.excerpt(),
+			var stockMatches = stockMatcher.matchArticle(
+				candidate.title(),
+				candidate.excerpt(),
 				mappings
 			);
 			if (stockMatches.isEmpty()) {

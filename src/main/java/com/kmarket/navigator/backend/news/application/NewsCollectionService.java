@@ -134,8 +134,9 @@ public class NewsCollectionService {
 		UUID clusterId = duplicate.targetClusterId() != null
 			? duplicate.targetClusterId()
 			: UUID.randomUUID();
-		Map<String, BigDecimal> stockMatches = stockMatcher.match(
-			article.title() + " " + article.excerpt(),
+		Map<String, BigDecimal> stockMatches = stockMatcher.matchArticle(
+			article.title(),
+			article.excerpt(),
 			mappings
 		);
 		if (stockMatches.isEmpty()
