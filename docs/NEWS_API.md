@@ -13,8 +13,8 @@
 - Naver 검색 결과의 제목·요약은 원문 후보 선별에만 사용하고 DB에는 저장하지 않는다. 언론사 공개 페이지에서 추출·정제한 원문 전문, 정규 URL, 대표 이미지를 함께 확보하지 못한 기사는 폐기한다.
 - 원문 요청은 HTTP(S) 80/443만 허용하고 DNS 결과의 로컬·사설·링크 로컬 주소를 차단한다. 리디렉션마다 동일 검증을 다시 수행하며 응답 크기·리디렉션 횟수·본문 길이를 제한한다.
 - 목록용 영어 제목은 수집 후 비동기 작업으로 생성하고 정규화 제목 해시 기반 번역 메모리에서 재사용한다.
-- 기사 본문 또는 검색 요약의 영어 번역과 What/Why/Impact는 사용자가 상세·AI Insight를 처음 요청할 때만 생성하고 원문 해시 기준으로 저장한다.
-- 수집 트랜잭션은 OpenAI 응답을 기다리지 않으며 본문 일괄 선번역을 수행하지 않는다.
+- 최근 1시간 내 원문·분류·영문 제목이 준비된 대표 기사는 영어 본문과 What/Why/Impact를 같은 작업에서 자동 생성하고 원문 해시 기준으로 저장한다.
+- 수집 트랜잭션은 OpenAI 응답을 기다리지 않으며 최근 1시간 범위의 별도 작업 큐가 번역과 요약을 처리한다.
 - 이벤트·감성·의미 중요도는 하나금융 프로젝트의 승인된 금융 NLP 모델이 계산한다.
 - 시장영향 중요도와 점수는 배포 gate를 통과한 K-FNSPID 모델이 계산한다.
 - 시장영향 방향(`POSITIVE`, `NEUTRAL`, `NEGATIVE`, `UNCERTAIN`)과 중요도(`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`)는 다른 필드다.
@@ -30,7 +30,7 @@
 | `POST` | `/api/v1/news/{articleId}/translation` | 영어 본문·What/Why/Impact 온디맨드 생성 요청 또는 캐시 재사용 |
 | `POST` | `/api/v1/news/{articleId}/term-explanations` | 기사에서 실제 선택한 텍스트의 금융 문맥 해설 |
 
-목록 정렬은 `LATEST`, `IMPORTANCE`, `MARKET_IMPACT`를 지원한다. `MARKET_IMPACT`는 방향이 아니라 K-FNSPID 점수를 기준으로 정렬한다. 검색·종목·관심종목 필터는 대표 기사 자체와 검증된 종목 연결을 대상으로 적용한다. `watchlist=true`는 인증 사용자의 관심종목 연관 기사만 반환하며 서버가 소유권을 검증한다. 다음 페이지는 응답의 `nextCursor`를 그대로 전달한다. 공개 API는 `FULL_ARTICLE`, 제목 번역 `READY`, 분류 `READY`가 모두 충족된 기사만 반환한다.
+목록 정렬은 `LATEST`, `IMPORTANCE`, `MARKET_IMPACT`를 지원한다. `MARKET_IMPACT`는 방향이 아니라 K-FNSPID 점수를 기준으로 정렬한다. 검색·종목·관심종목 필터는 대표 기사 자체와 검증된 종목 연결을 대상으로 적용한다. `watchlist=true`는 인증 사용자의 관심종목 연관 기사만 반환하며 서버가 소유권을 검증한다. 다음 페이지는 응답의 `nextCursor`를 그대로 전달한다. 공개 API는 `FULL_ARTICLE`, 제목 번역 `READY`, 분류 `READY`, 영어 본문과 What/Why/Impact가 모두 충족된 기사만 반환한다.
 
 주요 응답 필드는 `sentiment`, `importance`, `marketImpact`, `marketImpactImportance`, `marketImpactScore`, 각 confidence, 모델·프롬프트 버전이다. 감성·의미 중요도·시장영향 중요도를 하나의 값으로 합치지 않는다.
 
@@ -75,4 +75,4 @@
 
 OpenAI 모델과 프롬프트 버전은 AI 서비스의 `KMARKET_AI_NEWS_MODEL`, `KMARKET_AI_NEWS_PROMPT_VERSION`, `KMARKET_AI_TERM_PROMPT_VERSION`으로 관리한다. 분류 런타임은 Hana 프로젝트 경로, 허용 commit과 모델 SHA-256으로 고정한다. KF-DeBERTa v6 후보는 공식 gate가 `KEEP_CURRENT_MODEL`이므로 활성 모델로 표기하지 않는다. API 키는 AI 서비스에만 주입하며 브라우저나 Backend 응답에 포함하지 않는다.
 
-뉴스 수집은 원문과 제목 번역 작업만 저장하며 생성 응답을 기다리지 않는다. 분류 워커는 로컬 금융 모델 신호만 저장하고, 제목 워커는 최대 25개를 구조화 번역한다. 본문·What/Why/Impact는 상세 화면의 명시적 요청이 있을 때만 별도 작업으로 생성한다.
+뉴스 수집은 원문과 제목 번역 작업만 저장하며 생성 응답을 기다리지 않는다. 분류 워커는 로컬 금융 모델 신호만 저장하고, 제목 워커는 최대 25개를 구조화 번역한다. 최근 1시간 내 완결된 대표 기사의 본문·What/Why/Impact는 별도 작업에서 자동 생성하며 상세 요청은 같은 캐시를 멱등 재사용한다.
