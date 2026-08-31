@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd /opt/kmarket
-
 # 콘텐츠나 비밀값 없이 파이프라인 단계별 건수만 배포 로그에 남긴다.
-docker compose --env-file runtime.env -f compose.prod.yaml exec -T postgres \
+docker exec -i kmarket-postgres-1 \
   psql -U kmarket -d kmarket -At -v ON_ERROR_STOP=1 <<'SQL'
 SELECT 'news.collected_1h=' || count(*)
 FROM news_article
