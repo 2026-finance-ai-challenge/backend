@@ -173,7 +173,8 @@ class JdbcTranslationRepository implements TranslationRepository {
 			    SET status = 'PROCESSING', attempts = attempts + 1,
 			        locked_at = :now, locked_by = :workerId, updated_at = :now
 			    FROM selected WHERE job.translation_memory_id = selected.translation_memory_id
-			    RETURNING job.translation_memory_id, job.attempts
+			    RETURNING job.translation_memory_id, job.attempts,
+			              job.priority, job.available_at
 			), marked AS (
 			    UPDATE translation_memory memory
 			    SET status = 'PROCESSING', updated_at = :now
@@ -184,7 +185,7 @@ class JdbcTranslationRepository implements TranslationRepository {
 			)
 			SELECT marked.*, claimed.attempts
 			FROM marked JOIN claimed ON claimed.translation_memory_id = marked.id
-			ORDER BY marked.id
+			ORDER BY claimed.priority, claimed.available_at, marked.id
 			""")
 			.param("now", atUtc(now))
 			.param("workerId", workerId)
