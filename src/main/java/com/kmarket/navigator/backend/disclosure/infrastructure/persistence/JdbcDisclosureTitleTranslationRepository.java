@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.kmarket.navigator.backend.disclosure.application.port.DisclosureTitleTranslationRepository;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureTitleTranslationJob;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureTitleTranslationSource;
+import com.kmarket.navigator.backend.global.text.EnglishTextPolicy;
 
 @Repository
 class JdbcDisclosureTitleTranslationRepository implements DisclosureTitleTranslationRepository {
@@ -118,6 +119,7 @@ class JdbcDisclosureTitleTranslationRepository implements DisclosureTitleTransla
 		String promptVersion,
 		Instant generatedAt
 	) {
+		EnglishTextPolicy.requireValid(translatedTitle);
 		int updated = jdbcClient.sql("""
 			UPDATE translation_memory
 			SET translated_text = :translatedTitle, status = 'READY',
