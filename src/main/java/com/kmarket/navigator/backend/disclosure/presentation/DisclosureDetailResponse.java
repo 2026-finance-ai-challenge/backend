@@ -14,6 +14,9 @@ import com.kmarket.navigator.backend.disclosure.domain.DocumentStatus;
 import com.kmarket.navigator.backend.disclosure.domain.IndexStatus;
 import com.kmarket.navigator.backend.disclosure.domain.Market;
 import com.kmarket.navigator.backend.disclosure.domain.SectionKind;
+import com.kmarket.navigator.backend.news.domain.MarketImpact;
+import com.kmarket.navigator.backend.news.domain.NewsImportance;
+import com.kmarket.navigator.backend.news.domain.NewsSentiment;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -28,6 +31,10 @@ record DisclosureDetailResponse(
 	DisclosureType type,
 	String titleKo,
 	String titleEn,
+	String eventType,
+	NewsSentiment sentiment,
+	NewsImportance importance,
+	MarketImpact marketImpact,
 	String submitter,
 	LocalDate filedDate,
 	Instant detectedAt,
@@ -50,6 +57,10 @@ record DisclosureDetailResponse(
 			detail.type(),
 			detail.titleKo(),
 			detail.titleEn(),
+			detail.eventType(),
+			detail.sentiment(),
+			detail.importance(),
+			detail.marketImpact(),
 			detail.submitter(),
 			detail.filedDate(),
 			detail.detectedAt(),

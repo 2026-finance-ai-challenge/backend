@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 
 import com.kmarket.navigator.backend.disclosure.application.DisclosureCollectionHandler;
 import com.kmarket.navigator.backend.disclosure.application.DisclosureDocumentHandler;
+import com.kmarket.navigator.backend.disclosure.application.DisclosureSignalHandler;
 
 @Component
 @Profile("!test & !backfill & !title-backfill")
@@ -24,15 +25,18 @@ class DisclosureScheduler {
 
 	private final DisclosureCollectionHandler collectionHandler;
 	private final DisclosureDocumentHandler documentHandler;
+	private final DisclosureSignalHandler signalHandler;
 	private final Clock clock;
 
 	DisclosureScheduler(
 		DisclosureCollectionHandler collectionHandler,
 		DisclosureDocumentHandler documentHandler,
+		DisclosureSignalHandler signalHandler,
 		Clock clock
 	) {
 		this.collectionHandler = collectionHandler;
 		this.documentHandler = documentHandler;
+		this.signalHandler = signalHandler;
 		this.clock = clock;
 	}
 
@@ -64,5 +68,11 @@ class DisclosureScheduler {
 	@SchedulerLock(name = "processDisclosureDocuments", lockAtMostFor = "PT3M")
 	void processDisclosureDocuments() {
 		documentHandler.processNext();
+	}
+
+	@Scheduled(fixedDelay = 2_000, initialDelay = 15_000)
+	@SchedulerLock(name = "processDisclosureSignals", lockAtMostFor = "PT3M")
+	void processDisclosureSignals() {
+		signalHandler.processNext();
 	}
 }

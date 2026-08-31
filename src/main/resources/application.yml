@@ -121,11 +121,18 @@ kmarket:
       connect-timeout: ${KMARKET_NAVER_NEWS_CONNECT_TIMEOUT:10s}
       read-timeout: ${KMARKET_NAVER_NEWS_READ_TIMEOUT:30s}
       request-delay: ${KMARKET_NAVER_NEWS_REQUEST_DELAY:125ms}
-      max-article-age: ${KMARKET_NEWS_MAX_ARTICLE_AGE:72h}
+      max-article-age: ${KMARKET_NEWS_MAX_ARTICLE_AGE:1h}
       queries: ${KMARKET_NAVER_NEWS_QUERIES:}
   market:
     collection-interval: ${KMARKET_MARKET_COLLECTION_INTERVAL:60s}
     collection-initial-delay: ${KMARKET_MARKET_COLLECTION_INITIAL_DELAY:15s}
+    reference-interval: ${KMARKET_MARKET_REFERENCE_INTERVAL:10m}
+    history-cron: ${KMARKET_MARKET_HISTORY_CRON:0 20 18 * * MON-FRI}
+    frankfurter:
+      enabled: ${KMARKET_FRANKFURTER_ENABLED:true}
+      base-url: ${KMARKET_FRANKFURTER_BASE_URL:https://api.frankfurter.dev}
+      connect-timeout: ${KMARKET_FRANKFURTER_CONNECT_TIMEOUT:3s}
+      read-timeout: ${KMARKET_FRANKFURTER_READ_TIMEOUT:10s}
     kis:
       enabled: ${KMARKET_KIS_ENABLED:false}
       base-url: ${KMARKET_KIS_BASE_URL:https://openapi.koreainvestment.com:9443}

@@ -10,6 +10,7 @@ import com.kmarket.navigator.backend.stock.domain.ForeignLimitPolicy;
 import com.kmarket.navigator.backend.stock.domain.ForeignOwnershipSnapshot;
 import com.kmarket.navigator.backend.stock.domain.MarketDailyPrice;
 import com.kmarket.navigator.backend.stock.domain.MarketIndexSnapshot;
+import com.kmarket.navigator.backend.stock.domain.MarketForeignNetFlowSummary;
 import com.kmarket.navigator.backend.stock.domain.StockIdentity;
 import com.kmarket.navigator.backend.stock.domain.StockMarketView;
 
@@ -28,6 +29,8 @@ public interface MarketRepository {
 	List<MarketIndexSnapshot> findMarketIndices();
 
 	Optional<ExchangeRateSnapshot> findExchangeRate(String currency);
+
+	Optional<MarketForeignNetFlowSummary> findLatestForeignNetFlow();
 
 	List<MarketDailyPrice> findDailyPrices(
 		UUID securityId,

@@ -20,6 +20,7 @@ import com.kmarket.navigator.backend.stock.domain.ForeignOwnershipSnapshot;
 import com.kmarket.navigator.backend.stock.domain.MarketDailyPrice;
 import com.kmarket.navigator.backend.stock.domain.MarketDataStatus;
 import com.kmarket.navigator.backend.stock.domain.MarketIndexSnapshot;
+import com.kmarket.navigator.backend.stock.domain.MarketForeignNetFlowSummary;
 import com.kmarket.navigator.backend.stock.domain.MarketQuoteSnapshot;
 import com.kmarket.navigator.backend.stock.domain.PriceLimitState;
 import com.kmarket.navigator.backend.stock.domain.StockIdentity;
@@ -219,6 +220,43 @@ class JdbcMarketRepository implements MarketRepository {
 	}
 
 	@Override
+	public Optional<MarketForeignNetFlowSummary> findLatestForeignNetFlow() {
+		List<ForeignFlowRow> rows = jdbcClient.sql("""
+			SELECT trading_date, SUM(net_purchase_amount_krw) AS total_amount,
+			       MAX(collected_at) AS collected_at,
+			       string_agg(DISTINCT source, '+') AS source
+			FROM market_foreign_net_flow
+			GROUP BY trading_date
+			ORDER BY trading_date DESC
+			LIMIT 30
+			""")
+			.query((resultSet, rowNumber) -> new ForeignFlowRow(
+				resultSet.getObject("trading_date", LocalDate.class),
+				resultSet.getBigDecimal("total_amount"),
+				instant(resultSet, "collected_at"),
+				resultSet.getString("source")
+			))
+			.list();
+		if (rows.isEmpty()) {
+			return Optional.empty();
+		}
+		int sign = rows.getFirst().amount().signum();
+		int consecutiveDays = 0;
+		for (ForeignFlowRow row : rows) {
+			if (sign == 0 || row.amount().signum() != sign) {
+				break;
+			}
+			consecutiveDays++;
+		}
+		ForeignFlowRow latest = rows.getFirst();
+		return Optional.of(new MarketForeignNetFlowSummary(
+			latest.tradingDate(), latest.amount(), consecutiveDays,
+			com.kmarket.navigator.backend.stock.domain.MarketDataStatus.CLOSED,
+			latest.collectedAt(), latest.source()
+		));
+	}
+
+	@Override
 	public List<MarketDailyPrice> findDailyPrices(
 		UUID securityId,
 		LocalDate from,
@@ -364,6 +402,14 @@ class JdbcMarketRepository implements MarketRepository {
 
 	private java.time.Instant instant(ResultSet resultSet, String column) throws SQLException {
 		return resultSet.getObject(column, OffsetDateTime.class).toInstant();
+	}
+
+	private record ForeignFlowRow(
+		LocalDate tradingDate,
+		java.math.BigDecimal amount,
+		java.time.Instant collectedAt,
+		String source
+	) {
 	}
 
 }

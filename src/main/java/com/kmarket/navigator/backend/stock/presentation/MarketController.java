@@ -39,6 +39,7 @@ import com.kmarket.navigator.backend.stock.domain.GlobalPeerAnalysis;
 import com.kmarket.navigator.backend.stock.domain.MarketDailyPrice;
 import com.kmarket.navigator.backend.stock.domain.MarketDataStatus;
 import com.kmarket.navigator.backend.stock.domain.MarketIndexSnapshot;
+import com.kmarket.navigator.backend.stock.domain.MarketForeignNetFlowSummary;
 import com.kmarket.navigator.backend.stock.domain.MarketQuoteSnapshot;
 import com.kmarket.navigator.backend.stock.domain.PriceLimitState;
 import com.kmarket.navigator.backend.stock.domain.ScreenerQuery;
@@ -139,6 +140,11 @@ public class MarketController {
 			.toList());
 	}
 
+	@GetMapping("/foreign-net-flow")
+	public ResponseEntity<ForeignNetFlowResponse> foreignNetFlow() {
+		return noStore(ForeignNetFlowResponse.from(service.foreignNetFlow()));
+	}
+
 	@GetMapping("/stocks/{stockCode}/history")
 	public ResponseEntity<MarketHistoryResponse> history(
 		@PathVariable @Pattern(regexp = STOCK_CODE_PATTERN) String stockCode,
@@ -169,6 +175,26 @@ public class MarketController {
 	}
 
 	public record SearchResponse(String query, int count, List<SearchItem> items) {
+	}
+
+	public record ForeignNetFlowResponse(
+		LocalDate tradingDate,
+		BigDecimal netPurchaseAmountKrw,
+		int consecutiveDays,
+		MarketDataStatus status,
+		Instant asOf,
+		String source
+	) {
+		static ForeignNetFlowResponse from(MarketForeignNetFlowSummary summary) {
+			return summary == null
+				? new ForeignNetFlowResponse(
+					null, null, 0, MarketDataStatus.UNAVAILABLE, null, "UNAVAILABLE"
+				)
+				: new ForeignNetFlowResponse(
+					summary.tradingDate(), summary.netPurchaseAmountKrw(),
+					summary.consecutiveDays(), summary.dataStatus(), summary.asOf(), summary.source()
+				);
+		}
 	}
 
 	public record SearchItem(

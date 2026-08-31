@@ -10,6 +10,8 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import java.math.BigDecimal;
+import java.time.Duration;
+import java.time.LocalDate;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -126,6 +128,59 @@ class KisMarketDataGatewayTests {
 
 		org.assertj.core.api.Assertions.assertThatThrownBy(() -> gateway.fetchQuote("005930"))
 			.isInstanceOf(RestClientResponseException.class);
+		server.verify();
+	}
+
+	@Test
+	void mapsOfficialDailyPriceAndWholeMarketForeignFlowContracts() {
+		KisMarketProperties properties = configuredProperties();
+		properties.setCollectionDelay(Duration.ZERO);
+		RestClient.Builder builder = RestClient.builder();
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		KisAccessTokenProvider tokenProvider = mock(KisAccessTokenProvider.class);
+		when(tokenProvider.accessToken()).thenReturn("access-token");
+		KisMarketDataGateway gateway = new KisMarketDataGateway(
+			builder.baseUrl("https://example.test").build(),
+			properties,
+			tokenProvider,
+			new KisCircuitBreaker()
+		);
+
+		server.expect(header("tr_id", "FHKST03010100"))
+			.andExpect(queryParam("FID_INPUT_ISCD", "005930"))
+			.andExpect(queryParam("FID_INPUT_DATE_1", "20260801"))
+			.andExpect(queryParam("FID_INPUT_DATE_2", "20260831"))
+			.andRespond(withSuccess("""
+				{"rt_cd":"0","output2":[
+				  {"stck_bsop_date":"20260801","stck_oprc":"70000","stck_hgpr":"71000",
+				   "stck_lwpr":"69000","stck_clpr":"70500","acml_vol":"123456"}
+				]}
+				""", MediaType.APPLICATION_JSON));
+		server.expect(header("tr_id", "FHPTJ04040000"))
+			.andExpect(queryParam("FID_INPUT_ISCD_1", "KSP"))
+			.andRespond(withSuccess("""
+				{"rt_cd":"0","output":[
+				  {"stck_bsop_date":"20260831","frgn_ntby_tr_pbmn":"1250"}
+				]}
+				""", MediaType.APPLICATION_JSON));
+		server.expect(header("tr_id", "FHPTJ04040000"))
+			.andExpect(queryParam("FID_INPUT_ISCD_1", "KSQ"))
+			.andRespond(withSuccess("""
+				{"rt_cd":"0","output":[
+				  {"stck_bsop_date":"20260831","frgn_ntby_tr_pbmn":"-250"}
+				]}
+				""", MediaType.APPLICATION_JSON));
+
+		var prices = gateway.fetchDailyPrices(
+			"005930", LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 31)
+		);
+		assertThat(prices).singleElement().satisfies(price -> {
+			assertThat(price.closePriceKrw()).isEqualByComparingTo("70500");
+			assertThat(price.volume()).isEqualTo(123456L);
+		});
+		var flows = gateway.fetchForeignNetFlows(LocalDate.of(2026, 8, 31));
+		assertThat(flows).extracting(flow -> flow.netPurchaseAmountKrw())
+			.containsExactly(new BigDecimal("1250000000"), new BigDecimal("-250000000"));
 		server.verify();
 	}
 

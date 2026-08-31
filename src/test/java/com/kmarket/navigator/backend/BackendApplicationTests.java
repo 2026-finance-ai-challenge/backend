@@ -200,7 +200,7 @@ class BackendApplicationTests {
 		assertThat(aiServiceProperties.readTimeout()).isEqualTo(Duration.ofSeconds(120));
 		assertThat(naverNewsProperties.getConnectTimeout()).isEqualTo(Duration.ofSeconds(10));
 		assertThat(naverNewsProperties.getReadTimeout()).isEqualTo(Duration.ofSeconds(30));
-		assertThat(naverNewsProperties.getMaxArticleAge()).isEqualTo(Duration.ofHours(72));
+		assertThat(naverNewsProperties.getMaxArticleAge()).isEqualTo(Duration.ofHours(1));
 		assertThat(naverNewsProperties.getTargetBatchSize()).isEqualTo(75);
 		assertThat(naverNewsProperties.getQueries()).isEmpty();
 		assertThat(openDartProperties.connectTimeout()).isEqualTo(Duration.ofSeconds(5));
@@ -1338,7 +1338,7 @@ class BackendApplicationTests {
 			.andExpect(jsonPath("$.marketImpact").value("POSITIVE"))
 			.andExpect(jsonPath("$.marketImpactImportance").value("HIGH"))
 			.andExpect(jsonPath("$.marketImpactScore").value(0.55))
-			.andExpect(jsonPath("$.contentAvailability").value("SOURCE_EXCERPT"))
+			.andExpect(jsonPath("$.contentAvailability").value("FULL_ARTICLE"))
 			.andExpect(jsonPath("$.relatedStocks[0].stockCode").value("005930"));
 
 		mockMvc.perform(post("/api/v1/news/{articleId}/term-explanations", firstArticleId)
@@ -1478,6 +1478,7 @@ class BackendApplicationTests {
 		);
 		assertThat(disclosureRepository.saveFiling(filing)).isTrue();
 		activateCommonStocks("0126Z0");
+		publishDisclosureFixture(filing.receiptNumber());
 
 		mockMvc.perform(get("/api/v1/disclosures").param("stockCode", "0126Z0"))
 			.andExpect(status().isOk())
@@ -1654,6 +1655,7 @@ class BackendApplicationTests {
 			))
 		);
 		disclosureRepository.completeDocumentJob(filing.receiptNumber(), List.of(document("b", "second")), List.of());
+		publishDisclosureFixture(filing.receiptNumber());
 
 		var detail = disclosureRepository.findByReceiptNumber(filing.receiptNumber()).orElseThrow();
 		assertThat(detail.documents()).singleElement().satisfies(document -> {
@@ -1713,6 +1715,7 @@ class BackendApplicationTests {
 		disclosureRepository.saveFiling(correction);
 		disclosureRepository.saveFiling(original);
 		activateCommonStocks("005930");
+		publishDisclosureFixture(correction.receiptNumber());
 
 		var detail = disclosureRepository.findByReceiptNumber(correction.receiptNumber()).orElseThrow();
 		assertThat(detail.versions()).hasSize(2);
@@ -1735,6 +1738,8 @@ class BackendApplicationTests {
 		disclosureRepository.saveFiling(filing("20260818800670"));
 		disclosureRepository.saveFiling(filing("20260818800671"));
 		activateCommonStocks("005930");
+		publishDisclosureFixture("20260818800670");
+		publishDisclosureFixture("20260818800671");
 
 		var first = disclosureQueryHandler.findAll(
 			new DisclosureListQuery("005930", LocalDate.of(2026, 8, 18), LocalDate.of(2026, 8, 18),
@@ -1810,7 +1815,8 @@ class BackendApplicationTests {
 			List.of(document("e", "The company approved a new facility.")),
 			List.of()
 		);
-		UUID sectionId = disclosureQueryHandler.findOne(filing.receiptNumber())
+		publishDisclosureFixture(filing.receiptNumber());
+		UUID sectionId = disclosureRepository.findByReceiptNumber(filing.receiptNumber()).orElseThrow()
 			.documents().getFirst().sections().getFirst().id();
 
 		mockMvc.perform(post(
@@ -2041,6 +2047,36 @@ class BackendApplicationTests {
 			.single();
 	}
 
+	private void publishDisclosureFixture(String receiptNumber) {
+		jdbcClient.sql("""
+			UPDATE disclosure
+			SET document_status = 'READY', index_status = 'READY', analysis_status = 'READY',
+			    event_type = 'CORPORATE_ACTION', sentiment = 'NEUTRAL', importance = 'MEDIUM',
+			    market_impact = 'NEUTRAL', market_impact_importance = 'MEDIUM',
+			    market_impact_score = 0.5, event_confidence = 0.9,
+			    sentiment_confidence = 0.8, importance_confidence = 0.8,
+			    market_impact_confidence = 0.8, analysis_model_id = 'test-signal-model',
+			    analyzed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+			WHERE receipt_number = :receiptNumber
+			""")
+			.param("receiptNumber", receiptNumber)
+			.update();
+		jdbcClient.sql("""
+			UPDATE translation_memory memory
+			SET translated_text = disclosure.title_ko, status = 'READY',
+			    model_id = 'test-reviewed-title', prompt_version = 'test-title-v1',
+			    generated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+			FROM disclosure
+			WHERE disclosure.receipt_number = :receiptNumber
+			  AND memory.content_kind = 'DISCLOSURE_TITLE'
+			  AND memory.source_hash = disclosure.title_source_hash
+			  AND memory.target_locale = 'en'
+			  AND memory.translation_version = 'codex-disclosure-title-v1'
+			""")
+			.param("receiptNumber", receiptNumber)
+			.update();
+	}
+
 	private UUID insertReadyNews(
 		String title,
 		String excerpt,
@@ -2070,24 +2106,24 @@ class BackendApplicationTests {
 			INSERT INTO news_article (
 			    id, cluster_id, provider, provider_article_id, original_title,
 			    title_source_hash,
-			    original_excerpt, english_title, english_body, what_summary,
+			    original_excerpt, original_body, english_title, english_body, what_summary,
 			    why_summary, impact_summary, event_type, sentiment, importance,
 			    market_impact, market_impact_importance, market_impact_score,
 			    event_confidence, sentiment_confidence,
 			    importance_confidence, market_impact_confidence, original_url,
-			    canonical_url, canonical_url_hash, publisher, content_availability,
+			    canonical_url, canonical_url_hash, publisher, content_availability, source_policy,
 			    analysis_status, model_id, prompt_version, published_at, collected_at,
 			    analyzed_at
 			)
 			VALUES (
 			    :id, :clusterId, 'NAVER_NEWS', :providerId, :title,
 			    encode(digest(regexp_replace(btrim(:title), '[[:space:]]+', ' ', 'g'), 'sha256'), 'hex'),
-			    :excerpt, :title, :excerpt, 'A market event occurred.',
+			    NULL, :excerpt, :title, :excerpt, 'A market event occurred.',
 			    'The article states the reason.', 'The event may affect future operations.',
 			    'CORPORATE_ACTION', 'POSITIVE', :importance, 'POSITIVE',
 			    :importance, 0.55, 0.90, 0.85, 0.80, 0.75,
 			    :url, :url, :hash, 'news.example.com',
-			    'SOURCE_EXCERPT', 'READY', 'gpt-5-mini', 'news-analysis-v1',
+			    'FULL_ARTICLE', 'publisher_public_article_v1', 'READY', 'gpt-5-mini', 'news-analysis-v1',
 			    :publishedAt, :publishedAt, :publishedAt
 			)
 			""")
@@ -2129,7 +2165,7 @@ class BackendApplicationTests {
 			    market_impact_score, event_confidence, sentiment_confidence,
 			    importance_confidence, market_impact_confidence, original_url,
 			    canonical_url, canonical_url_hash, publisher, thumbnail_url,
-			    content_availability, analysis_status, model_id, prompt_version,
+			    content_availability, source_policy, analysis_status, model_id, prompt_version,
 			    published_at, collected_at, analyzed_at
 			)
 			SELECT :id, source.cluster_id, source.provider, :providerId, :title,
@@ -2142,7 +2178,7 @@ class BackendApplicationTests {
 			       source.sentiment_confidence, source.importance_confidence,
 			       source.market_impact_confidence, :url, :url, :hash,
 			       'wire.example.com', source.thumbnail_url, source.content_availability,
-			       source.analysis_status, source.model_id, source.prompt_version,
+			       source.source_policy, source.analysis_status, source.model_id, source.prompt_version,
 			       source.published_at + INTERVAL '1 minute',
 			       source.collected_at + INTERVAL '1 minute', source.analyzed_at
 			FROM news_article source WHERE source.id = :representativeArticleId

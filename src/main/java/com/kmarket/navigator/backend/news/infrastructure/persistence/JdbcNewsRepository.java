@@ -62,9 +62,15 @@ class JdbcNewsRepository implements NewsRepository {
 			JOIN news_cluster story
 			  ON story.id = article.cluster_id
 			 AND story.representative_article_id = article.id
-			WHERE (CAST(:query AS varchar) IS NULL
+			WHERE article.content_availability = 'FULL_ARTICLE'
+			  AND article.original_body IS NOT NULL
+			  AND btrim(article.original_body) <> ''
+			  AND article.analysis_status = 'READY'
+			  AND article.english_title IS NOT NULL
+			  AND btrim(article.english_title) <> ''
+			  AND (CAST(:query AS varchar) IS NULL
 			       OR article.original_title ILIKE '%%' || :query || '%%' ESCAPE '\\'
-			       OR article.original_excerpt ILIKE '%%' || :query || '%%' ESCAPE '\\'
+			       OR article.original_body ILIKE '%%' || :query || '%%' ESCAPE '\\'
 			       OR COALESCE(article.english_title, '') ILIKE '%%' || :query || '%%' ESCAPE '\\'
 			       OR COALESCE(article.english_body, '') ILIKE '%%' || :query || '%%' ESCAPE '\\')
 			  AND (CAST(:stockCode AS varchar) IS NULL OR EXISTS (
@@ -188,7 +194,8 @@ class JdbcNewsRepository implements NewsRepository {
 	public List<NewsDuplicateCandidate> findDuplicateCandidates(Instant since, int limit) {
 		return jdbcClient.sql("""
 			SELECT article.id, article.cluster_id, article.original_title,
-			       article.original_excerpt, article.publisher, article.published_at
+			       COALESCE(article.original_body, article.original_excerpt, '') AS source_text,
+			       article.publisher, article.published_at
 			FROM news_article article
 			WHERE article.collected_at >= :since
 			ORDER BY article.published_at DESC
@@ -200,7 +207,7 @@ class JdbcNewsRepository implements NewsRepository {
 				resultSet.getObject("id", UUID.class),
 				resultSet.getObject("cluster_id", UUID.class),
 				resultSet.getString("original_title"),
-				resultSet.getString("original_excerpt"),
+				resultSet.getString("source_text"),
 				resultSet.getString("publisher"),
 				instant(resultSet, "published_at")
 			))
@@ -350,16 +357,16 @@ class JdbcNewsRepository implements NewsRepository {
 			INSERT INTO news_article (
 			    id, cluster_id, provider, provider_article_id, original_title,
 			    title_source_hash,
-			    original_excerpt, original_url, canonical_url, canonical_url_hash,
+			    original_excerpt, original_body, original_url, canonical_url, canonical_url_hash,
 			    publisher, thumbnail_url, content_availability, analysis_status,
-			    duplicate_score, published_at, collected_at
+			    source_policy, duplicate_score, published_at, collected_at
 			)
 			VALUES (
 			    :id, :clusterId, 'NAVER_NEWS', :providerArticleId, :title,
 			    encode(digest(regexp_replace(btrim(:title), '[[:space:]]+', ' ', 'g'), 'sha256'), 'hex'),
-			    :excerpt, :originalUrl, :canonicalUrl, :canonicalUrlHash,
-			    :publisher, :thumbnailUrl, 'SOURCE_EXCERPT', 'PENDING',
-			    :duplicateScore, :publishedAt, :collectedAt
+			    NULL, :body, :originalUrl, :canonicalUrl, :canonicalUrlHash,
+			    :publisher, :thumbnailUrl, 'FULL_ARTICLE', 'PENDING',
+			    :sourcePolicy, :duplicateScore, :publishedAt, :collectedAt
 			)
 			ON CONFLICT (canonical_url_hash) DO NOTHING
 			RETURNING id
@@ -368,7 +375,7 @@ class JdbcNewsRepository implements NewsRepository {
 			.param("clusterId", clusterId)
 			.param("providerArticleId", draft.providerArticleId())
 			.param("title", draft.title())
-			.param("excerpt", draft.excerpt())
+			.param("body", draft.body())
 			.param("originalUrl", draft.originalUrl())
 			.param("canonicalUrl", draft.canonicalUrl())
 			.param("canonicalUrlHash", draft.canonicalUrlHash())
@@ -377,6 +384,7 @@ class JdbcNewsRepository implements NewsRepository {
 			.param("collectedAt", atUtc(draft.collectedAt()))
 			.param("publisher", draft.publisher(), Types.VARCHAR)
 			.param("thumbnailUrl", draft.thumbnailUrl(), Types.VARCHAR)
+			.param("sourcePolicy", draft.sourcePolicy())
 			.query(UUID.class)
 			.optional();
 		if (inserted.isEmpty()) {

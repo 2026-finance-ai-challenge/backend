@@ -65,6 +65,7 @@ public class OpenApiConfig {
 		entry("MarketController#indices", operation("시장 지수 조회", "Market")),
 		entry("MarketController#exchangeRate", operation("환율 조회", "Market")),
 		entry("MarketController#foreignLimits", operation("외국인 보유 한도 모니터 조회", "Market", Access.OPTIONAL)),
+		entry("MarketController#foreignNetFlow", operation("시장 전체 외국인 순매수 조회", "Market")),
 		entry("MarketController#history", operation("종목 가격 이력 조회", "Market")),
 		entry("MarketController#globalPeers", operation("글로벌 피어 비교 조회", "Market")),
 
