@@ -25,7 +25,7 @@ import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 public class NewsDataMaintenanceService {
 
 	private static final Logger log = LoggerFactory.getLogger(NewsDataMaintenanceService.class);
-	static final String VERSION = "news-relevance-dedup-v3";
+	static final String VERSION = "news-relevance-dedup-v4";
 	private static final int ARTICLE_LIMIT = 100_000;
 	private final NewsRepository repository;
 	private final NewsFingerprint fingerprint;

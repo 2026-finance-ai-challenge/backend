@@ -88,6 +88,17 @@ class NewsStockMatcherTests {
 		)).containsOnlyKeys("005930");
 	}
 
+	@Test
+	void doesNotMatchKoreanCompanyNameInsideAProductName() {
+		var mappings = List.of(mapping("035720", "카카오", "Kakao Corp."));
+
+		assertThat(matcher.matchArticle(
+			"법원, 강력 사건 피고인에게 무기징역 선고",
+			"재판부는 카카오톡 대화 기록을 증거로 검토했다",
+			mappings
+		)).isEmpty();
+	}
+
 	private NewsStockMapping mapping(String stockCode, String nameKo, String nameEn) {
 		return new NewsStockMapping(stockCode, nameKo, nameEn, "KOSPI", List.of(
 			stockCode,
