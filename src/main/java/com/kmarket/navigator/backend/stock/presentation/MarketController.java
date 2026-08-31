@@ -123,6 +123,13 @@ public class MarketController {
 		return noStore(service.marketIndices().stream().map(MarketIndexResponse::from).toList());
 	}
 
+	@GetMapping("/exchange-rates/{currency}")
+	public ResponseEntity<ExchangeRateResponse> exchangeRate(
+		@PathVariable @Pattern(regexp = "USD") String currency
+	) {
+		return noStore(ExchangeRateResponse.from(service.exchangeRate(currency)));
+	}
+
 	@GetMapping("/foreign-limits")
 	public ResponseEntity<List<ForeignLimitMonitorResponse>> foreignLimits(
 		@AuthenticationPrincipal AuthenticatedUser user

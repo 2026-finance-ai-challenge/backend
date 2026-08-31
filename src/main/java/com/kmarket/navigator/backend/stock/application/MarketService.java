@@ -152,6 +152,12 @@ public class MarketService {
 	}
 
 	@Transactional(readOnly = true)
+	public ExchangeRateSnapshot exchangeRate(String currency) {
+		return repository.findExchangeRate(currency.strip().toUpperCase(Locale.ROOT))
+			.orElse(null);
+	}
+
+	@Transactional(readOnly = true)
 	public MarketHistory history(
 		String stockCode,
 		LocalDate from,

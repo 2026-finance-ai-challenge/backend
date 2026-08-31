@@ -15,6 +15,7 @@
 | `GET` | `/api/v1/market/stocks` | 시장·업종·등락률·거래 유의·관심종목 스크리너 |
 | `GET` | `/api/v1/market/stocks/{stockCode}` | KRW·USD 시세, 외국인 보유, 한도, 거래 상태 |
 | `GET` | `/api/v1/market/indices` | KOSPI·KOSDAQ·KOSPI 200 스냅샷 |
+| `GET` | `/api/v1/market/exchange-rates/USD` | 원/달러 환율 스냅샷과 데이터 상태 |
 | `GET` | `/api/v1/market/foreign-limits` | 4개 종목 한도 게이지와 Min/Base/Max 예측 |
 | `GET` | `/api/v1/market/stocks/{stockCode}/history` | 일별 OHLCV 차트 데이터 |
 | `GET` | `/api/v1/market/stocks/{stockCode}/global-peers` | 데이터 랭커와 OpenAI 구조화 설명 기반 글로벌 피어 분석 |
