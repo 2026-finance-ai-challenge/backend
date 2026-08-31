@@ -26,6 +26,7 @@ public class DisclosureInsightHandler {
 	private static final int MAX_EVIDENCE_ITEMS = 100;
 	private static final int MAX_ITEM_CHARACTERS = 6_000;
 	private static final int MAX_TOTAL_CHARACTERS = 60_000;
+	private static final String SUMMARY_PROMPT_VERSION = "filing-summary-v2";
 	private final DisclosureRepository repository;
 	private final DisclosureInsightGateway gateway;
 	private final Clock clock;
@@ -51,13 +52,15 @@ public class DisclosureInsightHandler {
 	public DisclosureInsight find(String receiptNumber) {
 		DisclosureDetail detail = detail(receiptNumber);
 		return repository.findInsight(receiptNumber, DisclosureContentVersion.calculate(detail))
+			.filter(insight -> SUMMARY_PROMPT_VERSION.equals(insight.promptVersion()))
 			.orElseThrow(() -> new BusinessException(ErrorCode.DISCLOSURE_INSIGHT_NOT_READY));
 	}
 
 	public DisclosureInsight generate(String receiptNumber) {
 		DisclosureDetail detail = detail(receiptNumber);
 		String contentVersion = DisclosureContentVersion.calculate(detail);
-		var existing = repository.findInsight(receiptNumber, contentVersion);
+		var existing = repository.findInsight(receiptNumber, contentVersion)
+			.filter(insight -> SUMMARY_PROMPT_VERSION.equals(insight.promptVersion()));
 		if (existing.isPresent()) {
 			return existing.get();
 		}

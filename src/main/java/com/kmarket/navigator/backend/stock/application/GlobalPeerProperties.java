@@ -7,7 +7,7 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "kmarket.global-peer")
 public class GlobalPeerProperties {
 
-	private String dataVersion = "hana-global-peer-2026-07-21-openai-v1";
+	private String dataVersion = "kmarket-global-peer-2026-09-01-openai-v2";
 
 	public String dataVersion() {
 		return dataVersion;

@@ -8,6 +8,7 @@ public record DisclosureDocument(
 	String sourceFilename,
 	int version,
 	String contentHash,
+	String originalHtml,
 	List<DisclosureSection> sections
 ) {
 	public DisclosureDocument {
