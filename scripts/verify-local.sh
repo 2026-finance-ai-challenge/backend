@@ -55,7 +55,7 @@ curl --fail --silent --show-error "http://127.0.0.1:${AI_PORT}/health" >/dev/nul
 curl --fail --silent --show-error "http://127.0.0.1:${BACKEND_PORT}/actuator/health" >/dev/null
 curl --fail --silent --show-error "http://127.0.0.1:${FRONTEND_PORT}/healthz" >/dev/null
 curl --fail --silent --show-error "http://127.0.0.1:${FRONTEND_PORT}/api/v1/market/indices" >/dev/null
-COMPOSE_PROJECT_NAME="$project_name" compose exec -T ai-api python -c 'import os; from pathlib import Path; from k_market_ai.news.classifier import HanaNewsSignalClassifier; classifier = HanaNewsSignalClassifier(Path("/opt/hannah"), expected_commit=os.environ["KMARKET_AI_HANA_EXPECTED_COMMIT"], runtime_environment="development"); result = classifier.classify("삼성전자 신규 공급 계약", ("삼성전자가 신규 공급 계약을 체결했다.",), ("삼성전자",)); assert result.model_version.startswith("hana-finance-")'
+COMPOSE_PROJECT_NAME="$project_name" compose exec -T ai-api python -c 'import os; from pathlib import Path; from k_market_ai.news.classifier import FinancialSignalClassifier; classifier = FinancialSignalClassifier(Path("/opt/kmarket-model-runtime"), expected_commit=os.environ["KMARKET_AI_MODEL_BUNDLE_COMMIT"], runtime_environment="development"); result = classifier.classify("삼성전자 신규 공급 계약", ("삼성전자가 신규 공급 계약을 체결했다.",), ("삼성전자",)); assert result.model_version.startswith("kmarket-finance-")'
 test_login_id="verify_$$"
 signup_status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
   -H 'Content-Type: application/json' \

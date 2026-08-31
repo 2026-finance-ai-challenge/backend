@@ -52,7 +52,7 @@ jobs:
           KMARKET_AI_ALLOWED_HOSTS: '["localhost","127.0.0.1","ai-api"]'
           KMARKET_AI_SERVICE_TOKEN: ci-service-token
           OPENAI_API_KEY: ci-openai-key
-          KMARKET_AI_HANA_EXPECTED_COMMIT: 0000000000000000000000000000000000000000
+          KMARKET_AI_MODEL_BUNDLE_COMMIT: 0000000000000000000000000000000000000000
           OPENDART_API_KEYS: ci-opendart-key
           KMARKET_CONTEXT_PEPPER: ci-context-pepper-at-least-32-bytes
           KMARKET_JWT_SECRET_BASE64: bG9jYWwtdGVzdC1qd3Qtc2VjcmV0LTAxMjM0NTY3ODktQUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVotYWJjZGVmZ2g=
@@ -171,7 +171,7 @@ jobs:
             printf 'OPENAI_API_KEY=%s\n' "$OPENAI_API_KEY"
             printf 'KMARKET_AI_ALLOWED_HOSTS=["localhost","127.0.0.1","ai-api"]\n'
             printf 'KMARKET_AI_SERVICE_TOKEN=%s\n' "$KMARKET_AI_SERVICE_TOKEN"
-            printf 'KMARKET_AI_HANA_EXPECTED_COMMIT=ab82ccc51cb096872f9a110a85c027a4158a147f\n'
+            printf 'KMARKET_AI_MODEL_BUNDLE_COMMIT=ab82ccc51cb096872f9a110a85c027a4158a147f\n'
             printf 'KMARKET_CONTEXT_PEPPER=%s\n' "$KMARKET_CONTEXT_PEPPER"
             printf 'KMARKET_JWT_SECRET_BASE64=%s\n' "$KMARKET_JWT_SECRET_BASE64"
             printf 'KMARKET_CORS_ALLOWED_ORIGINS=https://kartkr.cloud,https://www.kartkr.cloud,http://localhost:5173,http://127.0.0.1:5173\n'
