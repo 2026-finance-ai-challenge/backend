@@ -86,4 +86,20 @@ docker compose --env-file "$RUNTIME_ENV" --env-file "$IMAGE_ENV" -f "$COMPOSE_FI
 docker compose --profile worker --env-file "$RUNTIME_ENV" --env-file "$IMAGE_ENV" -f "$COMPOSE_FILE" up -d --wait --wait-timeout 900 --remove-orphans
 curl --fail --silent --show-error --max-time 10 http://127.0.0.1:15102/actuator/health >/dev/null
 reload_edge_nginx
+
+# 새 마운트가 정상 기동된 뒤에만 이전 경로 호환 심볼릭 링크를 제거한다.
+legacy_model_runtime="$DEPLOY_ROOT/hannah-runtime"
+if [[ -L "$legacy_model_runtime" ]]; then
+  if [[ "$(readlink "$legacy_model_runtime")" != "kmarket-model-runtime" ]]; then
+    echo "알 수 없는 기존 모델 런타임 링크가 있습니다." >&2
+    exit 1
+  fi
+  rm "$legacy_model_runtime"
+fi
+
+runtime_env_temporary=$(mktemp "$DEPLOY_ROOT/.runtime.env.XXXXXX")
+awk -F= '$1 != "KMARKET_AI_HANA_EXPECTED_COMMIT" { print }' "$RUNTIME_ENV" \
+  >"$runtime_env_temporary"
+chmod 600 "$runtime_env_temporary"
+mv "$runtime_env_temporary" "$RUNTIME_ENV"
 docker image prune --force --filter until=168h >/dev/null
