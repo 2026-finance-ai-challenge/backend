@@ -758,7 +758,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			JOIN issuer i ON i.id = d.issuer_id
 			JOIN security s ON s.id = d.security_id
 			JOIN service_stock_universe universe ON universe.stock_code = s.stock_code
-			LEFT JOIN translation_memory translation
+			JOIN translation_memory translation
 			  ON translation.content_kind = 'DISCLOSURE_TITLE'
 			 AND translation.source_hash = d.title_source_hash
 			 AND translation.target_locale = 'en'

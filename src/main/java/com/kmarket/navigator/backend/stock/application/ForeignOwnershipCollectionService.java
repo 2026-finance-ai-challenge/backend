@@ -13,6 +13,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import com.kmarket.navigator.backend.stock.application.port.ForeignOwnershipGateway;
+import com.kmarket.navigator.backend.stock.application.port.MarketDataGateway;
 import com.kmarket.navigator.backend.stock.application.port.MarketSnapshotRepository;
 import com.kmarket.navigator.backend.stock.domain.ForeignLimitCollectionTarget;
 
@@ -25,23 +26,27 @@ public class ForeignOwnershipCollectionService {
 	private static final ZoneId KOREA_ZONE = ZoneId.of("Asia/Seoul");
 	private static final int HISTORY_DAYS = 45;
 	private final ForeignOwnershipGateway gateway;
+	private final MarketDataGateway marketDataGateway;
 	private final MarketSnapshotRepository repository;
 	private final Clock clock;
 
 	@Autowired
 	public ForeignOwnershipCollectionService(
 		ForeignOwnershipGateway gateway,
+		MarketDataGateway marketDataGateway,
 		MarketSnapshotRepository repository
 	) {
-		this(gateway, repository, Clock.system(KOREA_ZONE));
+		this(gateway, marketDataGateway, repository, Clock.system(KOREA_ZONE));
 	}
 
 	ForeignOwnershipCollectionService(
 		ForeignOwnershipGateway gateway,
+		MarketDataGateway marketDataGateway,
 		MarketSnapshotRepository repository,
 		Clock clock
 	) {
 		this.gateway = gateway;
+		this.marketDataGateway = marketDataGateway;
 		this.repository = repository;
 		this.clock = clock;
 	}
@@ -58,18 +63,23 @@ public class ForeignOwnershipCollectionService {
 		lockAtLeastFor = "PT1S"
 	)
 	public void collect() {
-		if (!gateway.configured()) {
+		if (!gateway.configured() && !marketDataGateway.configured()) {
 			return;
 		}
 		LocalDate to = LocalDate.now(clock);
 		LocalDate from = to.minusDays(HISTORY_DAYS);
 		for (ForeignLimitCollectionTarget target : repository.findForeignLimitTargets()) {
 			try {
-				gateway.fetchHistory(target, from, to)
-					.forEach(snapshot -> repository.saveForeignOwnership(target.stockCode(), snapshot));
+				if (gateway.configured()) {
+					gateway.fetchHistory(target, from, to)
+						.forEach(snapshot -> repository.saveForeignOwnership(target.stockCode(), snapshot));
+				} else {
+					marketDataGateway.fetchForeignOwnership(target.stockCode())
+						.ifPresent(snapshot -> repository.saveForeignOwnership(target.stockCode(), snapshot));
+				}
 			} catch (RuntimeException exception) {
 				log.warn(
-					"KRX foreign ownership collection failed for stockCode={} type={}",
+					"Foreign ownership collection failed for stockCode={} type={}",
 					target.stockCode(),
 					exception.getClass().getSimpleName()
 				);

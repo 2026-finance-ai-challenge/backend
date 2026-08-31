@@ -201,3 +201,10 @@ jobs:
             printf '%s\n' "$GHCR_USERNAME"
             printf '%s\n' "$GHCR_TOKEN"
           } | sshpass -e ssh "${SSH_OPTIONS[@]}" "ubuntu@$PROD_HOST" "IFS= read -r GHCR_USERNAME; IFS= read -r GHCR_TOKEN; export GHCR_USERNAME GHCR_TOKEN; /opt/kmarket/deploy-backend.sh '$GITHUB_SHA'"
+      - name: 운영 파이프라인 집계 확인
+        env:
+          SSHPASS: ${{ secrets.PROD_SSH_PASSWORD }}
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+        run: |
+          SSH_OPTIONS=(-i "$RUNNER_TEMP/ssh/key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/ssh/known_hosts" -o PreferredAuthentications=publickey,keyboard-interactive,password)
+          sshpass -e ssh "${SSH_OPTIONS[@]}" "ubuntu@$PROD_HOST" '/opt/kmarket/report-pipeline-readiness.sh'
