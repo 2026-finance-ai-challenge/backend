@@ -18,6 +18,7 @@ import com.kmarket.navigator.backend.news.application.port.NewsRepository;
 import com.kmarket.navigator.backend.news.domain.NewsContentAvailability;
 import com.kmarket.navigator.backend.translation.application.port.TranslationRepository;
 import com.kmarket.navigator.backend.translation.domain.TranslationKind;
+import com.kmarket.navigator.backend.translation.domain.TranslationStatus;
 import com.kmarket.navigator.backend.translation.domain.TranslationView;
 
 import tools.jackson.databind.ObjectMapper;
@@ -77,7 +78,9 @@ public class OnDemandTranslationService {
 
 	public TranslationView requestNews(UUID articleId, String clientHash) {
 		rateLimiter.check(clientHash);
-		return ensureNewsRequested(articleId);
+		TranslationView view = ensureNewsRequested(articleId);
+		prioritize(view);
+		return view;
 	}
 
 	public TranslationView ensureNewsRequested(UUID articleId) {
@@ -116,7 +119,7 @@ public class OnDemandTranslationService {
 		context.put("receipt_number", receiptNumber);
 		context.put("document_version", source.document().version());
 		context.put("section_id", sectionId.toString());
-		return translationRepository.request(
+		TranslationView view = translationRepository.request(
 			TranslationKind.DISCLOSURE_SECTION,
 			source.source().hash(),
 			source.source().canonical(),
@@ -124,6 +127,14 @@ public class OnDemandTranslationService {
 			DISCLOSURE_SECTION_VERSION,
 			Instant.now(clock)
 		);
+		prioritize(view);
+		return view;
+	}
+
+	private void prioritize(TranslationView view) {
+		if (view.jobId() != null && view.status() != TranslationStatus.READY) {
+			translationRepository.prioritize(view.jobId(), Instant.now(clock));
+		}
 	}
 
 	private NewsSource newsSource(UUID articleId) {
