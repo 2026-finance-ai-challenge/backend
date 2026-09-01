@@ -581,6 +581,12 @@ class JdbcNewsRepository implements NewsRepository {
 			"ALTER TABLE news_article_security ENABLE TRIGGER news_watchlist_notification_trigger"
 		);
 		jdbcClient.sql("""
+			DELETE FROM translation_memory memory
+			USING news_deletion_stage deletion
+			WHERE memory.content_kind = 'NEWS_NARRATIVE'
+			  AND memory.request_context ->> 'article_id' = deletion.article_id::text
+			""").update();
+		jdbcClient.sql("""
 			DELETE FROM news_article article
 			USING news_deletion_stage deletion
 			WHERE article.id = deletion.article_id
