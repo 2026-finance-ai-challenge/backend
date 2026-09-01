@@ -30,7 +30,7 @@ import tools.jackson.databind.ObjectMapper;
 class JdbcTranslationRepository implements TranslationRepository {
 
 	private static final int MAX_ATTEMPTS = 1;
-	private static final String NEWS_TITLE_VERSION = "news-title-v2";
+	private static final String NEWS_TITLE_VERSION = "news-title-v3";
 	private final JdbcClient jdbcClient;
 	private final ObjectMapper objectMapper;
 

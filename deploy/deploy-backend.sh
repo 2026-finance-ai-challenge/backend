@@ -41,6 +41,18 @@ awk -F= '$1 != "FRONTEND_IMAGE_TAG" { print }' "$IMAGE_ENV" >"$temporary"
 chmod 600 "$temporary"
 mv "$temporary" "$IMAGE_ENV"
 
+runtime_env_temporary=$(mktemp "$DEPLOY_ROOT/.runtime.env.XXXXXX")
+awk -F= '$1 != "KMARKET_AI_HANA_EXPECTED_COMMIT" && $1 != "KMARKET_AI_TITLE_TRANSLATION_PROMPT_VERSION" && $1 != "KMARKET_AI_NEWS_NARRATIVE_PROMPT_VERSION" && $1 != "KMARKET_AI_DISCLOSURE_SECTION_PROMPT_VERSION" && $1 != "KMARKET_AI_TAX_DOCUMENT_PROMPT_VERSION" { print }' "$RUNTIME_ENV" \
+  >"$runtime_env_temporary"
+printf '%s\n' \
+  'KMARKET_AI_TITLE_TRANSLATION_PROMPT_VERSION=financial-title-translation-v5' \
+  'KMARKET_AI_NEWS_NARRATIVE_PROMPT_VERSION=news-narrative-v9' \
+  'KMARKET_AI_DISCLOSURE_SECTION_PROMPT_VERSION=disclosure-section-translation-v4' \
+  'KMARKET_AI_TAX_DOCUMENT_PROMPT_VERSION=kmarket-tax-ocr-e2e-v1' \
+  >>"$runtime_env_temporary"
+chmod 600 "$runtime_env_temporary"
+mv "$runtime_env_temporary" "$RUNTIME_ENV"
+
 reload_edge_nginx() {
   local backup
   backup=$(mktemp "$DEPLOY_ROOT/.nginx.conf.backup.XXXXXX")
@@ -97,11 +109,4 @@ if [[ -L "$legacy_model_runtime" ]]; then
   rm "$legacy_model_runtime"
 fi
 
-runtime_env_temporary=$(mktemp "$DEPLOY_ROOT/.runtime.env.XXXXXX")
-awk -F= '$1 != "KMARKET_AI_HANA_EXPECTED_COMMIT" && $1 != "KMARKET_AI_TITLE_TRANSLATION_PROMPT_VERSION" { print }' "$RUNTIME_ENV" \
-  >"$runtime_env_temporary"
-printf '%s\n' 'KMARKET_AI_TITLE_TRANSLATION_PROMPT_VERSION=financial-title-translation-v2' \
-  >>"$runtime_env_temporary"
-chmod 600 "$runtime_env_temporary"
-mv "$runtime_env_temporary" "$RUNTIME_ENV"
 docker image prune --force --filter until=168h >/dev/null
