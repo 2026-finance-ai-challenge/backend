@@ -861,8 +861,9 @@ class JdbcNewsRepository implements NewsRepository {
 	private NewsArticle withStocks(NewsArticle article) {
 		return new NewsArticle(
 			article.id(), article.clusterId(), article.originalTitle(), article.originalExcerpt(),
-			article.originalBody(), article.englishTitle(), article.englishBody(), article.what(),
-			article.why(), article.impact(), article.eventType(), article.sentiment(),
+			article.originalBody(), article.englishTitle(), article.englishBody(), article.whatEn(),
+			article.whyEn(), article.impactEn(), article.whatKo(), article.whyKo(),
+			article.impactKo(), article.eventType(), article.sentiment(),
 			article.importance(), article.marketImpact(), article.marketImpactImportance(),
 			article.marketImpactScore(), article.eventConfidence(),
 			article.sentimentConfidence(), article.importanceConfidence(),
@@ -909,6 +910,9 @@ class JdbcNewsRepository implements NewsRepository {
 			resultSet.getString("what_summary"),
 			resultSet.getString("why_summary"),
 			resultSet.getString("impact_summary"),
+			resultSet.getString("what_summary_ko"),
+			resultSet.getString("why_summary_ko"),
+			resultSet.getString("impact_summary_ko"),
 			resultSet.getString("event_type"),
 			enumValue(NewsSentiment.class, resultSet.getString("sentiment")),
 			enumValue(NewsImportance.class, resultSet.getString("importance")),

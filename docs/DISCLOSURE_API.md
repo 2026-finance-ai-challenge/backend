@@ -24,6 +24,8 @@
 | `GET` | `/api/v1/disclosures/{receiptNumber}/sections/{sectionId}/translation` | 현재 문서 버전의 저장된 영어 섹션 번역 또는 생성 상태 조회 |
 | `POST` | `/api/v1/disclosures/{receiptNumber}/sections/{sectionId}/translation` | 영어 섹션 번역 온디맨드 생성 요청 또는 캐시 재사용 |
 
+목록 항목의 `filedDateTotal`은 현재 페이지 크기가 아닌 해당 `filedDate` 전체 공시 건수다.
+
 ## 정정 버전
 
 상세 응답의 `versions`는 같은 발행사·공시군에 속한 접수번호를 시간순으로 제공한다.

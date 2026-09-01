@@ -110,17 +110,22 @@ class NewsController {
 	}
 
 	@GetMapping("/{articleId}/translation")
-	TranslationResponse findTranslation(@PathVariable UUID articleId) {
-		return TranslationResponse.from(translationService.findNews(articleId));
+	TranslationResponse findTranslation(
+		@PathVariable UUID articleId,
+		@RequestParam(defaultValue = "en") String locale
+	) {
+		return TranslationResponse.from(translationService.findNews(articleId, locale));
 	}
 
 	@PostMapping("/{articleId}/translation")
 	ResponseEntity<TranslationResponse> requestTranslation(
 		@PathVariable UUID articleId,
+		@RequestParam(defaultValue = "en") String locale,
 		HttpServletRequest request
 	) {
 		var result = translationService.requestNews(
 			articleId,
+			locale,
 			clientContextResolver.resolve(request).ipHash()
 		);
 		var builder = result.status() == TranslationStatus.READY

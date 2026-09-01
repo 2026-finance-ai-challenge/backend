@@ -5,7 +5,7 @@ import java.util.List;
 import com.kmarket.navigator.backend.stock.domain.ForeignLimitPrediction;
 import com.kmarket.navigator.backend.stock.domain.MarketIndexSnapshot;
 import com.kmarket.navigator.backend.stock.domain.MarketQuoteSnapshot;
-import com.kmarket.navigator.backend.stock.domain.ForeignLimitCollectionTarget;
+import com.kmarket.navigator.backend.stock.domain.ForeignOwnershipCollectionTarget;
 import com.kmarket.navigator.backend.stock.domain.ForeignOwnershipSnapshot;
 import com.kmarket.navigator.backend.stock.domain.ExchangeRateSnapshot;
 import com.kmarket.navigator.backend.stock.domain.MarketDailyPrice;
@@ -19,7 +19,7 @@ public interface MarketSnapshotRepository {
 
 	void saveIndex(MarketIndexSnapshot index);
 
-	List<ForeignLimitCollectionTarget> findForeignLimitTargets();
+	List<ForeignOwnershipCollectionTarget> findForeignOwnershipTargets();
 
 	void saveForeignOwnership(String stockCode, ForeignOwnershipSnapshot snapshot);
 

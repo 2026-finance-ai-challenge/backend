@@ -17,13 +17,19 @@ import tools.jackson.databind.JsonNode;
 
 public interface TranslationRepository {
 
-	Optional<TranslationView> find(TranslationKind kind, String sourceHash, String version);
+	Optional<TranslationView> find(
+		TranslationKind kind,
+		String sourceHash,
+		String targetLocale,
+		String version
+	);
 
 	TranslationView request(
 		TranslationKind kind,
 		String sourceHash,
 		String canonicalSource,
 		JsonNode context,
+		String targetLocale,
 		String version,
 		Instant now
 	);

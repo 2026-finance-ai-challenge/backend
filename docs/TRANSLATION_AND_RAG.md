@@ -13,7 +13,7 @@
 | --- | --- | --- |
 | 뉴스 제목 | 수집 직후 비동기 | 정규화 제목 SHA-256, `ko→en`, 번역 정책 버전 |
 | 공시 제목 | 수집 직후 비동기 | 정규화 제목 SHA-256, `ko→en`, 번역 정책 버전 |
-| 뉴스 본문·What/Why/Impact | 상세 또는 AI Insight 최초 요청 | 기사 원문 SHA-256, `ko→en`, 모델·프롬프트 버전 |
+| 뉴스 본문·What/Why/Impact | 홈 호버 또는 상세 최초 요청 | 기사 원문 SHA-256, `en|ko`, 생성 정책 버전 |
 | 공시 본문 | 사용자가 요청한 섹션·표·문단 | 접수번호, 문서 버전, 섹션 ID, 원문 SHA-256, `ko→en` |
 | 공시 RAG | 질문 시 | 한글 원문 검색, 영어 답변, 접수번호·문서 버전 격리 |
 
@@ -44,8 +44,8 @@
 
 | Method | Path | 동작 |
 | --- | --- | --- |
-| `GET` | `/api/v1/news/{articleId}/translation` | 저장된 영어 본문·Insight 또는 현재 생성 상태 조회 |
-| `POST` | `/api/v1/news/{articleId}/translation` | 기사 원문 버전의 영어 본문·Insight 생성 요청 또는 캐시 재사용 |
+| `GET` | `/api/v1/news/{articleId}/translation?locale=en|ko` | 언어별 본문·Insight 캐시 또는 현재 생성 상태 조회 |
+| `POST` | `/api/v1/news/{articleId}/translation?locale=en|ko` | 언어별 본문·Insight 생성 요청 또는 캐시 재사용 |
 | `GET` | `/api/v1/disclosures/{receiptNumber}/sections/{sectionId}/translation` | 저장된 영어 섹션 번역 또는 현재 생성 상태 조회 |
 | `POST` | `/api/v1/disclosures/{receiptNumber}/sections/{sectionId}/translation` | 현재 문서 버전의 섹션 번역 생성 요청 또는 캐시 재사용 |
 
@@ -57,7 +57,7 @@
 
 ## 저장·동시성 기준
 
-- PostgreSQL 번역 메모리는 `contentKind + sourceHash + targetLocale + translationVersion`을 유일 키로 사용한다.
+- PostgreSQL 번역 메모리는 `contentKind + sourceHash + targetLocale + translationVersion`을 유일 키로 사용해 EN과 KR을 분리 저장한다.
 - 작업 상태는 `PENDING`, `PROCESSING`, `READY`, `FAILED`로 분리하고 시도 횟수, 다음 시도 시각, 마지막 오류 코드를 기록한다.
 - Redis 분산 잠금은 원문을 포함하지 않은 해시 키를 사용하고 TTL을 둔다. Redis 잠금은 최적화이며 PostgreSQL 유일 제약이 최종 중복 방지 장치다.
 - 오래된 `PROCESSING` 작업은 임대 만료 후 회수하고, 지수 백오프와 최대 시도 횟수를 적용한다.

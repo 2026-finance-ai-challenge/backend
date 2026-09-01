@@ -4,6 +4,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,7 +28,7 @@ import tools.jackson.databind.node.ObjectNode;
 @Service
 public class OnDemandTranslationService {
 
-	public static final String NEWS_VERSION = "news-narrative-v9";
+	public static final String NEWS_VERSION = "news-narrative-v10";
 	public static final String DISCLOSURE_SECTION_VERSION = "disclosure-section-v4";
 	private final NewsRepository newsRepository;
 	private final DisclosureQueryHandler disclosureQueryHandler;
@@ -36,6 +37,7 @@ public class OnDemandTranslationService {
 	private final TranslationRequestRateLimiter rateLimiter;
 	private final ObjectMapper objectMapper;
 	private final Clock clock;
+	private static final Set<String> NEWS_LOCALES = Set.of("en", "ko");
 
 	@Autowired
 	public OnDemandTranslationService(
@@ -69,21 +71,25 @@ public class OnDemandTranslationService {
 		this.clock = clock;
 	}
 
-	public TranslationView findNews(UUID articleId) {
+	public TranslationView findNews(UUID articleId, String targetLocale) {
+		String locale = newsLocale(targetLocale);
 		NewsSource source = newsSource(articleId);
 		return translationRepository.find(TranslationKind.NEWS_NARRATIVE,
-			source.source().hash(), NEWS_VERSION)
-			.orElseGet(() -> TranslationView.notRequested(source.source().hash(), NEWS_VERSION));
+			source.source().hash(), locale, NEWS_VERSION)
+			.orElseGet(() -> TranslationView.notRequested(
+				source.source().hash(), locale, NEWS_VERSION
+			));
 	}
 
-	public TranslationView requestNews(UUID articleId, String clientHash) {
+	public TranslationView requestNews(UUID articleId, String targetLocale, String clientHash) {
 		rateLimiter.check(clientHash);
-		TranslationView view = ensureNewsRequested(articleId);
+		TranslationView view = ensureNewsRequested(articleId, targetLocale);
 		prioritize(view);
 		return view;
 	}
 
-	public TranslationView ensureNewsRequested(UUID articleId) {
+	public TranslationView ensureNewsRequested(UUID articleId, String targetLocale) {
+		String locale = newsLocale(targetLocale);
 		NewsSource source = newsSource(articleId);
 		ObjectNode context = objectMapper.createObjectNode();
 		context.put("article_id", articleId.toString());
@@ -92,6 +98,7 @@ public class OnDemandTranslationService {
 			source.source().hash(),
 			source.source().canonical(),
 			context,
+			locale,
 			NEWS_VERSION,
 			Instant.now(clock)
 		);
@@ -101,10 +108,10 @@ public class OnDemandTranslationService {
 		DisclosureSource source = disclosureSource(receiptNumber, sectionId);
 		return translationRepository.find(
 			TranslationKind.DISCLOSURE_SECTION,
-			source.source().hash(),
+			source.source().hash(), "en",
 			DISCLOSURE_SECTION_VERSION
 		).orElseGet(() -> TranslationView.notRequested(
-			source.source().hash(), DISCLOSURE_SECTION_VERSION
+			source.source().hash(), "en", DISCLOSURE_SECTION_VERSION
 		));
 	}
 
@@ -124,6 +131,7 @@ public class OnDemandTranslationService {
 			source.source().hash(),
 			source.source().canonical(),
 			context,
+			"en",
 			DISCLOSURE_SECTION_VERSION,
 			Instant.now(clock)
 		);
@@ -135,6 +143,14 @@ public class OnDemandTranslationService {
 		if (view.jobId() != null && view.status() != TranslationStatus.READY) {
 			translationRepository.prioritize(view.jobId(), Instant.now(clock));
 		}
+	}
+
+	private String newsLocale(String targetLocale) {
+		String locale = targetLocale == null ? "en" : targetLocale.strip().toLowerCase();
+		if (!NEWS_LOCALES.contains(locale)) {
+			throw new BusinessException(ErrorCode.INVALID_REQUEST);
+		}
+		return locale;
 	}
 
 	private NewsSource newsSource(UUID articleId) {
