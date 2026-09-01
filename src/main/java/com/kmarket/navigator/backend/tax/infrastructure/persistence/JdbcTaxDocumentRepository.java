@@ -267,24 +267,6 @@ public class JdbcTaxDocumentRepository implements TaxDocumentRepository {
 	}
 
 	@Override
-	public List<TaxDocumentFields> findComparableFields(UUID userId, UUID excludingDocumentId) {
-		return jdbcClient.sql("""
-			SELECT extracted_fields
-			FROM tax_document
-			WHERE user_id = :userId AND id <> :documentId AND deleted_at IS NULL
-			  AND status IN ('VERIFIED', 'REVIEW_REQUIRED')
-			ORDER BY updated_at DESC
-			LIMIT 10
-			""")
-			.param("userId", userId)
-			.param("documentId", excludingDocumentId)
-			.query(String.class)
-			.list().stream()
-			.map(value -> read(value, TaxDocumentFields.class))
-			.toList();
-	}
-
-	@Override
 	public List<TaxDocument> findPurgeCandidates(Instant now, int limit) {
 		return jdbcClient.sql("SELECT " + COLUMNS + " FROM tax_document "
 			+ "WHERE deleted_at IS NOT NULL AND purge_after <= :now AND purged_at IS NULL "
