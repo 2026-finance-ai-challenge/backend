@@ -1862,7 +1862,7 @@ class BackendApplicationTests {
 			FROM translation_memory memory
 			JOIN translation_job job ON job.translation_memory_id = memory.id
 			WHERE memory.content_kind = 'DISCLOSURE_SECTION'
-			  AND memory.translation_version = 'disclosure-section-v3'
+			  AND memory.translation_version = 'disclosure-section-v4'
 			  AND memory.request_context ->> 'section_id' = :sectionId
 			""")
 			.param("sectionId", sectionId.toString())
