@@ -1874,7 +1874,7 @@ class BackendApplicationTests {
 					invocation.getArgument(4),
 					result,
 					"translation-test-model",
-					"news-narrative-v3"
+					"news-narrative-v4"
 				);
 			});
 
