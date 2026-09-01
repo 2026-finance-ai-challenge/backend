@@ -53,7 +53,7 @@ class TranslationWorkerTests {
 		new TranslationWorker(
 			repository, gateway, guard, JsonMapper.builder().build(),
 			Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(15)
-		).process();
+		).processTitleBatch();
 
 		verify(repository).completeNewsTitle(generated, NOW);
 	}
@@ -81,8 +81,8 @@ class TranslationWorkerTests {
 			Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(15)
 		);
 
-		worker.process();
-		worker.process();
+		worker.processTitleBatch();
+		worker.processTitleBatch();
 
 		verify(repository, times(1)).claimNewsTitles(
 			eq(25), anyString(), eq(NOW), eq(NOW.minusSeconds(300))
@@ -114,8 +114,8 @@ class TranslationWorkerTests {
 			Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(15)
 		);
 
-		worker.process();
-		worker.process();
+		worker.processTitleBatch();
+		worker.processTitleBatch();
 
 		verify(repository, times(1)).claimNewsTitles(
 			eq(25), anyString(), eq(NOW), eq(NOW.minusSeconds(300))
