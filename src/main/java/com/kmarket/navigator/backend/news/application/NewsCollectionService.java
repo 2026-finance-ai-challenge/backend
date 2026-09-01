@@ -129,7 +129,7 @@ public class NewsCollectionService {
 		}
 		Map<String, BigDecimal> preliminaryMatches = stockMatcher.matchArticle(
 			article.title(),
-			article.excerpt(),
+			"",
 			mappings
 		);
 		if (preliminaryMatches.isEmpty()
@@ -142,7 +142,7 @@ public class NewsCollectionService {
 		}
 		String canonicalUrl = fingerprint.canonicalizeUrl(original.canonicalUrl());
 		String normalizedTitle = fingerprint.normalize(article.title());
-		NewsFingerprint.Profile incoming = fingerprint.profile(article.title(), original.body());
+		NewsFingerprint.Profile incoming = fingerprint.profile(article.title(), article.excerpt());
 		NewsDuplicateIndex.Match duplicate = duplicateIndex.findBest(
 			incoming,
 			article.publishedAt(),
@@ -152,15 +152,8 @@ public class NewsCollectionService {
 		UUID clusterId = duplicate.targetClusterId() != null
 			? duplicate.targetClusterId()
 			: UUID.randomUUID();
-		Map<String, BigDecimal> stockMatches = stockMatcher.matchArticle(
-			article.title(),
-			original.body(),
-			mappings
-		);
-		if (stockMatches.isEmpty()
-			|| (queryStockCode != null && !stockMatches.containsKey(queryStockCode))) {
-			return;
-		}
+		// 본문에는 관련 기사 링크가 섞일 수 있으므로 제목에서 확정한 종목만 저장한다.
+		Map<String, BigDecimal> stockMatches = preliminaryMatches;
 		if (duplicate.targetClusterId() != null) {
 			repository.addClusterStockMappings(duplicate.targetClusterId(), stockMatches);
 			return;
@@ -174,6 +167,7 @@ public class NewsCollectionService {
 			normalizedTitle,
 			article.providerArticleId(),
 			article.title(),
+			article.excerpt(),
 			original.body(),
 			article.originalUrl(),
 			canonicalUrl,

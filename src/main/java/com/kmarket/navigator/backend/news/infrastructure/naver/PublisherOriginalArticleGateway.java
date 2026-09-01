@@ -37,7 +37,7 @@ class PublisherOriginalArticleGateway implements NewsOriginalArticleGateway {
 	private static final String SOURCE_POLICY = "publisher_public_article_v1";
 	private static final int MAX_REDIRECTS = 5;
 	private static final int MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
-	private static final int MAX_CONTENT_CHARS = 1_000_000;
+	private static final int MAX_CONTENT_CHARS = 120_000;
 	private static final int MIN_BODY_CHARS = 100;
 	private static final Pattern SCRIPT_REDIRECT = Pattern.compile(
 		"(?:top\\.|window\\.|document\\.)?location(?:\\.href)?\\s*=\\s*['\"]([^'\"]+)['\"]",
@@ -53,10 +53,12 @@ class PublisherOriginalArticleGateway implements NewsOriginalArticleGateway {
 	);
 	private static final String NON_CONTENT_SELECTOR = String.join(",",
 		"script", "style", "noscript", "iframe", "figure", "figcaption", "form", "button",
-		"nav", "aside", "table", "[hidden]", ".ad", ".ads", ".advertisement",
+		"header", "footer", "nav", "aside", "table", "[hidden]", ".ad", ".ads", ".advertisement",
 		"[class*=advert]", "[id*=advert]", "[class*=banner]", "[id*=banner]",
 		"[class*=share]", "[id*=share]", "[class*=sns]", "[id*=sns]",
 		"[class*=recommend]", "[id*=recommend]", "[class*=related]", "[id*=related]",
+		"[class*=ranking]", "[id*=ranking]", "[class*=popular]", "[id*=popular]",
+		"[class*=subscribe]", "[id*=subscribe]", "[class*=promotion]", "[id*=promotion]",
 		"[class*=copyright]", "[id*=copyright]", "[class*=reporter]", "[id*=reporter]"
 	);
 
@@ -155,20 +157,29 @@ class PublisherOriginalArticleGateway implements NewsOriginalArticleGateway {
 		Document document = Jsoup.parse(fetched.html(), fetched.sourceUri().toString());
 		String canonicalUrl = canonicalUrl(document, fetched.sourceUri());
 		String thumbnailUrl = imageUrl(document, fetched.sourceUri());
-		String selected = "";
+		String selected = findArticleBody(document);
+		if (selected.isBlank()) {
+			return Optional.empty();
+		}
+		String body = selected.length() > MAX_CONTENT_CHARS ? selected.substring(0, MAX_CONTENT_CHARS) : selected;
+		return Optional.of(new OriginalNewsArticle(body, canonicalUrl, thumbnailUrl, SOURCE_POLICY));
+	}
+
+	String findArticleBody(Document document) {
 		for (String selector : BODY_SELECTORS) {
+			String selected = "";
 			for (Element element : document.select(selector)) {
 				String candidate = cleanArticleText(element);
 				if (isLikelyBody(candidate) && candidate.length() > selected.length()) {
 					selected = candidate;
 				}
 			}
+			// 구체적인 본문 선택자가 잡히면 뒤의 article/main 전체 영역으로 넓히지 않는다.
+			if (!selected.isBlank()) {
+				return selected;
+			}
 		}
-		if (selected.isBlank()) {
-			return Optional.empty();
-		}
-		String body = selected.length() > MAX_CONTENT_CHARS ? selected.substring(0, MAX_CONTENT_CHARS) : selected;
-		return Optional.of(new OriginalNewsArticle(body, canonicalUrl, thumbnailUrl, SOURCE_POLICY));
+		return "";
 	}
 
 	private List<URI> alternateUris(FetchedHtml fetched) {

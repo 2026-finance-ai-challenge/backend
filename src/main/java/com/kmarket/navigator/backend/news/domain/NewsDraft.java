@@ -12,6 +12,7 @@ public record NewsDraft(
 	String normalizedTitle,
 	String providerArticleId,
 	String title,
+	String excerpt,
 	String body,
 	String originalUrl,
 	String canonicalUrl,

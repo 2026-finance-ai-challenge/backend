@@ -29,7 +29,7 @@ import tools.jackson.databind.ObjectMapper;
 public class TranslationWorker {
 
 	private static final Logger log = LoggerFactory.getLogger(TranslationWorker.class);
-	private static final int BATCH_SIZE = 10;
+	private static final int BATCH_SIZE = 1;
 	private static final int TITLE_BATCH_SIZE = 25;
 	private static final Duration TRANSIENT_FAILURE_COOLDOWN = Duration.ofSeconds(15);
 	private static final Duration RATE_LIMIT_COOLDOWN = Duration.ofMinutes(1);
@@ -40,7 +40,7 @@ public class TranslationWorker {
 	private final Clock clock;
 	private final Duration providerFailureCooldown;
 	private final String workerId = UUID.randomUUID().toString();
-	private volatile Instant nextTitleAttemptAt = Instant.EPOCH;
+	private volatile Instant nextProviderAttemptAt = Instant.EPOCH;
 
 	@Autowired
 	public TranslationWorker(
@@ -76,6 +76,9 @@ public class TranslationWorker {
 	@SchedulerLock(name = "on-demand-translation", lockAtMostFor = "PT4M", lockAtLeastFor = "PT0.5S")
 	public void process() {
 		Instant now = Instant.now(clock);
+		if (now.isBefore(nextProviderAttemptAt)) {
+			return;
+		}
 		List<TranslationJob> jobs = repository.claim(
 			BATCH_SIZE, workerId, now, now.minus(Duration.ofMinutes(5))
 		);
@@ -94,7 +97,7 @@ public class TranslationWorker {
 	}
 
 	private void processTitles(Instant now) {
-		if (now.isBefore(nextTitleAttemptAt)) {
+		if (now.isBefore(nextProviderAttemptAt)) {
 			return;
 		}
 		List<TitleTranslationJob> jobs = repository.claimNewsTitles(
@@ -110,34 +113,18 @@ public class TranslationWorker {
 		try {
 			var generated = aiGateway.translateTitles(jobs);
 			generated.forEach(title -> repository.completeNewsTitle(title, Instant.now(clock)));
-			nextTitleAttemptAt = Instant.EPOCH;
 		}
 		catch (RuntimeException exception) {
-			if (isInvalidOutput(exception) && jobs.size() > 1) {
-				int midpoint = jobs.size() / 2;
-				processTitleSubset(jobs.subList(0, midpoint), now);
-				processTitleSubset(jobs.subList(midpoint, jobs.size()), now);
-				return;
-			}
 			Duration cooldown = cooldown(exception);
-			if (!isInvalidOutput(exception)) {
-				nextTitleAttemptAt = now.plus(cooldown);
-			}
+			nextProviderAttemptAt = now.plus(cooldown);
 			String errorCode = errorCode(exception);
 			for (TitleTranslationJob job : jobs) {
-				Duration backoff = Duration.ofSeconds(Math.min(3_600, 15L << Math.min(job.attempts(), 7)));
-				Duration delay = backoff.compareTo(cooldown) >= 0 ? backoff : cooldown;
 				repository.fail(job.id(), job.attempts(), errorCode,
-					Instant.now(clock), delay);
+					Instant.now(clock), cooldown);
 			}
 			log.warn("News title translation batch failed size={} error={} cooldownSeconds={}",
 				jobs.size(), errorCode, cooldown.toSeconds());
 		}
-	}
-
-	private static boolean isInvalidOutput(RuntimeException exception) {
-		return exception instanceof TranslationProviderException providerException
-			&& providerException.failure() == TranslationProviderException.Failure.INVALID_OUTPUT;
 	}
 
 	private Duration cooldown(RuntimeException exception) {
@@ -167,11 +154,12 @@ public class TranslationWorker {
 			repository.complete(job.id(), generated, Instant.now(clock));
 		}
 		catch (RuntimeException exception) {
-			Duration delay = Duration.ofSeconds(Math.min(3_600, 15L << Math.min(job.attempts(), 7)));
-			repository.fail(job.id(), job.attempts(), exception.getClass().getSimpleName(),
-				Instant.now(clock), delay);
-			log.warn("Translation generation failed id={} kind={} type={}",
-				job.id(), job.kind(), exception.getClass().getSimpleName());
+			Duration delay = cooldown(exception);
+			nextProviderAttemptAt = Instant.now(clock).plus(delay);
+			String code = errorCode(exception);
+			repository.fail(job.id(), job.attempts(), code, Instant.now(clock), delay);
+			log.warn("Translation generation failed id={} kind={} error={}",
+				job.id(), job.kind(), code);
 		}
 	}
 

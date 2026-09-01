@@ -16,6 +16,7 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import com.kmarket.navigator.backend.news.application.port.NewsProviderGateway;
 import com.kmarket.navigator.backend.news.application.port.NewsOriginalArticleGateway;
@@ -103,6 +104,32 @@ class NewsCollectionServiceTests {
 
 		verify(repository, never()).saveCollected(any(NewsDraft.class));
 		verify(repository).addClusterStockMappings(eq(clusterId), any());
+	}
+
+	@Test
+	void storesOnlyHeadlineMatchesAndPreservesProviderExcerpt() {
+		String excerpt = "삼성전자가 차세대 반도체 투자 계획을 발표했다.";
+		when(provider.search(eq("삼성전자"), anyInt())).thenReturn(List.of(article(
+			"삼성전자, 차세대 반도체 투자 확대",
+			excerpt,
+			"news.example.com"
+		)));
+		when(originalArticleGateway.fetch(any())).thenReturn(java.util.Optional.of(
+			new OriginalNewsArticle(
+				"본문\n\n관련 기사: SK하이닉스와 기타 지원 종목 목록",
+				"https://news.example.com/article",
+				null,
+				"publisher_public_article_v1"
+			)
+		));
+
+		service.collect();
+
+		ArgumentCaptor<NewsDraft> draft = ArgumentCaptor.forClass(NewsDraft.class);
+		verify(repository).saveCollected(draft.capture());
+		org.assertj.core.api.Assertions.assertThat(draft.getValue().excerpt()).isEqualTo(excerpt);
+		org.assertj.core.api.Assertions.assertThat(draft.getValue().stockConfidences().keySet())
+			.containsExactly("005930");
 	}
 
 	private List<NewsStockMapping> mappings() {

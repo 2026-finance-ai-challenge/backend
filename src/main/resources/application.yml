@@ -79,7 +79,7 @@ kmarket:
   translation:
     generation-interval: ${KMARKET_TRANSLATION_GENERATION_INTERVAL:2s}
     generation-initial-delay: ${KMARKET_TRANSLATION_GENERATION_INITIAL_DELAY:30s}
-    provider-failure-cooldown: ${KMARKET_TRANSLATION_PROVIDER_FAILURE_COOLDOWN:15m}
+    provider-failure-cooldown: ${KMARKET_TRANSLATION_PROVIDER_FAILURE_COOLDOWN:1h}
     per-client-minute-limit: ${KMARKET_TRANSLATION_PER_CLIENT_MINUTE_LIMIT:12}
     global-daily-limit: ${KMARKET_TRANSLATION_GLOBAL_DAILY_LIMIT:5000}
 
@@ -121,7 +121,7 @@ kmarket:
       connect-timeout: ${KMARKET_NAVER_NEWS_CONNECT_TIMEOUT:10s}
       read-timeout: ${KMARKET_NAVER_NEWS_READ_TIMEOUT:30s}
       request-delay: ${KMARKET_NAVER_NEWS_REQUEST_DELAY:125ms}
-      max-article-age: ${KMARKET_NEWS_MAX_ARTICLE_AGE:7d}
+      max-article-age: ${KMARKET_NEWS_MAX_ARTICLE_AGE:36h}
       queries: ${KMARKET_NAVER_NEWS_QUERIES:}
   market:
     collection-interval: ${KMARKET_MARKET_COLLECTION_INTERVAL:60s}

@@ -29,7 +29,7 @@ import tools.jackson.databind.ObjectMapper;
 @Repository
 class JdbcTranslationRepository implements TranslationRepository {
 
-	private static final int MAX_ATTEMPTS = 10;
+	private static final int MAX_ATTEMPTS = 1;
 	private final JdbcClient jdbcClient;
 	private final ObjectMapper objectMapper;
 
@@ -139,6 +139,8 @@ class JdbcTranslationRepository implements TranslationRepository {
 	@Override
 	@Transactional
 	public List<TranslationJob> claim(int limit, String workerId, Instant now, Instant staleBefore) {
+		markExhausted("NEWS_NARRATIVE", now);
+		markExhausted("DISCLOSURE_SECTION", now);
 		jdbcClient.sql("""
 			WITH recovered AS (
 			    UPDATE translation_job job
@@ -165,7 +167,8 @@ class JdbcTranslationRepository implements TranslationRepository {
 			    FROM translation_job job
 			    JOIN translation_memory memory ON memory.id = job.translation_memory_id
 			    WHERE memory.content_kind IN ('NEWS_NARRATIVE', 'DISCLOSURE_SECTION')
-			      AND job.status = 'PENDING' AND job.available_at <= :now
+			      AND job.status = 'PENDING' AND job.attempts < :maxAttempts
+			      AND job.available_at <= :now
 			    ORDER BY job.priority, job.available_at, job.updated_at, job.translation_memory_id
 			    FOR UPDATE OF job SKIP LOCKED LIMIT :limit
 			), claimed AS (
@@ -190,6 +193,7 @@ class JdbcTranslationRepository implements TranslationRepository {
 			.param("now", atUtc(now))
 			.param("workerId", workerId)
 			.param("limit", limit)
+			.param("maxAttempts", MAX_ATTEMPTS)
 			.query((resultSet, rowNumber) -> new TranslationJob(
 				resultSet.getObject("id", UUID.class),
 				TranslationKind.valueOf(resultSet.getString("content_kind")),
@@ -219,7 +223,8 @@ class JdbcTranslationRepository implements TranslationRepository {
 			    WHERE memory.content_kind = 'NEWS_TITLE'
 			      AND memory.target_locale = 'en'
 			      AND memory.translation_version = 'news-title-v1'
-			      AND job.status = 'PENDING' AND job.available_at <= :now
+			      AND job.status = 'PENDING' AND job.attempts < :maxAttempts
+			      AND job.available_at <= :now
 			    ORDER BY job.priority, memory.created_at DESC, job.available_at DESC,
 			             job.translation_memory_id
 			    FOR UPDATE OF job SKIP LOCKED LIMIT :limit
@@ -243,6 +248,7 @@ class JdbcTranslationRepository implements TranslationRepository {
 			.param("now", atUtc(now))
 			.param("workerId", workerId)
 			.param("limit", limit)
+			.param("maxAttempts", MAX_ATTEMPTS)
 			.query((resultSet, rowNumber) -> new TitleTranslationJob(
 				resultSet.getObject("id", UUID.class),
 				resultSet.getString("source_hash"),
@@ -430,6 +436,30 @@ class JdbcTranslationRepository implements TranslationRepository {
 			.param("kind", kind)
 			.param("now", atUtc(now))
 			.param("staleBefore", atUtc(staleBefore))
+			.update();
+		markExhausted(kind, now);
+	}
+
+	private void markExhausted(String kind, Instant now) {
+		jdbcClient.sql("""
+			WITH exhausted AS (
+			    UPDATE translation_job job
+			    SET status = 'FAILED', locked_at = NULL, locked_by = NULL,
+			        last_error_code = COALESCE(job.last_error_code, 'AUTOMATIC_RETRY_LIMIT_REACHED'),
+			        updated_at = :now
+			    FROM translation_memory memory
+			    WHERE memory.id = job.translation_memory_id
+			      AND memory.content_kind = :kind
+			      AND job.status = 'PENDING' AND job.attempts >= :maxAttempts
+			    RETURNING memory.id
+			)
+			UPDATE translation_memory memory
+			SET status = 'FAILED', updated_at = :now
+			FROM exhausted WHERE memory.id = exhausted.id
+			""")
+			.param("kind", kind)
+			.param("maxAttempts", MAX_ATTEMPTS)
+			.param("now", atUtc(now))
 			.update();
 	}
 

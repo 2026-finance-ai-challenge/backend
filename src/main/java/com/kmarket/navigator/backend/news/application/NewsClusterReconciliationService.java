@@ -52,9 +52,6 @@ public class NewsClusterReconciliationService {
 	)
 	@SchedulerLock(name = "news-collection", lockAtMostFor = "PT15M", lockAtLeastFor = "PT1S")
 	public void reconcile() {
-		if (repository.newsMaintenanceApplied(NewsDataMaintenanceService.VERSION)) {
-			return;
-		}
 		Instant now = Instant.now(clock);
 		List<NewsDuplicateCandidate> articles = new ArrayList<>(repository.findDuplicateCandidates(
 			now.minus(Duration.ofHours(72)),
