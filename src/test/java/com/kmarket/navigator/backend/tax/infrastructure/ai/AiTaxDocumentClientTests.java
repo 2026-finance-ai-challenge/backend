@@ -2,11 +2,13 @@ package com.kmarket.navigator.backend.tax.infrastructure.ai;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
@@ -18,7 +20,8 @@ import org.springframework.web.client.RestClient;
 
 import com.kmarket.navigator.backend.disclosure.infrastructure.ai.AiServiceProperties;
 import com.kmarket.navigator.backend.identity.domain.InvestorType;
-import com.kmarket.navigator.backend.tax.application.TaxDocumentPayload;
+import com.kmarket.navigator.backend.tax.domain.TaxDocumentFields;
+import com.kmarket.navigator.backend.tax.domain.TaxDocumentReviewInput;
 import com.kmarket.navigator.backend.tax.domain.TaxDocumentStatus;
 import com.kmarket.navigator.backend.tax.domain.TaxDocumentType;
 
@@ -97,6 +100,8 @@ class AiTaxDocumentClientTests {
 			.andExpect(header(HttpHeaders.AUTHORIZATION, "Bearer test-service-token"))
 			.andExpect(content().string(containsString("\"document_type\":\"APOSTILLE\"")))
 			.andExpect(content().string(containsString("\"expected_residency_country\":\"US\"")))
+			.andExpect(content().string(containsString("\"holder_name\":\"Maria L. Chen\"")))
+			.andExpect(content().string(not(containsString("document_base64"))))
 			.andRespond(withSuccess("""
 				{
 				  "verification_status": "VERIFIED",
@@ -132,23 +137,26 @@ class AiTaxDocumentClientTests {
 
 		var result = client.compare(
 			List.of(
-				new TaxDocumentPayload(
+				cachedResult(
 					TaxDocumentType.RESIDENCY_CERTIFICATE,
-					"residency.png",
-					"image/png",
-					"first".getBytes(StandardCharsets.UTF_8)
+					new TaxDocumentFields(
+						"Maria L. Chen", "US", "2026-01-12", null, "IRS",
+						"987-65-4321", null, null, null
+					)
 				),
-				new TaxDocumentPayload(
+				cachedResult(
 					TaxDocumentType.APOSTILLE,
-					"apostille.png",
-					"image/png",
-					"second".getBytes(StandardCharsets.UTF_8)
+					new TaxDocumentFields(
+						"Chong U Choi", null, "2014-04-10", null, "Secretary of State",
+						"1185973223", "US", null, null
+					)
 				),
-				new TaxDocumentPayload(
+				cachedResult(
 					TaxDocumentType.REDUCED_TAX_APPLICATION,
-					"application.png",
-					"image/png",
-					"third".getBytes(StandardCharsets.UTF_8)
+					new TaxDocumentFields(
+						"Maria L Chen", null, "2026-01-12", null, null,
+						"987-65-4321", null, "US", "INDIVIDUAL"
+					)
 				)
 			),
 			"US",
@@ -159,5 +167,24 @@ class AiTaxDocumentClientTests {
 		assertThat(result.verificationStatus()).isEqualTo("VERIFIED");
 		assertThat(result.crossCheck()).containsEntry("matched", true);
 		server.verify();
+	}
+
+	private TaxDocumentReviewInput cachedResult(
+		TaxDocumentType documentType,
+		TaxDocumentFields fields
+	) {
+		return new TaxDocumentReviewInput(
+			documentType,
+			documentType,
+			TaxDocumentStatus.VERIFIED,
+			fields,
+			List.of(),
+			List.of(),
+			new BigDecimal("0.95"),
+			new BigDecimal("0.05"),
+			false,
+			"kmarket-tax-document-ocr-runtime-v2",
+			"tax-document-v2"
+		);
 	}
 }
