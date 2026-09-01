@@ -95,7 +95,11 @@ final class NewsDuplicateIndex {
 			&& profile.normalizedTitle().equals(candidate.profile().normalizedTitle())
 			&& match.excerptScore() >= 0.75
 			&& Duration.between(publishedAt, candidate.publishedAt()).abs().compareTo(Duration.ofHours(12)) <= 0;
-		return exactTitleInSameEdition || exactExcerpt || exactSpecificTitle;
+		boolean nearDuplicateInSameEdition = profile.titleTokens().size() >= 4
+			&& match.titleScore() >= 0.86
+			&& match.excerptScore() >= 0.50
+			&& Duration.between(publishedAt, candidate.publishedAt()).abs().compareTo(Duration.ofHours(6)) <= 0;
+		return exactTitleInSameEdition || exactExcerpt || exactSpecificTitle || nearDuplicateInSameEdition;
 	}
 
 	private boolean corroboratedByDifferentPublisher(

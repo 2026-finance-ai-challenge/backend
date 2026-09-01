@@ -19,7 +19,7 @@ public class NaverNewsProperties {
 	private Duration connectTimeout = Duration.ofSeconds(10);
 	private Duration readTimeout = Duration.ofSeconds(30);
 	private Duration requestDelay = Duration.ofMillis(125);
-	private Duration maxArticleAge = Duration.ofDays(7);
+	private Duration maxArticleAge = Duration.ofHours(36);
 	private List<String> queries = new ArrayList<>();
 
 	public boolean configured() {
