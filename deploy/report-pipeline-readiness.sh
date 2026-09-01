@@ -42,7 +42,7 @@ JOIN translation_memory translation
   ON translation.content_kind = 'DISCLOSURE_TITLE'
  AND translation.source_hash = disclosure.title_source_hash
  AND translation.target_locale = 'en'
- AND translation.translation_version = 'codex-disclosure-title-v1'
+ AND translation.translation_version = 'codex-disclosure-title-v2'
  AND translation.status = 'READY';
 
 SELECT 'disclosure.signal.' || status || '=' || count(*)

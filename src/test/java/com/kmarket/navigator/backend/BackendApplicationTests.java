@@ -1824,7 +1824,7 @@ class BackendApplicationTests {
 			FROM translation_memory memory
 			JOIN translation_job job ON job.translation_memory_id = memory.id
 			WHERE memory.content_kind = 'NEWS_NARRATIVE'
-			  AND memory.translation_version = 'news-narrative-v8'
+			  AND memory.translation_version = 'news-narrative-v9'
 			  AND memory.request_context ->> 'article_id' = :articleId
 			""")
 			.param("articleId", articleId.toString())
@@ -1862,7 +1862,7 @@ class BackendApplicationTests {
 			FROM translation_memory memory
 			JOIN translation_job job ON job.translation_memory_id = memory.id
 			WHERE memory.content_kind = 'DISCLOSURE_SECTION'
-			  AND memory.translation_version = 'disclosure-section-v2'
+			  AND memory.translation_version = 'disclosure-section-v3'
 			  AND memory.request_context ->> 'section_id' = :sectionId
 			""")
 			.param("sectionId", sectionId.toString())
@@ -1906,7 +1906,7 @@ class BackendApplicationTests {
 					invocation.getArgument(4),
 					result,
 					"translation-test-model",
-					"news-narrative-v8"
+					"news-narrative-v9"
 				);
 			});
 
@@ -2171,7 +2171,7 @@ class BackendApplicationTests {
 			  AND memory.content_kind = 'DISCLOSURE_TITLE'
 			  AND memory.source_hash = disclosure.title_source_hash
 			  AND memory.target_locale = 'en'
-			  AND memory.translation_version = 'codex-disclosure-title-v1'
+			  AND memory.translation_version = 'codex-disclosure-title-v2'
 			""")
 			.param("receiptNumber", receiptNumber)
 			.update();
