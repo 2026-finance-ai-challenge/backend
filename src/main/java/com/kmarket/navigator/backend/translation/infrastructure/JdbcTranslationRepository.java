@@ -40,7 +40,12 @@ class JdbcTranslationRepository implements TranslationRepository {
 	}
 
 	@Override
-	public Optional<TranslationView> find(TranslationKind kind, String sourceHash, String version) {
+	public Optional<TranslationView> find(
+		TranslationKind kind,
+		String sourceHash,
+		String targetLocale,
+		String version
+	) {
 		return jdbcClient.sql("""
 			SELECT memory.id, memory.source_hash, memory.target_locale,
 			       memory.translation_version, memory.status, memory.result_payload,
@@ -49,10 +54,11 @@ class JdbcTranslationRepository implements TranslationRepository {
 			FROM translation_memory memory
 			LEFT JOIN translation_job job ON job.translation_memory_id = memory.id
 			WHERE memory.content_kind = :kind AND memory.source_hash = :sourceHash
-			  AND memory.target_locale = 'en' AND memory.translation_version = :version
+			  AND memory.target_locale = :targetLocale AND memory.translation_version = :version
 			""")
 			.param("kind", kind.name())
 			.param("sourceHash", sourceHash)
+			.param("targetLocale", targetLocale)
 			.param("version", version)
 			.query(this::mapView)
 			.optional();
@@ -65,6 +71,7 @@ class JdbcTranslationRepository implements TranslationRepository {
 		String sourceHash,
 		String canonicalSource,
 		JsonNode context,
+		String targetLocale,
 		String version,
 		Instant now
 	) {
@@ -76,7 +83,7 @@ class JdbcTranslationRepository implements TranslationRepository {
 			    request_context, created_at, updated_at
 			)
 			VALUES (
-			    :id, :kind, 'ko', 'en', :version, :sourceHash, :source,
+			    :id, :kind, 'ko', :targetLocale, :version, :sourceHash, :source,
 			    :source, 'PENDING', CAST(:context AS jsonb), :now, :now
 			)
 			ON CONFLICT (content_kind, source_hash, target_locale, translation_version)
@@ -85,12 +92,13 @@ class JdbcTranslationRepository implements TranslationRepository {
 			.param("id", id)
 			.param("kind", kind.name())
 			.param("version", version)
+			.param("targetLocale", targetLocale)
 			.param("sourceHash", sourceHash)
 			.param("source", canonicalSource)
 			.param("context", objectMapper.writeValueAsString(context))
 			.param("now", atUtc(now))
 			.update();
-		TranslationView current = find(kind, sourceHash, version).orElseThrow();
+		TranslationView current = find(kind, sourceHash, targetLocale, version).orElseThrow();
 		if (current.status() == TranslationStatus.FAILED) {
 			jdbcClient.sql("""
 				UPDATE translation_memory
@@ -122,7 +130,7 @@ class JdbcTranslationRepository implements TranslationRepository {
 			.param("id", current.jobId())
 			.param("now", atUtc(now))
 			.update();
-		return find(kind, sourceHash, version).orElseThrow();
+		return find(kind, sourceHash, targetLocale, version).orElseThrow();
 	}
 
 	@Override
@@ -185,7 +193,7 @@ class JdbcTranslationRepository implements TranslationRepository {
 			    FROM claimed WHERE memory.id = claimed.translation_memory_id
 			    RETURNING memory.id, memory.content_kind, memory.source_hash,
 			              memory.source_text, memory.request_context,
-			              memory.translation_version
+			              memory.target_locale, memory.translation_version
 			)
 			SELECT marked.*, claimed.attempts
 			FROM marked JOIN claimed ON claimed.translation_memory_id = marked.id
@@ -201,6 +209,7 @@ class JdbcTranslationRepository implements TranslationRepository {
 				resultSet.getString("source_hash"),
 				resultSet.getString("source_text"),
 				objectMapper.readTree(resultSet.getString("request_context")),
+				resultSet.getString("target_locale"),
 				resultSet.getString("translation_version"),
 				resultSet.getInt("attempts")
 			))
@@ -272,7 +281,9 @@ class JdbcTranslationRepository implements TranslationRepository {
 			.optional()
 			.map(TranslationKind::valueOf)
 			.orElseThrow(() -> new IllegalStateException("Claimed translation no longer exists"));
-		EnglishTextPolicy.requireAllTextValid(generated.result());
+		if ("en".equals(generated.targetLocale())) {
+			EnglishTextPolicy.requireAllTextValid(generated.result());
+		}
 		int updated = jdbcClient.sql("""
 			UPDATE translation_memory
 			SET result_payload = CAST(:result AS jsonb), status = 'READY',
@@ -314,8 +325,18 @@ class JdbcTranslationRepository implements TranslationRepository {
 			throw new IllegalArgumentException("News translation paragraphs must not be empty");
 		}
 		List<String> paragraphs = new ArrayList<>();
-		paragraphNodes.forEach(node -> paragraphs.add(EnglishTextPolicy.requireValid(node.stringValue())));
-		int updated = jdbcClient.sql("""
+		paragraphNodes.forEach(node -> paragraphs.add(node.stringValue()));
+		int updated = "en".equals(generated.targetLocale())
+			? copyEnglishNewsNarrative(id, result, paragraphs)
+			: copyKoreanNewsNarrative(id, result);
+		if (updated != 1) {
+			throw new IllegalStateException("News narrative target no longer exists");
+		}
+	}
+
+	private int copyEnglishNewsNarrative(UUID id, JsonNode result, List<String> paragraphs) {
+		paragraphs.replaceAll(EnglishTextPolicy::requireValid);
+		return jdbcClient.sql("""
 			UPDATE news_article article
 			SET english_body = :englishBody,
 			    what_summary = :whatSummary,
@@ -332,9 +353,32 @@ class JdbcTranslationRepository implements TranslationRepository {
 			.param("whySummary", EnglishTextPolicy.requireValid(result.path("why").stringValue()))
 			.param("impactSummary", EnglishTextPolicy.requireValid(result.path("impact").stringValue()))
 			.update();
-		if (updated != 1) {
-			throw new IllegalStateException("News narrative target no longer exists");
+	}
+
+	private int copyKoreanNewsNarrative(UUID id, JsonNode result) {
+		return jdbcClient.sql("""
+			UPDATE news_article article
+			SET what_summary_ko = :whatSummary,
+			    why_summary_ko = :whySummary,
+			    impact_summary_ko = :impactSummary
+			FROM translation_memory memory
+			WHERE memory.id = :id
+			  AND memory.content_kind = 'NEWS_NARRATIVE'
+			  AND memory.target_locale = 'ko'
+			  AND article.id = CAST(memory.request_context ->> 'article_id' AS uuid)
+			""")
+			.param("id", id)
+			.param("whatSummary", requireKoreanSummary(result.path("what").stringValue()))
+			.param("whySummary", requireKoreanSummary(result.path("why").stringValue()))
+			.param("impactSummary", requireKoreanSummary(result.path("impact").stringValue()))
+			.update();
+	}
+
+	private String requireKoreanSummary(String value) {
+		if (value == null || value.isBlank() || !value.matches(".*[가-힣].*")) {
+			throw new IllegalArgumentException("Korean summary must be non-blank and contain Hangul");
 		}
+		return value;
 	}
 
 	@Override

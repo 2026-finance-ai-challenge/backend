@@ -15,7 +15,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
-import com.kmarket.navigator.backend.stock.domain.ForeignLimitCollectionTarget;
+import com.kmarket.navigator.backend.stock.domain.ForeignOwnershipCollectionTarget;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -64,7 +64,7 @@ class KrxForeignOwnershipGatewayTests {
 				""", MediaType.TEXT_HTML));
 
 		var snapshots = gateway.fetchHistory(
-			new ForeignLimitCollectionTarget("003490", "KR7003490000"),
+			new ForeignOwnershipCollectionTarget("003490", "KR7003490000", true),
 			LocalDate.of(2025, 8, 1),
 			LocalDate.of(2025, 8, 2)
 		);

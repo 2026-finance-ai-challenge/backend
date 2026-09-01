@@ -108,11 +108,14 @@ class AiTranslationClient implements TranslationAiGateway {
 		String title,
 		List<String> paragraphs,
 		String contentAvailability,
+		String targetLocale,
 		String version
 	) {
 		NewsResponse response = post(
 			"/internal/v1/news/narratives",
-			new NewsRequest(sourceHash, title, paragraphs, contentAvailability, "en", version),
+			new NewsRequest(
+				sourceHash, title, paragraphs, contentAvailability, targetLocale, version
+			),
 			NewsResponse.class
 		);
 		ObjectNode result = objectMapper.createObjectNode();
@@ -124,7 +127,8 @@ class AiTranslationClient implements TranslationAiGateway {
 		result.put("contentAvailability", response.contentAvailability());
 		return generated(
 			sourceHash, version, response.sourceHash(), response.targetLocale(),
-			response.translationVersion(), result, response.model(), response.promptVersion()
+			response.translationVersion(), result, response.model(), response.promptVersion(),
+			targetLocale
 		);
 	}
 
@@ -163,7 +167,8 @@ class AiTranslationClient implements TranslationAiGateway {
 		}
 		return generated(
 			sourceHash, version, response.sourceHash(), response.targetLocale(),
-			response.translationVersion(), result, response.model(), response.promptVersion()
+			response.translationVersion(), result, response.model(), response.promptVersion(),
+			"en"
 		);
 	}
 
@@ -175,10 +180,11 @@ class AiTranslationClient implements TranslationAiGateway {
 		String actualVersion,
 		ObjectNode result,
 		String model,
-		String promptVersion
+		String promptVersion,
+		String expectedLocale
 	) {
 		if (!expectedHash.equals(actualHash) || !expectedVersion.equals(actualVersion)
-			|| !"en".equals(locale)) {
+			|| !expectedLocale.equals(locale)) {
 			throw new BusinessException(ErrorCode.AI_SERVICE_UNAVAILABLE);
 		}
 		return new GeneratedTranslation(

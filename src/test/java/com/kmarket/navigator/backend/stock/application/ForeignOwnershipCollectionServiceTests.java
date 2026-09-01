@@ -19,7 +19,7 @@ import com.kmarket.navigator.backend.stock.application.port.ForeignOwnershipGate
 import com.kmarket.navigator.backend.stock.application.port.ForeignLimitPredictionGateway;
 import com.kmarket.navigator.backend.stock.application.port.MarketDataGateway;
 import com.kmarket.navigator.backend.stock.application.port.MarketSnapshotRepository;
-import com.kmarket.navigator.backend.stock.domain.ForeignLimitCollectionTarget;
+import com.kmarket.navigator.backend.stock.domain.ForeignOwnershipCollectionTarget;
 import com.kmarket.navigator.backend.stock.domain.ForeignOwnershipSnapshot;
 import com.kmarket.navigator.backend.stock.domain.MarketDailyPrice;
 
@@ -31,7 +31,9 @@ class ForeignOwnershipCollectionServiceTests {
 		MarketDataGateway kisGateway = mock(MarketDataGateway.class);
 		MarketSnapshotRepository repository = mock(MarketSnapshotRepository.class);
 		ForeignLimitPredictionGateway predictionGateway = mock(ForeignLimitPredictionGateway.class);
-		ForeignLimitCollectionTarget target = new ForeignLimitCollectionTarget("003490", "KR7003490000");
+		ForeignOwnershipCollectionTarget target = new ForeignOwnershipCollectionTarget(
+			"003490", "KR7003490000", true
+		);
 		ForeignOwnershipSnapshot snapshot = new ForeignOwnershipSnapshot(
 			61_250_000L,
 			250_000_000L,
@@ -45,7 +47,7 @@ class ForeignOwnershipCollectionServiceTests {
 		);
 		when(krxGateway.configured()).thenReturn(false);
 		when(kisGateway.configured()).thenReturn(true);
-		when(repository.findForeignLimitTargets()).thenReturn(List.of(target));
+		when(repository.findForeignOwnershipTargets()).thenReturn(List.of(target));
 		when(kisGateway.fetchForeignOwnership("003490")).thenReturn(Optional.of(snapshot));
 		when(kisGateway.fetchDailyPrices(
 			"003490",
@@ -85,5 +87,37 @@ class ForeignOwnershipCollectionServiceTests {
 		));
 		verify(predictionGateway).predict("003490", List.of());
 		verify(krxGateway, never()).fetchHistory(target, LocalDate.of(2026, 7, 17), LocalDate.of(2026, 8, 31));
+	}
+
+	@Test
+	void collectsOwnershipWithoutPredictingWhenLegalLimitDoesNotApply() {
+		ForeignOwnershipGateway krxGateway = mock(ForeignOwnershipGateway.class);
+		MarketDataGateway kisGateway = mock(MarketDataGateway.class);
+		MarketSnapshotRepository repository = mock(MarketSnapshotRepository.class);
+		ForeignLimitPredictionGateway predictionGateway = mock(ForeignLimitPredictionGateway.class);
+		ForeignOwnershipCollectionTarget target = new ForeignOwnershipCollectionTarget(
+			"005930", "KR7005930003", false
+		);
+		ForeignOwnershipSnapshot snapshot = new ForeignOwnershipSnapshot(
+			1L, 2L, null, null, new BigDecimal("50.0000"), null,
+			LocalDate.of(2026, 8, 31), Instant.parse("2026-08-31T00:00:00Z"), "KRX"
+		);
+		when(krxGateway.configured()).thenReturn(true);
+		when(repository.findForeignOwnershipTargets()).thenReturn(List.of(target));
+		when(krxGateway.fetchHistory(
+			target, LocalDate.of(2026, 7, 17), LocalDate.of(2026, 8, 31)
+		)).thenReturn(List.of(snapshot));
+		ForeignOwnershipCollectionService service = new ForeignOwnershipCollectionService(
+			krxGateway,
+			kisGateway,
+			repository,
+			predictionGateway,
+			Clock.fixed(Instant.parse("2026-08-31T00:00:00Z"), ZoneOffset.UTC)
+		);
+
+		service.collect();
+
+		verify(repository).saveForeignOwnership("005930", snapshot);
+		verify(predictionGateway, never()).predict("005930", List.of());
 	}
 }

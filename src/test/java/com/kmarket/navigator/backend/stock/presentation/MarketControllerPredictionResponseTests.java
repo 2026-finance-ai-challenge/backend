@@ -28,7 +28,7 @@ class MarketControllerPredictionResponseTests {
 		);
 
 		MarketController.ForeignLimitPredictionResponse response =
-			MarketController.ForeignLimitPredictionResponse.from(prediction, "CLOSED");
+			MarketController.ForeignLimitPredictionResponse.from(prediction, "CLOSED", true);
 
 		assertThat(response.status()).isEqualTo("MARKET_CLOSED");
 		assertThat(response.minRate()).isNull();
@@ -36,5 +36,16 @@ class MarketControllerPredictionResponseTests {
 		assertThat(response.maxRate()).isNull();
 		assertThat(response.observationCount()).isEqualTo(120);
 		assertThat(response.modelVersion()).isEqualTo("kmarket-foreign-owned-quantity-ml-v2");
+	}
+
+	@Test
+	void marksPredictionAsNotApplicableForStocksWithoutAnAcquisitionLimit() {
+		MarketController.ForeignLimitPredictionResponse response =
+			MarketController.ForeignLimitPredictionResponse.from(null, "OPEN", false);
+
+		assertThat(response.status()).isEqualTo("NOT_APPLICABLE");
+		assertThat(response.source()).isEqualTo("NOT_APPLICABLE");
+		assertThat(response.baseRate()).isNull();
+		assertThat(response.observationCount()).isZero();
 	}
 }

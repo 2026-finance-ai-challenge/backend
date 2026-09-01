@@ -22,6 +22,7 @@ public record DisclosureSummary(
 	NewsImportance importance,
 	MarketImpact marketImpact,
 	LocalDate filedDate,
+	long filedDateTotal,
 	Instant detectedAt,
 	boolean correction,
 	DocumentStatus documentStatus,

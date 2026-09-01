@@ -91,6 +91,8 @@ import com.kmarket.navigator.backend.tax.domain.TaxDocumentType;
 import com.kmarket.navigator.backend.tax.domain.TaxDocumentVerification;
 import com.kmarket.navigator.backend.tax.infrastructure.storage.TaxDocumentProperties;
 import com.kmarket.navigator.backend.stock.application.port.GlobalPeerGateway;
+import com.kmarket.navigator.backend.stock.application.port.MarketSnapshotRepository;
+import com.kmarket.navigator.backend.stock.domain.ForeignOwnershipSnapshot;
 import com.kmarket.navigator.backend.stock.domain.GlobalPeerAnalysis;
 import com.kmarket.navigator.backend.translation.application.TranslationWorker;
 import com.kmarket.navigator.backend.translation.application.port.TranslationAiGateway;
@@ -140,6 +142,9 @@ class BackendApplicationTests {
 
 	@Autowired
 	NewsRepository newsRepository;
+
+	@Autowired
+	MarketSnapshotRepository marketSnapshotRepository;
 
 	@Autowired
 	NewsClusterReconciliationService newsClusterReconciliationService;
@@ -484,6 +489,28 @@ class BackendApplicationTests {
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.items").isArray())
 			.andExpect(jsonPath("$.nextCursor").doesNotExist());
+	}
+
+	@Test
+	void disclosureListReportsTheFullFiledDateCountWhenThePageIsLimited() throws Exception {
+		LocalDate filedDate = LocalDate.of(2099, 1, 1);
+		for (int index = 1; index <= 5; index++) {
+			String receiptNumber = "2099010100000" + index;
+			disclosureRepository.saveFiling(filingAt(receiptNumber, filedDate));
+			publishDisclosureFixture(receiptNumber);
+		}
+		activateCommonStocks("005930");
+
+		mockMvc.perform(get("/api/v1/disclosures")
+				.param("from", filedDate.toString())
+				.param("to", filedDate.toString())
+				.param("limit", "4"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.items.length()").value(4))
+			.andExpect(jsonPath("$.items[0].filedDateTotal").value(5))
+			.andExpect(jsonPath("$.items[1].filedDateTotal").value(5))
+			.andExpect(jsonPath("$.items[2].filedDateTotal").value(5))
+			.andExpect(jsonPath("$.items[3].filedDateTotal").value(5));
 	}
 
 	@Test
@@ -1166,6 +1193,17 @@ class BackendApplicationTests {
 			""")
 			.param("securityId", koreanAirId)
 			.update();
+		marketSnapshotRepository.saveForeignOwnership("005930", new ForeignOwnershipSnapshot(
+			2_900_000_000L,
+			5_969_782_550L,
+			null,
+			null,
+			new BigDecimal("48.5779"),
+			null,
+			LocalDate.of(2026, 8, 22),
+			Instant.now(),
+			"TEST_KRX"
+		));
 		jdbcClient.sql("""
 			INSERT INTO market_daily_price (
 			    security_id, trading_date, open_price_krw, high_price_krw,
@@ -1238,7 +1276,9 @@ class BackendApplicationTests {
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.currentPriceUsd").value(60.0))
 			.andExpect(jsonPath("$.subjectToForeignAcquisitionLimit").value(false))
-			.andExpect(jsonPath("$.foreignOwnership.status").value("UNAVAILABLE"));
+			.andExpect(jsonPath("$.foreignOwnership.ownershipRate").value(48.5779))
+			.andExpect(jsonPath("$.foreignOwnership.foreignLimitQuantity").doesNotExist())
+			.andExpect(jsonPath("$.foreignLimitPrediction.status").value("NOT_APPLICABLE"));
 		mockMvc.perform(get("/api/v1/market/foreign-limits"))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$[0].stock.stockCode").value("003490"))
@@ -1819,17 +1859,23 @@ class BackendApplicationTests {
 		mockMvc.perform(post("/api/v1/news/{articleId}/translation", articleId))
 			.andExpect(status().isAccepted())
 			.andExpect(jsonPath("$.status").value("PENDING"));
+		mockMvc.perform(post("/api/v1/news/{articleId}/translation?locale=ko", articleId))
+			.andExpect(status().isAccepted())
+			.andExpect(jsonPath("$.status").value("PENDING"));
+		mockMvc.perform(post("/api/v1/news/{articleId}/translation?locale=ko", articleId))
+			.andExpect(status().isAccepted())
+			.andExpect(jsonPath("$.status").value("PENDING"));
 		assertThat(jdbcClient.sql("""
 			SELECT count(*)
 			FROM translation_memory memory
 			JOIN translation_job job ON job.translation_memory_id = memory.id
 			WHERE memory.content_kind = 'NEWS_NARRATIVE'
-			  AND memory.translation_version = 'news-narrative-v9'
+			  AND memory.translation_version = 'news-narrative-v10'
 			  AND memory.request_context ->> 'article_id' = :articleId
 			""")
 			.param("articleId", articleId.toString())
 			.query(Long.class)
-			.single()).isEqualTo(1);
+			.single()).isEqualTo(2);
 
 		OpenDartFiling filing = filing("20260823800003");
 		disclosureRepository.saveFiling(filing);
@@ -1881,7 +1927,8 @@ class BackendApplicationTests {
 		jdbcClient.sql("""
 			UPDATE news_article
 			SET english_body = NULL, what_summary = NULL, why_summary = NULL,
-			    impact_summary = NULL
+			    impact_summary = NULL, what_summary_ko = NULL, why_summary_ko = NULL,
+			    impact_summary_ko = NULL
 			WHERE id = :articleId
 			""")
 			.param("articleId", articleId)
@@ -1892,24 +1939,36 @@ class BackendApplicationTests {
 			.andExpect(jsonPath("$.originalBody").isNotEmpty());
 		mockMvc.perform(post("/api/v1/news/{articleId}/translation", articleId))
 			.andExpect(status().isAccepted());
-		when(translationAiGateway.translateNews(any(), any(), any(), any(), any()))
+		mockMvc.perform(post("/api/v1/news/{articleId}/translation?locale=ko", articleId))
+			.andExpect(status().isAccepted());
+		when(translationAiGateway.translateNews(any(), any(), any(), any(), any(), any()))
 			.thenAnswer(invocation -> {
+				String targetLocale = invocation.getArgument(4);
 				var result = objectMapper.createObjectNode();
 				result.putArray("translatedParagraphs")
-					.add("The company announced a new semiconductor investment.");
-				result.put("what", "The company announced a semiconductor investment.");
-				result.put("why", "The filing cites capacity expansion.");
-				result.put("impact", "The investment may increase future capacity.");
+					.add("ko".equals(targetLocale)
+						? "회사는 새로운 반도체 투자를 발표했다."
+						: "The company announced a new semiconductor investment.");
+				result.put("what", "ko".equals(targetLocale)
+					? "회사가 신규 반도체 투자를 발표했다."
+					: "The company announced a semiconductor investment.");
+				result.put("why", "ko".equals(targetLocale)
+					? "생산 능력 확대가 필요했다."
+					: "The filing cites capacity expansion.");
+				result.put("impact", "ko".equals(targetLocale)
+					? "향후 생산 능력이 늘어날 수 있다."
+					: "The investment may increase future capacity.");
 				return new GeneratedTranslation(
 					invocation.getArgument(0),
-					"en",
-					invocation.getArgument(4),
+					targetLocale,
+					invocation.getArgument(5),
 					result,
 					"translation-test-model",
-					"news-narrative-v9"
+					"news-narrative-v10"
 				);
 			});
 
+		translationWorker.process();
 		translationWorker.process();
 
 		mockMvc.perform(get("/api/v1/news/{articleId}", articleId))
@@ -1917,13 +1976,16 @@ class BackendApplicationTests {
 			.andExpect(jsonPath("$.englishBody").value(
 				"The company announced a new semiconductor investment."
 			))
-			.andExpect(jsonPath("$.what").value(
+			.andExpect(jsonPath("$.whatEn").value(
 				"The company announced a semiconductor investment."
 			))
-			.andExpect(jsonPath("$.why").value("The filing cites capacity expansion."))
-			.andExpect(jsonPath("$.impact").value(
+			.andExpect(jsonPath("$.whyEn").value("The filing cites capacity expansion."))
+			.andExpect(jsonPath("$.impactEn").value(
 				"The investment may increase future capacity."
-			));
+			))
+			.andExpect(jsonPath("$.whatKo").value("회사가 신규 반도체 투자를 발표했다."))
+			.andExpect(jsonPath("$.whyKo").value("생산 능력 확대가 필요했다."))
+			.andExpect(jsonPath("$.impactKo").value("향후 생산 능력이 늘어날 수 있다."));
 	}
 
 	@Test

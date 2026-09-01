@@ -15,6 +15,7 @@ public interface TranslationAiGateway {
 		String title,
 		List<String> paragraphs,
 		String contentAvailability,
+		String targetLocale,
 		String version
 	);
 

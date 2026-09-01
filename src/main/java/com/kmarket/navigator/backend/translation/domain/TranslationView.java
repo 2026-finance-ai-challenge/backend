@@ -17,9 +17,13 @@ public record TranslationView(
 	Instant generatedAt,
 	String errorCode
 ) {
-	public static TranslationView notRequested(String sourceHash, String translationVersion) {
+	public static TranslationView notRequested(
+		String sourceHash,
+		String targetLocale,
+		String translationVersion
+	) {
 		return new TranslationView(
-			null, sourceHash, "en", translationVersion, TranslationStatus.NOT_REQUESTED,
+			null, sourceHash, targetLocale, translationVersion, TranslationStatus.NOT_REQUESTED,
 			null, null, null, null, null
 		);
 	}
