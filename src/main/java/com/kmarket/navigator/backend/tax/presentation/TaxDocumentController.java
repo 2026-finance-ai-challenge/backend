@@ -8,6 +8,7 @@ import java.util.UUID;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
@@ -25,6 +27,7 @@ import org.springframework.web.multipart.MultipartFile;
 import com.kmarket.navigator.backend.identity.domain.AuthenticatedUser;
 import com.kmarket.navigator.backend.tax.application.TaxDocumentService;
 import com.kmarket.navigator.backend.tax.domain.TaxDocument;
+import com.kmarket.navigator.backend.tax.domain.TaxDocumentComparison;
 import com.kmarket.navigator.backend.tax.domain.TaxDocumentFields;
 import com.kmarket.navigator.backend.tax.domain.TaxDocumentIssue;
 import com.kmarket.navigator.backend.tax.domain.TaxDocumentStatus;
@@ -60,6 +63,16 @@ public class TaxDocumentController {
 		return ResponseEntity.ok(service.list(user.id()).stream()
 			.map(TaxDocumentResponse::from)
 			.toList());
+	}
+
+	@PostMapping("/comparison")
+	public ResponseEntity<TaxDocumentComparisonResponse> compare(
+		@AuthenticationPrincipal AuthenticatedUser user,
+		@RequestBody @Validated TaxDocumentComparisonRequest request
+	) {
+		return ResponseEntity.ok(TaxDocumentComparisonResponse.from(
+			service.compare(user.id(), request.documentIds())
+		));
 	}
 
 	@GetMapping("/{documentId}")
@@ -139,6 +152,61 @@ public class TaxDocumentController {
 				document.errorCode(),
 				document.createdAt(),
 				document.updatedAt()
+			);
+		}
+	}
+
+	public record TaxDocumentComparisonRequest(
+		@NotNull @Size(min = 3, max = 3) List<@NotNull UUID> documentIds
+	) {
+	}
+
+	public record TaxDocumentComparisonResponse(
+		String verificationStatus,
+		List<TaxDocumentIssue> findings,
+		java.util.Map<String, Object> crossCheck,
+		List<TaxDocumentVerificationResponse> documents,
+		String modelId
+	) {
+		private static TaxDocumentComparisonResponse from(TaxDocumentComparison comparison) {
+			return new TaxDocumentComparisonResponse(
+				comparison.verificationStatus(),
+				comparison.findings(),
+				comparison.crossCheck(),
+				comparison.documents().stream()
+					.map(TaxDocumentVerificationResponse::from)
+					.toList(),
+				comparison.modelId()
+			);
+		}
+	}
+
+	public record TaxDocumentVerificationResponse(
+		TaxDocumentType detectedDocumentType,
+		TaxDocumentStatus verificationStatus,
+		TaxDocumentFields fields,
+		List<String> missingRequiredFields,
+		List<TaxDocumentIssue> issues,
+		BigDecimal ocrConfidence,
+		BigDecimal tamperRisk,
+		boolean manualReviewRequired,
+		String modelId,
+		String promptVersion
+	) {
+		private static TaxDocumentVerificationResponse from(
+			com.kmarket.navigator.backend.tax.domain.TaxDocumentVerification verification
+		) {
+			return new TaxDocumentVerificationResponse(
+				verification.detectedDocumentType(),
+				verification.status(),
+				verification.fields(),
+				verification.missingRequiredFields(),
+				verification.issues(),
+				verification.ocrConfidence(),
+				verification.tamperRisk(),
+				verification.manualReviewRequired(),
+				verification.modelId(),
+				verification.promptVersion()
 			);
 		}
 	}
