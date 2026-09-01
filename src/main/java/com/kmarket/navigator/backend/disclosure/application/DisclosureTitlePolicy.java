@@ -9,7 +9,7 @@ public final class DisclosureTitlePolicy {
 	public static final String CONTENT_KIND = "DISCLOSURE_TITLE";
 	public static final String SOURCE_LOCALE = "ko";
 	public static final String TARGET_LOCALE = "en";
-	public static final String TRANSLATION_VERSION = "codex-disclosure-title-v1";
+	public static final String TRANSLATION_VERSION = "codex-disclosure-title-v2";
 	public static final String MODEL_ID = "codex-reviewed-catalog";
 	public static final String PROMPT_VERSION = "disclosure-title-catalog-v1";
 

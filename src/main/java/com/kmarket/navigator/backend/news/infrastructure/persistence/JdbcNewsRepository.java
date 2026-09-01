@@ -629,7 +629,7 @@ class JdbcNewsRepository implements NewsRepository {
 			        source_hash, source_text, normalized_source_text, status,
 			        created_at, updated_at
 			    )
-			    SELECT gen_random_uuid(), 'NEWS_TITLE', 'ko', 'en', 'news-title-v2',
+			    SELECT gen_random_uuid(), 'NEWS_TITLE', 'ko', 'en', 'news-title-v3',
 			           encode(digest(normalized, 'sha256'), 'hex'), normalized, normalized,
 			           'PENDING', :now, :now
 			    FROM source
