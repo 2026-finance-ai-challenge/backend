@@ -99,7 +99,7 @@ public class NewsFingerprint {
 		boolean duplicate;
 		if (distance.compareTo(Duration.ofHours(12)) <= 0) {
 			duplicate = exactTitle
-				|| (!shortTitle && title >= 0.72)
+				|| (!shortTitle && title >= 0.66)
 				|| (title >= 0.58 && excerpt >= 0.58)
 				|| (title >= 0.35 && excerpt >= 0.72)
 				|| (title >= 0.35 && combined >= 0.82);

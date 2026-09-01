@@ -121,12 +121,12 @@ class TranslationWorkerTests {
 			eq(25), anyString(), eq(NOW), eq(NOW.minusSeconds(300))
 		);
 		verify(repository).fail(
-			eq(job.id()), eq(1), eq("AI_PROVIDER_TIMEOUT"), eq(NOW), eq(Duration.ofSeconds(30))
+			eq(job.id()), eq(1), eq("AI_PROVIDER_TIMEOUT"), eq(NOW), eq(Duration.ofSeconds(15))
 		);
 	}
 
 	@Test
-	void isolatesInvalidTitleOutputAndCompletesValidJobs() {
+	void rejectsInvalidTitleBatchWithoutAdditionalProviderCalls() {
 		TranslationRepository repository = Mockito.mock(TranslationRepository.class);
 		TranslationAiGateway gateway = Mockito.mock(TranslationAiGateway.class);
 		TranslationGenerationGuard guard = Mockito.mock(TranslationGenerationGuard.class);
@@ -150,20 +150,17 @@ class TranslationWorkerTests {
 			.thenThrow(new TranslationProviderException(
 				TranslationProviderException.Failure.INVALID_OUTPUT
 			));
-		when(gateway.translateTitles(List.of(valid))).thenReturn(List.of(generated));
-		when(gateway.translateTitles(List.of(invalid)))
-			.thenThrow(new TranslationProviderException(
-				TranslationProviderException.Failure.INVALID_OUTPUT
-			));
-
 		new TranslationWorker(
 			repository, gateway, guard, JsonMapper.builder().build(),
 			Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(15)
 		).processTitleBatch();
 
-		verify(repository).completeNewsTitle(generated, NOW);
+		verify(gateway, times(1)).translateTitles(List.of(valid, invalid));
 		verify(repository).fail(
-			eq(invalid.id()), eq(1), eq("AI_INVALID_OUTPUT"), eq(NOW), eq(Duration.ofSeconds(30))
+			eq(valid.id()), eq(1), eq("AI_INVALID_OUTPUT"), eq(NOW), eq(Duration.ofSeconds(15))
+		);
+		verify(repository).fail(
+			eq(invalid.id()), eq(1), eq("AI_INVALID_OUTPUT"), eq(NOW), eq(Duration.ofSeconds(15))
 		);
 	}
 }

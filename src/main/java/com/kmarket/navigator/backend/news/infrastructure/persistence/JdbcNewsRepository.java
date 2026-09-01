@@ -189,48 +189,10 @@ class JdbcNewsRepository implements NewsRepository {
 	}
 
 	@Override
-	public List<UUID> findNarrativeBackfillCandidates(int limit) {
-		return jdbcClient.sql("""
-			SELECT article.id
-			FROM news_article article
-			JOIN news_cluster story
-			  ON story.id = article.cluster_id
-			 AND story.representative_article_id = article.id
-			WHERE article.published_at >= CURRENT_TIMESTAMP - INTERVAL '1 hour'
-			  AND article.content_availability = 'FULL_ARTICLE'
-			  AND article.original_body IS NOT NULL
-			  AND btrim(article.original_body) <> ''
-			  AND article.analysis_status = 'READY'
-			  AND article.english_title IS NOT NULL
-			  AND btrim(article.english_title) <> ''
-			  AND article.english_title !~ '[가-힣ㄱ-ㅎㅏ-ㅣ]'
-			  AND (
-			    article.english_body IS NULL OR btrim(article.english_body) = ''
-			    OR article.english_body ~ '[가-힣ㄱ-ㅎㅏ-ㅣ]'
-			    OR article.english_body ~* '\\y(eok|jo)([ -]?won)?\\y|\\yman[ -]?won\\y'
-			    OR article.what_summary IS NULL OR btrim(article.what_summary) = ''
-			    OR article.what_summary ~ '[가-힣ㄱ-ㅎㅏ-ㅣ]'
-			    OR article.what_summary ~* '\\y(eok|jo)([ -]?won)?\\y|\\yman[ -]?won\\y'
-			    OR article.why_summary IS NULL OR btrim(article.why_summary) = ''
-			    OR article.why_summary ~ '[가-힣ㄱ-ㅎㅏ-ㅣ]'
-			    OR article.why_summary ~* '\\y(eok|jo)([ -]?won)?\\y|\\yman[ -]?won\\y'
-			    OR article.impact_summary IS NULL OR btrim(article.impact_summary) = ''
-			    OR article.impact_summary ~ '[가-힣ㄱ-ㅎㅏ-ㅣ]'
-			    OR article.impact_summary ~* '\\y(eok|jo)([ -]?won)?\\y|\\yman[ -]?won\\y'
-			  )
-			ORDER BY article.published_at DESC, article.id DESC
-			LIMIT :limit
-			""")
-			.param("limit", limit)
-			.query(UUID.class)
-			.list();
-	}
-
-	@Override
 	public List<NewsDuplicateCandidate> findDuplicateCandidates(Instant since, int limit) {
 		return jdbcClient.sql("""
 			SELECT article.id, article.cluster_id, article.original_title,
-			       COALESCE(article.original_body, article.original_excerpt, '') AS source_text,
+			       COALESCE(NULLIF(article.original_excerpt, ''), LEFT(article.original_body, 2000), '') AS source_text,
 			       article.publisher, article.published_at
 			FROM news_article article
 			WHERE article.collected_at >= :since
@@ -400,7 +362,7 @@ class JdbcNewsRepository implements NewsRepository {
 			VALUES (
 			    :id, :clusterId, 'NAVER_NEWS', :providerArticleId, :title,
 			    encode(digest(regexp_replace(btrim(:title), '[[:space:]]+', ' ', 'g'), 'sha256'), 'hex'),
-			    NULL, :body, :originalUrl, :canonicalUrl, :canonicalUrlHash,
+			    :excerpt, :body, :originalUrl, :canonicalUrl, :canonicalUrlHash,
 			    :publisher, :thumbnailUrl, 'FULL_ARTICLE', 'PENDING',
 			    :sourcePolicy, :duplicateScore, :publishedAt, :collectedAt
 			)
@@ -411,6 +373,7 @@ class JdbcNewsRepository implements NewsRepository {
 			.param("clusterId", clusterId)
 			.param("providerArticleId", draft.providerArticleId())
 			.param("title", draft.title())
+			.param("excerpt", draft.excerpt(), Types.VARCHAR)
 			.param("body", draft.body())
 			.param("originalUrl", draft.originalUrl())
 			.param("canonicalUrl", draft.canonicalUrl())

@@ -204,12 +204,12 @@ class BackendApplicationTests {
 	}
 
 	@Test
-	void usesTimeoutsThatAllowBoundedProviderRetriesToComplete() {
+	void usesBoundedProviderTimeoutsAndRecentNewsWindow() {
 		assertThat(aiServiceProperties.connectTimeout()).isEqualTo(Duration.ofSeconds(3));
 		assertThat(aiServiceProperties.readTimeout()).isEqualTo(Duration.ofSeconds(120));
 		assertThat(naverNewsProperties.getConnectTimeout()).isEqualTo(Duration.ofSeconds(10));
 		assertThat(naverNewsProperties.getReadTimeout()).isEqualTo(Duration.ofSeconds(30));
-		assertThat(naverNewsProperties.getMaxArticleAge()).isEqualTo(Duration.ofDays(7));
+		assertThat(naverNewsProperties.getMaxArticleAge()).isEqualTo(Duration.ofHours(36));
 		assertThat(naverNewsProperties.getTargetBatchSize()).isEqualTo(8);
 		assertThat(naverNewsProperties.getQueries()).isEmpty();
 		assertThat(openDartProperties.connectTimeout()).isEqualTo(Duration.ofSeconds(5));
