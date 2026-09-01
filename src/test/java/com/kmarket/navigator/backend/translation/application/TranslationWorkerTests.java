@@ -124,4 +124,46 @@ class TranslationWorkerTests {
 			eq(job.id()), eq(1), eq("AI_PROVIDER_TIMEOUT"), eq(NOW), eq(Duration.ofSeconds(30))
 		);
 	}
+
+	@Test
+	void isolatesInvalidTitleOutputAndCompletesValidJobs() {
+		TranslationRepository repository = Mockito.mock(TranslationRepository.class);
+		TranslationAiGateway gateway = Mockito.mock(TranslationAiGateway.class);
+		TranslationGenerationGuard guard = Mockito.mock(TranslationGenerationGuard.class);
+		TitleTranslationJob valid = new TitleTranslationJob(
+			UUID.randomUUID(),
+			"4bf85830b94228184e8234c14e92c8c9eee79847867458ba624b29d3ce359677",
+			"삼성전자 투자 확대", "news-title-v1", 1
+		);
+		TitleTranslationJob invalid = new TitleTranslationJob(
+			UUID.randomUUID(),
+			"5bf85830b94228184e8234c14e92c8c9eee79847867458ba624b29d3ce359678",
+			"목표가 240만원", "news-title-v1", 1
+		);
+		GeneratedTitle generated = new GeneratedTitle(
+			valid.id(), valid.sourceHash(), "Samsung Electronics expands investment", "en",
+			"news-title-v1", "gpt-5-mini", "news-title-v1"
+		);
+		when(repository.claimNewsTitles(eq(25), anyString(), eq(NOW), eq(NOW.minusSeconds(300))))
+			.thenReturn(List.of(valid, invalid));
+		when(gateway.translateTitles(List.of(valid, invalid)))
+			.thenThrow(new TranslationProviderException(
+				TranslationProviderException.Failure.INVALID_OUTPUT
+			));
+		when(gateway.translateTitles(List.of(valid))).thenReturn(List.of(generated));
+		when(gateway.translateTitles(List.of(invalid)))
+			.thenThrow(new TranslationProviderException(
+				TranslationProviderException.Failure.INVALID_OUTPUT
+			));
+
+		new TranslationWorker(
+			repository, gateway, guard, JsonMapper.builder().build(),
+			Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(15)
+		).processTitleBatch();
+
+		verify(repository).completeNewsTitle(generated, NOW);
+		verify(repository).fail(
+			eq(invalid.id()), eq(1), eq("AI_INVALID_OUTPUT"), eq(NOW), eq(Duration.ofSeconds(30))
+		);
+	}
 }
