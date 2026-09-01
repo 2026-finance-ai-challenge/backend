@@ -1816,6 +1816,20 @@ class BackendApplicationTests {
 		mockMvc.perform(post("/api/v1/news/{articleId}/translation", articleId))
 			.andExpect(status().isAccepted())
 			.andExpect(jsonPath("$.status").value("PENDING"));
+		mockMvc.perform(post("/api/v1/news/{articleId}/translation", articleId))
+			.andExpect(status().isAccepted())
+			.andExpect(jsonPath("$.status").value("PENDING"));
+		assertThat(jdbcClient.sql("""
+			SELECT count(*)
+			FROM translation_memory memory
+			JOIN translation_job job ON job.translation_memory_id = memory.id
+			WHERE memory.content_kind = 'NEWS_NARRATIVE'
+			  AND memory.translation_version = 'news-narrative-v8'
+			  AND memory.request_context ->> 'article_id' = :articleId
+			""")
+			.param("articleId", articleId.toString())
+			.query(Long.class)
+			.single()).isEqualTo(1);
 
 		OpenDartFiling filing = filing("20260823800003");
 		disclosureRepository.saveFiling(filing);
@@ -1836,6 +1850,24 @@ class BackendApplicationTests {
 		))
 			.andExpect(status().isAccepted())
 			.andExpect(jsonPath("$.status").value("PENDING"));
+		mockMvc.perform(post(
+			"/api/v1/disclosures/{receiptNumber}/sections/{sectionId}/translation",
+			filing.receiptNumber(),
+			sectionId
+		))
+			.andExpect(status().isAccepted())
+			.andExpect(jsonPath("$.status").value("PENDING"));
+		assertThat(jdbcClient.sql("""
+			SELECT count(*)
+			FROM translation_memory memory
+			JOIN translation_job job ON job.translation_memory_id = memory.id
+			WHERE memory.content_kind = 'DISCLOSURE_SECTION'
+			  AND memory.translation_version = 'disclosure-section-v2'
+			  AND memory.request_context ->> 'section_id' = :sectionId
+			""")
+			.param("sectionId", sectionId.toString())
+			.query(Long.class)
+			.single()).isEqualTo(1);
 	}
 
 	@Test
@@ -1874,7 +1906,7 @@ class BackendApplicationTests {
 					invocation.getArgument(4),
 					result,
 					"translation-test-model",
-					"news-narrative-v7"
+					"news-narrative-v8"
 				);
 			});
 

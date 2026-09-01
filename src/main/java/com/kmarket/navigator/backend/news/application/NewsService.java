@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 
 import com.kmarket.navigator.backend.global.error.BusinessException;
 import com.kmarket.navigator.backend.global.error.ErrorCode;
+import com.kmarket.navigator.backend.global.text.EnglishTextPolicy;
 import com.kmarket.navigator.backend.news.application.port.NewsAiGateway;
 import com.kmarket.navigator.backend.news.application.port.NewsRepository;
 import com.kmarket.navigator.backend.news.domain.NewsArticle;
@@ -71,6 +72,7 @@ public class NewsService {
 		return article.contentAvailability() == NewsContentAvailability.FULL_ARTICLE
 			&& article.originalBody() != null
 			&& !article.originalBody().isBlank()
+			&& EnglishTextPolicy.isValid(article.englishTitle())
 			&& article.analysisStatus() == NewsAnalysisStatus.READY;
 	}
 

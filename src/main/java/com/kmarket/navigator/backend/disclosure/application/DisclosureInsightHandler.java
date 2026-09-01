@@ -29,23 +29,27 @@ public class DisclosureInsightHandler {
 	private static final String SUMMARY_PROMPT_VERSION = "filing-summary-v2";
 	private final DisclosureRepository repository;
 	private final DisclosureInsightGateway gateway;
+	private final DisclosureInsightGenerationGuard generationGuard;
 	private final Clock clock;
 
 	@Autowired
 	public DisclosureInsightHandler(
 		DisclosureRepository repository,
-		DisclosureInsightGateway gateway
+		DisclosureInsightGateway gateway,
+		DisclosureInsightGenerationGuard generationGuard
 	) {
-		this(repository, gateway, Clock.systemUTC());
+		this(repository, gateway, generationGuard, Clock.systemUTC());
 	}
 
 	DisclosureInsightHandler(
 		DisclosureRepository repository,
 		DisclosureInsightGateway gateway,
+		DisclosureInsightGenerationGuard generationGuard,
 		Clock clock
 	) {
 		this.repository = repository;
 		this.gateway = gateway;
+		this.generationGuard = generationGuard;
 		this.clock = clock;
 	}
 
@@ -63,6 +67,25 @@ public class DisclosureInsightHandler {
 			.filter(insight -> SUMMARY_PROMPT_VERSION.equals(insight.promptVersion()));
 		if (existing.isPresent()) {
 			return existing.get();
+		}
+		DisclosureInsightGenerationGuard.Guard acquired = generationGuard.tryAcquire(contentVersion);
+		if (acquired == null) {
+			return awaitCached(receiptNumber, contentVersion);
+		}
+		try (acquired) {
+			return generateLocked(receiptNumber, detail, contentVersion);
+		}
+	}
+
+	private DisclosureInsight generateLocked(
+		String receiptNumber,
+		DisclosureDetail detail,
+		String contentVersion
+	) {
+		var cached = repository.findInsight(receiptNumber, contentVersion)
+			.filter(insight -> SUMMARY_PROMPT_VERSION.equals(insight.promptVersion()));
+		if (cached.isPresent()) {
+			return cached.get();
 		}
 		Map<String, DisclosureSection> allowed = evidence(detail);
 		if (allowed.isEmpty()) {
@@ -101,6 +124,25 @@ public class DisclosureInsightHandler {
 		);
 		repository.saveInsight(insight);
 		return insight;
+	}
+
+	private DisclosureInsight awaitCached(String receiptNumber, String contentVersion) {
+		long deadline = System.nanoTime() + java.time.Duration.ofSeconds(120).toNanos();
+		while (System.nanoTime() < deadline) {
+			var cached = repository.findInsight(receiptNumber, contentVersion)
+				.filter(insight -> SUMMARY_PROMPT_VERSION.equals(insight.promptVersion()));
+			if (cached.isPresent()) {
+				return cached.get();
+			}
+			try {
+				Thread.sleep(200);
+			}
+			catch (InterruptedException exception) {
+				Thread.currentThread().interrupt();
+				break;
+			}
+		}
+		throw new BusinessException(ErrorCode.DISCLOSURE_INSIGHT_NOT_READY);
 	}
 
 	private DisclosureDetail detail(String receiptNumber) {

@@ -134,7 +134,7 @@ class DisclosureController {
 		@Pattern(regexp = "^[0-9]{14}$")
 		String receiptNumber
 	) {
-		return DisclosureDetailResponse.from(queryHandler.findOne(receiptNumber), objectMapper);
+		return DisclosureDetailResponse.from(queryHandler.findPublished(receiptNumber), objectMapper);
 	}
 
 	@GetMapping("/{receiptNumber}/sections/{sectionId}/translation")

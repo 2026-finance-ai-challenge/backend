@@ -30,6 +30,7 @@ import tools.jackson.databind.ObjectMapper;
 class JdbcTranslationRepository implements TranslationRepository {
 
 	private static final int MAX_ATTEMPTS = 1;
+	private static final String NEWS_TITLE_VERSION = "news-title-v2";
 	private final JdbcClient jdbcClient;
 	private final ObjectMapper objectMapper;
 
@@ -222,7 +223,7 @@ class JdbcTranslationRepository implements TranslationRepository {
 			    JOIN translation_memory memory ON memory.id = job.translation_memory_id
 			    WHERE memory.content_kind = 'NEWS_TITLE'
 			      AND memory.target_locale = 'en'
-			      AND memory.translation_version = 'news-title-v1'
+			      AND memory.translation_version = :translationVersion
 			      AND job.status = 'PENDING' AND job.attempts < :maxAttempts
 			      AND job.available_at <= :now
 			    ORDER BY job.priority, memory.created_at DESC, job.available_at DESC,
@@ -249,6 +250,7 @@ class JdbcTranslationRepository implements TranslationRepository {
 			.param("workerId", workerId)
 			.param("limit", limit)
 			.param("maxAttempts", MAX_ATTEMPTS)
+			.param("translationVersion", NEWS_TITLE_VERSION)
 			.query((resultSet, rowNumber) -> new TitleTranslationJob(
 				resultSet.getObject("id", UUID.class),
 				resultSet.getString("source_hash"),

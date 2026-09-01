@@ -66,6 +66,8 @@ class JdbcNewsRepository implements NewsRepository {
 			  AND article.original_body IS NOT NULL
 			  AND btrim(article.original_body) <> ''
 			  AND article.analysis_status = 'READY'
+			  AND article.english_title IS NOT NULL
+			  AND btrim(article.english_title) <> ''
 			  AND (CAST(:query AS varchar) IS NULL
 			       OR article.original_title ILIKE '%%' || :query || '%%' ESCAPE '\\'
 			       OR article.original_body ILIKE '%%' || :query || '%%' ESCAPE '\\'
@@ -627,7 +629,7 @@ class JdbcNewsRepository implements NewsRepository {
 			        source_hash, source_text, normalized_source_text, status,
 			        created_at, updated_at
 			    )
-			    SELECT gen_random_uuid(), 'NEWS_TITLE', 'ko', 'en', 'news-title-v1',
+			    SELECT gen_random_uuid(), 'NEWS_TITLE', 'ko', 'en', 'news-title-v2',
 			           encode(digest(normalized, 'sha256'), 'hex'), normalized, normalized,
 			           'PENDING', :now, :now
 			    FROM source
