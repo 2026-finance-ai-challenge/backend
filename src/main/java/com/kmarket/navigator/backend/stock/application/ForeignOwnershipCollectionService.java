@@ -19,7 +19,7 @@ import com.kmarket.navigator.backend.stock.application.port.ForeignOwnershipGate
 import com.kmarket.navigator.backend.stock.application.port.ForeignLimitPredictionGateway;
 import com.kmarket.navigator.backend.stock.application.port.MarketDataGateway;
 import com.kmarket.navigator.backend.stock.application.port.MarketSnapshotRepository;
-import com.kmarket.navigator.backend.stock.domain.ForeignLimitCollectionTarget;
+import com.kmarket.navigator.backend.stock.domain.ForeignOwnershipCollectionTarget;
 import com.kmarket.navigator.backend.stock.domain.ForeignOwnershipSnapshot;
 import com.kmarket.navigator.backend.stock.domain.MarketDailyPrice;
 
@@ -76,7 +76,7 @@ public class ForeignOwnershipCollectionService {
 	public void collect() {
 		LocalDate to = LocalDate.now(clock);
 		LocalDate from = to.minusDays(HISTORY_DAYS);
-		for (ForeignLimitCollectionTarget target : repository.findForeignLimitTargets()) {
+		for (ForeignOwnershipCollectionTarget target : repository.findForeignOwnershipTargets()) {
 			try {
 				if (gateway.configured()) {
 					gateway.fetchHistory(target, from, to)
@@ -86,7 +86,9 @@ public class ForeignOwnershipCollectionService {
 						.flatMap(snapshot -> withLatestTradingDate(target.stockCode(), snapshot, to))
 						.ifPresent(snapshot -> repository.saveForeignOwnership(target.stockCode(), snapshot));
 				}
-				precomputePrediction(target.stockCode());
+				if (target.subjectToAcquisitionLimit()) {
+					precomputePrediction(target.stockCode());
+				}
 			} catch (RuntimeException exception) {
 				log.warn(
 					"Foreign ownership collection failed for stockCode={} type={}",
@@ -104,7 +106,10 @@ public class ForeignOwnershipCollectionService {
 		lockAtLeastFor = "PT1S"
 	)
 	public void precomputeAllPredictions() {
-		for (ForeignLimitCollectionTarget target : repository.findForeignLimitTargets()) {
+		for (ForeignOwnershipCollectionTarget target : repository.findForeignOwnershipTargets()) {
+			if (!target.subjectToAcquisitionLimit()) {
+				continue;
+			}
 			try {
 				precomputePrediction(target.stockCode());
 			}

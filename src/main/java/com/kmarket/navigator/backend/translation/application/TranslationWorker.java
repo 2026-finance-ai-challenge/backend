@@ -140,7 +140,9 @@ public class TranslationWorker {
 	}
 
 	private void process(TranslationJob job) {
-		TranslationGenerationGuard.Guard acquired = guard.tryAcquire(job.sourceHash());
+		TranslationGenerationGuard.Guard acquired = guard.tryAcquire(
+			job.sourceHash() + ":" + job.targetLocale()
+		);
 		if (acquired == null) {
 			repository.fail(job.id(), job.attempts(), "DUPLICATE_GENERATION_LOCKED",
 				Instant.now(clock), Duration.ofSeconds(5));
@@ -169,7 +171,8 @@ public class TranslationWorker {
 		source.path("paragraphs").forEach(value -> paragraphs.add(value.asString()));
 		return aiGateway.translateNews(
 			job.sourceHash(), source.path("title").asString(), paragraphs,
-			source.path("content_availability").asString(), job.translationVersion()
+			source.path("content_availability").asString(), job.targetLocale(),
+			job.translationVersion()
 		);
 	}
 

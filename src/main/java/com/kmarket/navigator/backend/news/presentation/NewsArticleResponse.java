@@ -21,9 +21,12 @@ record NewsArticleResponse(
 	String originalBody,
 	String englishTitle,
 	String englishBody,
-	String what,
-	String why,
-	String impact,
+	String whatEn,
+	String whyEn,
+	String impactEn,
+	String whatKo,
+	String whyKo,
+	String impactKo,
 	String eventType,
 	NewsSentiment sentiment,
 	NewsImportance importance,
@@ -47,8 +50,9 @@ record NewsArticleResponse(
 	static NewsArticleResponse from(NewsArticle article) {
 		return new NewsArticleResponse(
 			article.id(), article.clusterId(), article.originalTitle(), article.originalExcerpt(),
-			article.originalBody(), article.englishTitle(), article.englishBody(), article.what(),
-			article.why(), article.impact(), article.eventType(), article.sentiment(),
+			article.originalBody(), article.englishTitle(), article.englishBody(), article.whatEn(),
+			article.whyEn(), article.impactEn(), article.whatKo(), article.whyKo(),
+			article.impactKo(), article.eventType(), article.sentiment(),
 			article.importance(), article.marketImpact(), article.marketImpactImportance(),
 			article.marketImpactScore(), new Confidence(
 				article.eventConfidence(), article.sentimentConfidence(),

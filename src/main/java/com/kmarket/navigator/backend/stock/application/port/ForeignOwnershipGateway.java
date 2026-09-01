@@ -3,7 +3,7 @@ package com.kmarket.navigator.backend.stock.application.port;
 import java.time.LocalDate;
 import java.util.List;
 
-import com.kmarket.navigator.backend.stock.domain.ForeignLimitCollectionTarget;
+import com.kmarket.navigator.backend.stock.domain.ForeignOwnershipCollectionTarget;
 import com.kmarket.navigator.backend.stock.domain.ForeignOwnershipSnapshot;
 
 public interface ForeignOwnershipGateway {
@@ -11,7 +11,7 @@ public interface ForeignOwnershipGateway {
 	boolean configured();
 
 	List<ForeignOwnershipSnapshot> fetchHistory(
-		ForeignLimitCollectionTarget target,
+		ForeignOwnershipCollectionTarget target,
 		LocalDate from,
 		LocalDate to
 	);

@@ -276,7 +276,8 @@ public class MarketController {
 				ForeignLimitPolicyResponse.from(detail.foreignLimitPolicy()),
 				ForeignLimitPredictionResponse.from(
 					detail.foreignLimitPrediction(),
-					view.quote() == null ? null : view.quote().marketSession()
+					view.quote() == null ? null : view.quote().marketSession(),
+					detail.foreignLimitPolicy() != null
 				)
 			);
 		}
@@ -409,8 +410,15 @@ public class MarketController {
 	) {
 		static ForeignLimitPredictionResponse from(
 			ForeignLimitPrediction prediction,
-			String marketSession
+			String marketSession,
+			boolean applicable
 		) {
+			if (!applicable) {
+				return new ForeignLimitPredictionResponse(
+					"NOT_APPLICABLE", null, null, null, 0, 0, null, null, null, null,
+					"NOT_APPLICABLE"
+				);
+			}
 			if (prediction == null) {
 				return new ForeignLimitPredictionResponse(
 					"REGULAR".equals(marketSession) ? "UNAVAILABLE" : "MARKET_CLOSED",
@@ -462,7 +470,8 @@ public class MarketController {
 				monitor.warning(),
 				ForeignLimitPredictionResponse.from(
 					monitor.prediction(),
-					monitor.view().quote() == null ? null : monitor.view().quote().marketSession()
+					monitor.view().quote() == null ? null : monitor.view().quote().marketSession(),
+					true
 				)
 			);
 		}

@@ -10,6 +10,7 @@ public record TranslationJob(
 	String sourceHash,
 	String canonicalSource,
 	JsonNode context,
+	String targetLocale,
 	String translationVersion,
 	int attempts
 ) {

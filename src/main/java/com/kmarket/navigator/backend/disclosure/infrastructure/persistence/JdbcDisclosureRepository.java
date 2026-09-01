@@ -752,7 +752,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			       d.disclosure_type, d.title_ko,
 			       CASE WHEN translation.status = 'READY' THEN translation.translated_text END AS title_en,
 			       d.event_type, d.sentiment, d.importance, d.market_impact,
-			       d.filed_date,
+			       d.filed_date, COUNT(*) OVER (PARTITION BY d.filed_date) AS filed_date_total,
 			       d.detected_at, d.correction, d.document_status, d.index_status, d.official_url
 			FROM disclosure d
 			JOIN issuer i ON i.id = d.issuer_id
@@ -1340,6 +1340,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			enumValue(com.kmarket.navigator.backend.news.domain.MarketImpact.class,
 				resultSet.getString("market_impact")),
 			resultSet.getObject("filed_date", java.time.LocalDate.class),
+			resultSet.getLong("filed_date_total"),
 			resultSet.getObject("detected_at", OffsetDateTime.class).toInstant(),
 			resultSet.getBoolean("correction"),
 			DocumentStatus.valueOf(resultSet.getString("document_status")),

@@ -21,7 +21,7 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 
 import com.kmarket.navigator.backend.stock.application.port.ForeignOwnershipGateway;
-import com.kmarket.navigator.backend.stock.domain.ForeignLimitCollectionTarget;
+import com.kmarket.navigator.backend.stock.domain.ForeignOwnershipCollectionTarget;
 import com.kmarket.navigator.backend.stock.domain.ForeignOwnershipSnapshot;
 
 import tools.jackson.databind.JsonNode;
@@ -58,7 +58,7 @@ class KrxForeignOwnershipGateway implements ForeignOwnershipGateway {
 
 	@Override
 	public synchronized List<ForeignOwnershipSnapshot> fetchHistory(
-		ForeignLimitCollectionTarget target,
+		ForeignOwnershipCollectionTarget target,
 		LocalDate from,
 		LocalDate to
 	) {

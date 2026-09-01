@@ -84,9 +84,9 @@ public class AgentEvidenceProvider {
 		Map<String, Object> packet = new LinkedHashMap<>();
 		packet.put("title", article.originalTitle());
 		packet.put("sourceText", article.sourceText());
-		packet.put("what", article.what());
-		packet.put("why", article.why());
-		packet.put("impact", article.impact());
+		packet.put("what", article.whatEn());
+		packet.put("why", article.whyEn());
+		packet.put("impact", article.impactEn());
 		packet.put("sentiment", article.sentiment());
 		packet.put("importance", article.importance());
 		packet.put("marketImpact", article.marketImpact());

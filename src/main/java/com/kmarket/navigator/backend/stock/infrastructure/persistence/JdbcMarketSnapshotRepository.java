@@ -11,7 +11,7 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.kmarket.navigator.backend.stock.application.port.MarketSnapshotRepository;
-import com.kmarket.navigator.backend.stock.domain.ForeignLimitCollectionTarget;
+import com.kmarket.navigator.backend.stock.domain.ForeignOwnershipCollectionTarget;
 import com.kmarket.navigator.backend.stock.domain.ForeignLimitPrediction;
 import com.kmarket.navigator.backend.stock.domain.ForeignOwnershipSnapshot;
 import com.kmarket.navigator.backend.stock.domain.ExchangeRateSnapshot;
@@ -153,16 +153,19 @@ class JdbcMarketSnapshotRepository implements MarketSnapshotRepository {
 	}
 
 	@Override
-	public List<ForeignLimitCollectionTarget> findForeignLimitTargets() {
+	public List<ForeignOwnershipCollectionTarget> findForeignOwnershipTargets() {
 		return jdbcClient.sql("""
-			SELECT policy.stock_code, s.isin_code
-			FROM foreign_limit_policy policy
-			JOIN security s ON s.stock_code = policy.stock_code
-			ORDER BY policy.stock_code
+			SELECT s.stock_code, s.isin_code, policy.stock_code IS NOT NULL AS subject_to_limit
+			FROM security s
+			JOIN service_stock_universe universe ON universe.stock_code = s.stock_code
+			LEFT JOIN foreign_limit_policy policy ON policy.stock_code = s.stock_code
+			WHERE s.active AND s.common_stock
+			ORDER BY s.stock_code
 			""")
-			.query((resultSet, rowNumber) -> new ForeignLimitCollectionTarget(
+			.query((resultSet, rowNumber) -> new ForeignOwnershipCollectionTarget(
 				resultSet.getString("stock_code"),
-				resultSet.getString("isin_code")
+				resultSet.getString("isin_code"),
+				resultSet.getBoolean("subject_to_limit")
 			))
 			.list();
 	}
@@ -180,7 +183,6 @@ class JdbcMarketSnapshotRepository implements MarketSnapshotRepository {
 			       :foreignLimitQuantity, :availableQuantity, :ownershipRate,
 			       :limitExhaustionRate, :collectedAt, :source
 			FROM security s
-			JOIN foreign_limit_policy policy ON policy.stock_code = s.stock_code
 			WHERE s.stock_code = :stockCode
 			ON CONFLICT (security_id, base_date) DO UPDATE
 			SET foreign_owned_quantity = EXCLUDED.foreign_owned_quantity,

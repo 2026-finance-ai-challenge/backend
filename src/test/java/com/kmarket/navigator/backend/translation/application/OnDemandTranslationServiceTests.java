@@ -61,6 +61,7 @@ class OnDemandTranslationServiceTests {
 		when(translationRepository.find(
 			TranslationKind.DISCLOSURE_SECTION,
 			"7eeec9dfa5bbc38484ca8f4512729da678f7ff96b8f5d7859de0b537bf33974e",
+			"en",
 			OnDemandTranslationService.DISCLOSURE_SECTION_VERSION
 		)).thenReturn(Optional.empty());
 
@@ -90,6 +91,7 @@ class OnDemandTranslationServiceTests {
 		when(translationRepository.request(
 			Mockito.eq(TranslationKind.DISCLOSURE_SECTION),
 			Mockito.anyString(), Mockito.anyString(), Mockito.any(),
+			Mockito.eq("en"),
 			Mockito.eq(OnDemandTranslationService.DISCLOSURE_SECTION_VERSION),
 			Mockito.any()
 		)).thenReturn(new TranslationView(
