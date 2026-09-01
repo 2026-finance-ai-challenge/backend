@@ -44,7 +44,7 @@ class TranslationWorkerTests {
 			id, job.sourceHash(), "Samsung Electronics expands investment", "en",
 			"news-title-v1", "gpt-5-mini", "news-title-v1"
 		);
-		when(repository.claimNewsTitles(eq(10), anyString(), eq(NOW), eq(NOW.minusSeconds(300))))
+		when(repository.claimNewsTitles(eq(25), anyString(), eq(NOW), eq(NOW.minusSeconds(300))))
 			.thenReturn(List.of(job));
 		when(repository.claim(eq(10), anyString(), eq(NOW), eq(NOW.minusSeconds(300))))
 			.thenReturn(List.of());
@@ -68,7 +68,7 @@ class TranslationWorkerTests {
 			"4bf85830b94228184e8234c14e92c8c9eee79847867458ba624b29d3ce359677",
 			"삼성전자 투자 확대", "news-title-v1", 1
 		);
-		when(repository.claimNewsTitles(eq(10), anyString(), eq(NOW), eq(NOW.minusSeconds(300))))
+		when(repository.claimNewsTitles(eq(25), anyString(), eq(NOW), eq(NOW.minusSeconds(300))))
 			.thenReturn(List.of(job));
 		when(repository.claim(eq(10), anyString(), eq(NOW), eq(NOW.minusSeconds(300))))
 			.thenReturn(List.of());
@@ -85,7 +85,7 @@ class TranslationWorkerTests {
 		worker.process();
 
 		verify(repository, times(1)).claimNewsTitles(
-			eq(10), anyString(), eq(NOW), eq(NOW.minusSeconds(300))
+			eq(25), anyString(), eq(NOW), eq(NOW.minusSeconds(300))
 		);
 		verify(repository).fail(
 			eq(job.id()), eq(1), eq("AI_PROVIDER_QUOTA_EXHAUSTED"), eq(NOW),
@@ -103,7 +103,7 @@ class TranslationWorkerTests {
 			"4bf85830b94228184e8234c14e92c8c9eee79847867458ba624b29d3ce359677",
 			"삼성전자 투자 확대", "news-title-v1", 1
 		);
-		when(repository.claimNewsTitles(eq(10), anyString(), eq(NOW), eq(NOW.minusSeconds(300))))
+		when(repository.claimNewsTitles(eq(25), anyString(), eq(NOW), eq(NOW.minusSeconds(300))))
 			.thenReturn(List.of(job));
 		when(repository.claim(eq(10), anyString(), eq(NOW), eq(NOW.minusSeconds(300))))
 			.thenReturn(List.of());
@@ -118,7 +118,7 @@ class TranslationWorkerTests {
 		worker.process();
 
 		verify(repository, times(1)).claimNewsTitles(
-			eq(10), anyString(), eq(NOW), eq(NOW.minusSeconds(300))
+			eq(25), anyString(), eq(NOW), eq(NOW.minusSeconds(300))
 		);
 		verify(repository).fail(
 			eq(job.id()), eq(1), eq("AI_PROVIDER_TIMEOUT"), eq(NOW), eq(Duration.ofSeconds(30))

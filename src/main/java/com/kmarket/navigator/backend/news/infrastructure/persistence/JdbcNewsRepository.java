@@ -667,11 +667,16 @@ class JdbcNewsRepository implements NewsRepository {
 			    RETURNING id, status
 			)
 			INSERT INTO translation_job (
-			    translation_memory_id, status, attempts, available_at, created_at, updated_at
+			    translation_memory_id, status, attempts, available_at, created_at, updated_at,
+			    priority
 			)
-			SELECT id, 'PENDING', 0, :now, :now, :now
+			SELECT id, 'PENDING', 0, :now, :now, :now, 10
 			FROM memory WHERE status <> 'READY'
-			ON CONFLICT (translation_memory_id) DO NOTHING
+			ON CONFLICT (translation_memory_id) DO UPDATE
+			SET priority = LEAST(translation_job.priority, EXCLUDED.priority),
+			    available_at = LEAST(translation_job.available_at, EXCLUDED.available_at),
+			    updated_at = EXCLUDED.updated_at
+			WHERE translation_job.status = 'PENDING'
 			""")
 			.param("title", title)
 			.param("now", atUtc(now))

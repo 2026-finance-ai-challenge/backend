@@ -30,7 +30,7 @@ public class TranslationWorker {
 
 	private static final Logger log = LoggerFactory.getLogger(TranslationWorker.class);
 	private static final int BATCH_SIZE = 10;
-	private static final int TITLE_BATCH_SIZE = 10;
+	private static final int TITLE_BATCH_SIZE = 25;
 	private static final Duration TRANSIENT_FAILURE_COOLDOWN = Duration.ofSeconds(15);
 	private static final Duration RATE_LIMIT_COOLDOWN = Duration.ofMinutes(1);
 	private final TranslationRepository repository;
