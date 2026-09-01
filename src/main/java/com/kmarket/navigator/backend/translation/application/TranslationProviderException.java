@@ -15,6 +15,7 @@ public final class TranslationProviderException extends RuntimeException {
 	}
 
 	public enum Failure {
+		INVALID_OUTPUT("AI_INVALID_OUTPUT"),
 		QUOTA_EXHAUSTED("AI_PROVIDER_QUOTA_EXHAUSTED"),
 		RATE_LIMITED("AI_PROVIDER_RATE_LIMITED"),
 		TIMEOUT("AI_PROVIDER_TIMEOUT"),

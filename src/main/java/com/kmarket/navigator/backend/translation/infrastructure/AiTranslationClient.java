@@ -71,7 +71,7 @@ class AiTranslationClient implements TranslationAiGateway {
 		));
 		if (!"en".equals(response.targetLocale()) || !version.equals(response.translationVersion())
 			|| response.items().size() != expected.size()) {
-			throw new BusinessException(ErrorCode.AI_SERVICE_UNAVAILABLE);
+			throw new TranslationProviderException(Failure.INVALID_OUTPUT);
 		}
 		java.util.Set<UUID> seen = new java.util.HashSet<>();
 		List<GeneratedTitle> generated = response.items().stream().map(item -> {
@@ -80,19 +80,24 @@ class AiTranslationClient implements TranslationAiGateway {
 				id = UUID.fromString(item.id());
 			}
 			catch (IllegalArgumentException exception) {
-				throw new BusinessException(ErrorCode.AI_SERVICE_UNAVAILABLE);
+				throw new TranslationProviderException(Failure.INVALID_OUTPUT);
 			}
 			TitleTranslationJob source = expected.get(id);
 			if (source == null || !seen.add(id) || !source.sourceHash().equals(item.sourceHash())) {
-				throw new BusinessException(ErrorCode.AI_SERVICE_UNAVAILABLE);
+				throw new TranslationProviderException(Failure.INVALID_OUTPUT);
 			}
-			return new GeneratedTitle(
-				id, item.sourceHash(), item.translatedText(), response.targetLocale(),
-				response.translationVersion(), response.model(), response.promptVersion()
-			);
+			try {
+				return new GeneratedTitle(
+					id, item.sourceHash(), item.translatedText(), response.targetLocale(),
+					response.translationVersion(), response.model(), response.promptVersion()
+				);
+			}
+			catch (IllegalArgumentException exception) {
+				throw new TranslationProviderException(Failure.INVALID_OUTPUT);
+			}
 		}).toList();
 		if (seen.size() != expected.size()) {
-			throw new BusinessException(ErrorCode.AI_SERVICE_UNAVAILABLE);
+			throw new TranslationProviderException(Failure.INVALID_OUTPUT);
 		}
 		return generated;
 	}
@@ -214,6 +219,7 @@ class AiTranslationClient implements TranslationAiGateway {
 			code = "";
 		}
 		Failure failure = switch (code) {
+			case "AI_INVALID_OUTPUT" -> Failure.INVALID_OUTPUT;
 			case "AI_PROVIDER_QUOTA_EXHAUSTED" -> Failure.QUOTA_EXHAUSTED;
 			case "AI_PROVIDER_RATE_LIMITED" -> Failure.RATE_LIMITED;
 			case "AI_PROVIDER_TIMEOUT" -> Failure.TIMEOUT;
