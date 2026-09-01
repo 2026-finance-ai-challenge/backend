@@ -92,11 +92,7 @@ public class TaxDocumentWorker {
 				document.investorType(),
 				safetyIdentifier.from(document.userId())
 			);
-			var verified = policy.validate(
-				document,
-				generated,
-				repository.findComparableFields(document.userId(), document.id())
-			);
+			var verified = policy.validate(document, generated);
 			Instant now = Instant.now(clock);
 			repository.complete(document.id(), verified, "tax-" + UUID.randomUUID(), now);
 			repository.audit(document.id(), document.userId(), "VERIFICATION_COMPLETED", now);

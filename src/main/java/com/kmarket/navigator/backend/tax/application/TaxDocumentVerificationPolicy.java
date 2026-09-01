@@ -7,7 +7,6 @@ import java.time.format.DateTimeParseException;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -28,12 +27,13 @@ public class TaxDocumentVerificationPolicy {
 
 	public TaxDocumentVerification validate(
 		TaxDocument document,
-		TaxDocumentVerification generated,
-		List<TaxDocumentFields> comparableFields
+		TaxDocumentVerification generated
 	) {
 		Set<String> missing = new LinkedHashSet<>(generated.missingRequiredFields());
 		Map<String, TaxDocumentIssue> issues = new LinkedHashMap<>();
-		generated.issues().forEach(issue -> issues.put(issue.code(), issue));
+		generated.issues().stream()
+			.filter(issue -> !"CROSS_DOCUMENT_MISMATCH".equals(issue.code()))
+			.forEach(issue -> issues.put(issue.code(), issue));
 		TaxDocumentStatus status = generated.status();
 
 		if (generated.detectedDocumentType() != document.documentType()) {
@@ -72,15 +72,6 @@ public class TaxDocumentVerificationPolicy {
 				"HIGH_TAMPER_RISK_SIGNAL",
 				"HIGH",
 				"The automated screening detected visual consistency signals that require human review."
-			));
-		}
-		if (inconsistentWithOtherDocuments(generated.fields(), comparableFields)
-			&& status != TaxDocumentStatus.REJECTED) {
-			status = TaxDocumentStatus.REVIEW_REQUIRED;
-			issues.put("CROSS_DOCUMENT_MISMATCH", issue(
-				"CROSS_DOCUMENT_MISMATCH",
-				"HIGH",
-				"The holder or country differs from another uploaded tax document."
 			));
 		}
 		return new TaxDocumentVerification(
@@ -128,28 +119,6 @@ public class TaxDocumentVerificationPolicy {
 		}
 	}
 
-	private boolean inconsistentWithOtherDocuments(
-		TaxDocumentFields fields,
-		List<TaxDocumentFields> comparableFields
-	) {
-		String holder = normalize(fields.holderName());
-		String country = firstNonBlank(
-			fields.residencyCountry(),
-			fields.apostilleCountry(),
-			fields.treatyCountry()
-		);
-		return comparableFields.stream().anyMatch(other -> {
-			String otherHolder = normalize(other.holderName());
-			String otherCountry = firstNonBlank(
-				other.residencyCountry(),
-				other.apostilleCountry(),
-				other.treatyCountry()
-			);
-			return (!holder.isBlank() && !otherHolder.isBlank() && !holder.equals(otherHolder))
-				|| (!blank(country) && !blank(otherCountry) && !country.equalsIgnoreCase(otherCountry));
-		});
-	}
-
 	private List<String> required(TaxDocumentType type) {
 		return switch (type) {
 			case RESIDENCY_CERTIFICATE -> List.of(
@@ -190,20 +159,6 @@ public class TaxDocumentVerificationPolicy {
 
 	private TaxDocumentIssue issue(String code, String severity, String message) {
 		return new TaxDocumentIssue(code, severity, message);
-	}
-
-	private String firstNonBlank(String... values) {
-		for (String value : values) {
-			if (!blank(value)) {
-				return value;
-			}
-		}
-		return null;
-	}
-
-	private String normalize(String value) {
-		return value == null ? "" : value.replaceAll("[^\\p{L}\\p{N}]", "")
-			.toLowerCase(Locale.ROOT);
 	}
 
 	private boolean blank(String value) {
