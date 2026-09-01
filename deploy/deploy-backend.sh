@@ -46,7 +46,7 @@ awk -F= '$1 != "KMARKET_AI_HANA_EXPECTED_COMMIT" && $1 != "KMARKET_AI_TITLE_TRAN
   >"$runtime_env_temporary"
 printf '%s\n' \
   'KMARKET_AI_TITLE_TRANSLATION_PROMPT_VERSION=financial-title-translation-v5' \
-  'KMARKET_AI_NEWS_NARRATIVE_PROMPT_VERSION=news-narrative-v11' \
+  'KMARKET_AI_NEWS_NARRATIVE_PROMPT_VERSION=news-narrative-v12' \
   'KMARKET_AI_DISCLOSURE_SECTION_PROMPT_VERSION=disclosure-section-translation-v5' \
   'KMARKET_AI_TAX_DOCUMENT_PROMPT_VERSION=kmarket-tax-ocr-e2e-v1' \
   >>"$runtime_env_temporary"

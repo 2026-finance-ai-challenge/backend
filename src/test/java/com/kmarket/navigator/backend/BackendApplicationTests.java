@@ -1870,7 +1870,7 @@ class BackendApplicationTests {
 			FROM translation_memory memory
 			JOIN translation_job job ON job.translation_memory_id = memory.id
 			WHERE memory.content_kind = 'NEWS_NARRATIVE'
-			  AND memory.translation_version = 'news-narrative-v11'
+			  AND memory.translation_version = 'news-narrative-v12'
 			  AND memory.request_context ->> 'article_id' = :articleId
 			""")
 			.param("articleId", articleId.toString())
@@ -1964,7 +1964,7 @@ class BackendApplicationTests {
 					invocation.getArgument(5),
 					result,
 					"translation-test-model",
-					"news-narrative-v11"
+					"news-narrative-v12"
 				);
 			});
 
