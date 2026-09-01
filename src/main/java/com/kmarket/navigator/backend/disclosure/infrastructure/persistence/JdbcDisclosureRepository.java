@@ -33,6 +33,7 @@ import com.kmarket.navigator.backend.disclosure.domain.DisclosureInsight;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureSection;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureSignalJob;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureSummary;
+import com.kmarket.navigator.backend.global.text.EnglishTextPolicy;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureType;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureVersion;
 import com.kmarket.navigator.backend.disclosure.domain.DocumentStatus;
@@ -844,6 +845,14 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 
 	@Override
 	public void saveInsight(DisclosureInsight insight) {
+		if (insight.sufficientEvidence()) {
+			EnglishTextPolicy.requireValid(insight.what());
+			EnglishTextPolicy.requireValid(insight.why());
+			EnglishTextPolicy.requireValid(insight.impact());
+		}
+		else if (insight.refusalReason() != null) {
+			EnglishTextPolicy.requireValid(insight.refusalReason());
+		}
 		String sourceIds = insight.sourceSectionIds().stream()
 			.map(UUID::toString)
 			.collect(java.util.stream.Collectors.joining(","));

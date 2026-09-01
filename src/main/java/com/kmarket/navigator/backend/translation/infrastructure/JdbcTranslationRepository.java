@@ -220,7 +220,8 @@ class JdbcTranslationRepository implements TranslationRepository {
 			      AND memory.target_locale = 'en'
 			      AND memory.translation_version = 'news-title-v1'
 			      AND job.status = 'PENDING' AND job.available_at <= :now
-			    ORDER BY job.available_at, job.updated_at, job.translation_memory_id
+			    ORDER BY job.priority, memory.created_at DESC, job.available_at DESC,
+			             job.translation_memory_id
 			    FOR UPDATE OF job SKIP LOCKED LIMIT :limit
 			), claimed AS (
 			    UPDATE translation_job job
@@ -263,6 +264,7 @@ class JdbcTranslationRepository implements TranslationRepository {
 			.optional()
 			.map(TranslationKind::valueOf)
 			.orElseThrow(() -> new IllegalStateException("Claimed translation no longer exists"));
+		EnglishTextPolicy.requireAllTextValid(generated.result());
 		int updated = jdbcClient.sql("""
 			UPDATE translation_memory
 			SET result_payload = CAST(:result AS jsonb), status = 'READY',
