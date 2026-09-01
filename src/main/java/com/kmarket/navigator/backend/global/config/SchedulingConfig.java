@@ -39,7 +39,7 @@ class SchedulingConfig {
 	@Bean
 	TaskScheduler taskScheduler() {
 		ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
-		scheduler.setPoolSize(2);
+		scheduler.setPoolSize(4);
 		scheduler.setThreadNamePrefix("disclosure-scheduler-");
 		scheduler.setWaitForTasksToCompleteOnShutdown(true);
 		scheduler.setAwaitTerminationSeconds(20);

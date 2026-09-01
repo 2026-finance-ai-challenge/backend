@@ -76,13 +76,21 @@ public class TranslationWorker {
 	@SchedulerLock(name = "on-demand-translation", lockAtMostFor = "PT4M", lockAtLeastFor = "PT0.5S")
 	public void process() {
 		Instant now = Instant.now(clock);
-		processTitles(now);
 		List<TranslationJob> jobs = repository.claim(
 			BATCH_SIZE, workerId, now, now.minus(Duration.ofMinutes(5))
 		);
 		for (TranslationJob job : jobs) {
 			process(job);
 		}
+	}
+
+	@Scheduled(
+		fixedDelayString = "${kmarket.translation.title-generation-interval:2s}",
+		initialDelayString = "${kmarket.translation.title-generation-initial-delay:10s}"
+	)
+	@SchedulerLock(name = "title-translation", lockAtMostFor = "PT4M", lockAtLeastFor = "PT0.5S")
+	public void processTitleBatch() {
+		processTitles(Instant.now(clock));
 	}
 
 	private void processTitles(Instant now) {
