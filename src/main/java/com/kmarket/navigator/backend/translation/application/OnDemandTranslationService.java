@@ -27,8 +27,8 @@ import tools.jackson.databind.node.ObjectNode;
 @Service
 public class OnDemandTranslationService {
 
-	public static final String NEWS_VERSION = "news-narrative-v7";
-	public static final String DISCLOSURE_SECTION_VERSION = "disclosure-section-v1";
+	public static final String NEWS_VERSION = "news-narrative-v8";
+	public static final String DISCLOSURE_SECTION_VERSION = "disclosure-section-v2";
 	private final NewsRepository newsRepository;
 	private final DisclosureQueryHandler disclosureQueryHandler;
 	private final TranslationRepository translationRepository;

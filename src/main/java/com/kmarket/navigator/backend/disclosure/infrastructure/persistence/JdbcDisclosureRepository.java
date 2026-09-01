@@ -764,6 +764,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			 AND translation.target_locale = 'en'
 			 AND translation.translation_version = :translationVersion
 			WHERE s.active AND s.common_stock
+			  AND translation.status = 'READY'
 			""");
 		Map<String, Object> parameters = new LinkedHashMap<>();
 		parameters.put("translationVersion", DisclosureTitlePolicy.TRANSLATION_VERSION);

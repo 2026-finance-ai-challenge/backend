@@ -6,7 +6,9 @@ import tools.jackson.databind.JsonNode;
 
 public final class EnglishTextPolicy {
 
-	private static final Pattern HANGUL = Pattern.compile("[가-힣ㄱ-ㅎㅏ-ㅣ]");
+	private static final Pattern NON_ENGLISH_SCRIPT = Pattern.compile(
+		"[ㄱ-ㅎㅏ-ㅣ가-힣\\u3040-\\u30ff\\u3400-\\u4dbf\\u4e00-\\u9fff]"
+	);
 	private static final Pattern KOREAN_CURRENCY_ROMANIZATION = Pattern.compile(
 		"\\b(?:eok|jo)(?:[ -]?won)?\\b|\\bman[ -]?won\\b",
 		Pattern.CASE_INSENSITIVE
@@ -18,13 +20,13 @@ public final class EnglishTextPolicy {
 	public static boolean isValid(String value) {
 		return value != null
 			&& !value.isBlank()
-			&& !HANGUL.matcher(value).find()
+			&& !NON_ENGLISH_SCRIPT.matcher(value).find()
 			&& !KOREAN_CURRENCY_ROMANIZATION.matcher(value).find();
 	}
 
 	public static String requireValid(String value) {
 		if (!isValid(value)) {
-			throw new IllegalArgumentException("English text must be non-blank and contain no Hangul");
+			throw new IllegalArgumentException("English text must be non-blank and use English script");
 		}
 		return value;
 	}
@@ -35,9 +37,9 @@ public final class EnglishTextPolicy {
 		}
 		if (value.isString()) {
 			String text = value.stringValue();
-			if (!text.isBlank() && (HANGUL.matcher(text).find()
+			if (!text.isBlank() && (NON_ENGLISH_SCRIPT.matcher(text).find()
 				|| KOREAN_CURRENCY_ROMANIZATION.matcher(text).find())) {
-				throw new IllegalArgumentException("English payload contains Korean text or currency units");
+				throw new IllegalArgumentException("English payload contains non-English script or currency units");
 			}
 			return;
 		}
