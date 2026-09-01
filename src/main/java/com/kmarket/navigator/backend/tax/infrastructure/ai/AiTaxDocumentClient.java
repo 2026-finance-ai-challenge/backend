@@ -16,11 +16,11 @@ import com.kmarket.navigator.backend.disclosure.infrastructure.ai.AiServicePrope
 import com.kmarket.navigator.backend.global.error.BusinessException;
 import com.kmarket.navigator.backend.global.error.ErrorCode;
 import com.kmarket.navigator.backend.identity.domain.InvestorType;
-import com.kmarket.navigator.backend.tax.application.TaxDocumentPayload;
 import com.kmarket.navigator.backend.tax.application.port.TaxDocumentGateway;
 import com.kmarket.navigator.backend.tax.domain.TaxDocumentComparison;
 import com.kmarket.navigator.backend.tax.domain.TaxDocumentFields;
 import com.kmarket.navigator.backend.tax.domain.TaxDocumentIssue;
+import com.kmarket.navigator.backend.tax.domain.TaxDocumentReviewInput;
 import com.kmarket.navigator.backend.tax.domain.TaxDocumentStatus;
 import com.kmarket.navigator.backend.tax.domain.TaxDocumentType;
 import com.kmarket.navigator.backend.tax.domain.TaxDocumentVerification;
@@ -82,7 +82,7 @@ class AiTaxDocumentClient implements TaxDocumentGateway {
 
 	@Override
 	public TaxDocumentComparison compare(
-		List<TaxDocumentPayload> documents,
+		List<TaxDocumentReviewInput> documents,
 		String expectedResidencyCountry,
 		InvestorType investorType,
 		String safetyIdentifier
@@ -97,9 +97,16 @@ class AiTaxDocumentClient implements TaxDocumentGateway {
 				.body(new ComparisonRequest(
 					documents.stream().map(document -> new ComparisonDocument(
 						document.documentType().name(),
-						document.fileName(),
-						document.mediaType(),
-						encodeBase64Copy(document.content())
+						document.detectedDocumentType().name(),
+						document.status().name(),
+						Fields.from(document.fields()),
+						document.missingRequiredFields(),
+						document.issues(),
+						document.ocrConfidence(),
+						document.tamperRisk(),
+						document.manualReviewRequired(),
+						document.modelId(),
+						document.promptVersion()
 					)).toList(),
 					expectedResidencyCountry,
 					investorType.name(),
@@ -142,9 +149,16 @@ class AiTaxDocumentClient implements TaxDocumentGateway {
 	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 	private record ComparisonDocument(
 		String documentType,
-		String fileName,
-		String contentType,
-		String documentBase64
+		String detectedDocumentType,
+		String verificationStatus,
+		Fields fields,
+		List<String> missingRequiredFields,
+		List<TaxDocumentIssue> issues,
+		BigDecimal ocrConfidence,
+		BigDecimal tamperRisk,
+		boolean manualReviewRequired,
+		String model,
+		String promptVersion
 	) {
 	}
 
@@ -217,6 +231,20 @@ class AiTaxDocumentClient implements TaxDocumentGateway {
 		String treatyCountry,
 		String investorType
 	) {
+		private static Fields from(TaxDocumentFields fields) {
+			return new Fields(
+				fields.holderName(),
+				fields.residencyCountry(),
+				fields.issueDate(),
+				fields.expiryDate(),
+				fields.issuingAuthority(),
+				fields.documentNumber(),
+				fields.apostilleCountry(),
+				fields.treatyCountry(),
+				fields.investorType()
+			);
+		}
+
 		private TaxDocumentFields toDomain() {
 			return new TaxDocumentFields(
 				holderName,

@@ -23,6 +23,7 @@ import com.kmarket.navigator.backend.tax.application.port.TaxDocumentStorage;
 import com.kmarket.navigator.backend.tax.domain.TaxDocument;
 import com.kmarket.navigator.backend.tax.domain.TaxDocumentComparison;
 import com.kmarket.navigator.backend.tax.domain.TaxDocumentFields;
+import com.kmarket.navigator.backend.tax.domain.TaxDocumentReviewInput;
 import com.kmarket.navigator.backend.tax.domain.TaxDocumentStatus;
 import com.kmarket.navigator.backend.tax.domain.TaxDocumentType;
 import com.kmarket.navigator.backend.tax.infrastructure.storage.TaxDocumentProperties;
@@ -157,7 +158,13 @@ public class TaxDocumentService {
 		);
 		if (!suppliedTypes.equals(requiredTypes)
 			|| documents.stream().anyMatch(document -> document.status() == TaxDocumentStatus.PROCESSING
-				|| document.status() == TaxDocumentStatus.FAILED)) {
+				|| document.status() == TaxDocumentStatus.FAILED
+				|| document.detectedDocumentType() == null
+				|| document.fields() == null
+				|| document.ocrConfidence() == null
+				|| document.tamperRisk() == null
+				|| document.modelId() == null
+				|| document.promptVersion() == null)) {
 			throw new BusinessException(ErrorCode.INVALID_TAX_DOCUMENT);
 		}
 		TaxDocument first = documents.getFirst();
@@ -166,32 +173,27 @@ public class TaxDocumentService {
 				|| first.investorType() != document.investorType())) {
 			throw new BusinessException(ErrorCode.INVALID_TAX_DOCUMENT);
 		}
-		List<TaxDocumentPayload> payloads = documents.stream()
-			.map(document -> new TaxDocumentPayload(
+		List<TaxDocumentReviewInput> reviewInputs = documents.stream()
+			.map(document -> new TaxDocumentReviewInput(
 				document.documentType(),
-				document.originalFileName(),
-				document.mediaType(),
-				storage.read(
-					document.userId(),
-					document.id(),
-					document.sha256(),
-					document.mediaType(),
-					document.storageKey()
-				)
+				document.detectedDocumentType(),
+				document.status(),
+				document.fields(),
+				document.missingRequiredFields(),
+				document.issues(),
+				document.ocrConfidence(),
+				document.tamperRisk(),
+				document.manualReviewRequired(),
+				document.modelId(),
+				document.promptVersion()
 			))
 			.toList();
-		try {
-			return gateway.compare(
-				payloads,
-				first.expectedResidencyCountry(),
-				first.investorType(),
-				safetyIdentifier.from(userId)
-			);
-		}
-		finally {
-			// 복호화한 원문은 내부 AI 호출이 끝나는 즉시 메모리에서 제거한다.
-			payloads.forEach(TaxDocumentPayload::clear);
-		}
+		return gateway.compare(
+			reviewInputs,
+			first.expectedResidencyCountry(),
+			first.investorType(),
+			safetyIdentifier.from(userId)
+		);
 	}
 
 	@Transactional
