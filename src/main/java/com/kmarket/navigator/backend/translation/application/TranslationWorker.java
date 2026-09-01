@@ -103,14 +103,26 @@ public class TranslationWorker {
 		if (jobs.isEmpty()) {
 			return;
 		}
+		processTitleSubset(jobs, now);
+	}
+
+	private void processTitleSubset(List<TitleTranslationJob> jobs, Instant now) {
 		try {
 			var generated = aiGateway.translateTitles(jobs);
 			generated.forEach(title -> repository.completeNewsTitle(title, Instant.now(clock)));
 			nextTitleAttemptAt = Instant.EPOCH;
 		}
 		catch (RuntimeException exception) {
+			if (isInvalidOutput(exception) && jobs.size() > 1) {
+				int midpoint = jobs.size() / 2;
+				processTitleSubset(jobs.subList(0, midpoint), now);
+				processTitleSubset(jobs.subList(midpoint, jobs.size()), now);
+				return;
+			}
 			Duration cooldown = cooldown(exception);
-			nextTitleAttemptAt = now.plus(cooldown);
+			if (!isInvalidOutput(exception)) {
+				nextTitleAttemptAt = now.plus(cooldown);
+			}
 			String errorCode = errorCode(exception);
 			for (TitleTranslationJob job : jobs) {
 				Duration backoff = Duration.ofSeconds(Math.min(3_600, 15L << Math.min(job.attempts(), 7)));
@@ -123,9 +135,15 @@ public class TranslationWorker {
 		}
 	}
 
+	private static boolean isInvalidOutput(RuntimeException exception) {
+		return exception instanceof TranslationProviderException providerException
+			&& providerException.failure() == TranslationProviderException.Failure.INVALID_OUTPUT;
+	}
+
 	private Duration cooldown(RuntimeException exception) {
 		if (exception instanceof TranslationProviderException providerException) {
 			return switch (providerException.failure()) {
+				case INVALID_OUTPUT -> TRANSIENT_FAILURE_COOLDOWN;
 				case QUOTA_EXHAUSTED -> providerFailureCooldown;
 				case RATE_LIMITED -> RATE_LIMIT_COOLDOWN;
 				case TIMEOUT, UNAVAILABLE -> TRANSIENT_FAILURE_COOLDOWN;
