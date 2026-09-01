@@ -88,6 +88,7 @@ public class OpenApiConfig {
 		entry("TaxEligibilityController#eligibility", operation("조세조약 적용 가능성 확인", "Tax")),
 		entry("TaxDocumentController#upload", operation("세무 문서 업로드", "Tax", Access.AUTHENTICATED, "202")),
 		entry("TaxDocumentController#list", operation("내 세무 문서 목록 조회", "Tax", Access.AUTHENTICATED)),
+		entry("TaxDocumentController#compare", operation("세무 문서 3종 교차 검증", "Tax", Access.AUTHENTICATED)),
 		entry("TaxDocumentController#get", operation("내 세무 문서 상세 조회", "Tax", Access.AUTHENTICATED)),
 		entry("TaxDocumentController#retry", operation("세무 문서 검증 재시도", "Tax", Access.AUTHENTICATED)),
 		entry("TaxDocumentController#delete", operation("세무 문서 삭제", "Tax", Access.AUTHENTICATED, "204"))

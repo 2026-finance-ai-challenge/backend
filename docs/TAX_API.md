@@ -26,17 +26,20 @@
 
 - `POST /api/v1/me/tax-documents`: 문서 업로드 및 비동기 검증 요청
 - `GET /api/v1/me/tax-documents`: 내 문서 목록
+- `POST /api/v1/me/tax-documents/comparison`: 소유권이 확인된 문서 3종 교차검증
 - `GET /api/v1/me/tax-documents/{documentId}`: 진행률·추출 필드·검증 결과
 - `POST /api/v1/me/tax-documents/{documentId}/retry`: 실패 문서 재시도
 - `DELETE /api/v1/me/tax-documents/{documentId}`: 화면에서 즉시 제거하고 보존기간 후 암호문 파기
 
 업로드는 `multipart/form-data`이며 다음 필드를 사용한다.
 
-- `documentType`: `RESIDENCY_CERTIFICATE`, `APOSTILLE`, `REDUCED_RATE_APPLICATION`
+- `documentType`: `RESIDENCY_CERTIFICATE`, `APOSTILLE`, `REDUCED_TAX_APPLICATION`
 - `expectedResidencyCountry`: ISO 3166-1 alpha-2 국가 코드
 - `file`: PDF, JPEG 또는 PNG, 최대 10 MiB
 
 같은 사용자가 같은 유형과 SHA-256의 문서를 중복 업로드하면 기존 활성 문서를 반환한다. 암호화된 PDF, JavaScript·실행 액션이 포함된 PDF, 확장자·MIME·magic byte가 다른 파일은 거부한다.
+
+교차검증 요청은 각 유형의 문서 ID를 정확히 하나씩 전달한다. Backend는 JWT 소유권과 문서 상태를 확인한 뒤 AES-256-GCM 암호문을 메모리에서 복호화하고 내부 AI 서비스로만 전송한다. AI 서비스는 세 문서를 동시에 OCR한 뒤 원본 검토기의 성명·TIN·거주국 일치 규칙을 실행한다.
 
 상태는 다음과 같다.
 
@@ -52,7 +55,7 @@
 
 - 원본은 사용자·문서별 파생 AES-256-GCM 키와 고유 nonce로 암호화하며 AAD로 소유권과 문서 ID를 결합한다.
 - 저장 경로는 무작위 UUID만 사용하고 심볼릭 링크를 거부한다.
-- OpenAI에는 직접 사용자 식별자 대신 비가역 해시 식별자를 보내며 응답 저장을 끈다.
+- 내부 AI 서비스에는 직접 사용자 식별자 대신 비가역 해시 식별자를 보낸다. 세무 OCR은 OpenAI를 호출하지 않는다.
 - OCR 결과는 문서 내용을 신뢰할 수 없는 입력으로 취급하고 정부 발급 진위나 승인 여부를 단정하지 않는다.
 - 업로드는 Redis에서 사용자별 시간당 10회로 제한한다.
 - 삭제한 문서는 기본 30일 뒤 암호문과 추출 개인정보를 파기하고 최소 감사 tombstone만 남긴다.
