@@ -112,7 +112,7 @@ record DisclosureDetailResponse(
 				document.sourceFilename(),
 				document.version(),
 				document.contentHash(),
-				document.originalHtml(),
+				com.kmarket.navigator.backend.translation.application.DisclosureHtmlRenderer.annotateOriginal(document),
 				document.sections().stream().map(section -> Section.from(section, objectMapper)).toList()
 			);
 		}

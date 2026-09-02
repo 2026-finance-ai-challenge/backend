@@ -38,7 +38,8 @@ class ChatGenerationWorkerTests {
 		when(gateway.answer(any(), anyString(), any(), any(), anyString()))
 			.thenThrow(new BusinessException(ErrorCode.AI_SERVICE_UNAVAILABLE));
 		var worker = new ChatGenerationWorker(repository, gateway, provider, safety,
-			mock(DisclosureQuestionHandler.class), mock(DisclosureRepository.class));
+			mock(DisclosureQuestionHandler.class), mock(DisclosureRepository.class),
+			mock(com.kmarket.navigator.backend.translation.application.DisclosureSelectionValidator.class));
 
 		worker.process();
 

@@ -15,6 +15,36 @@ import com.kmarket.navigator.backend.translation.domain.TranslationView;
 import tools.jackson.databind.json.JsonMapper;
 
 class DisclosureHtmlRendererTests {
+	@Test
+	void annotatesOriginalWithoutChangingTextFormattingOrNestedTables() {
+		UUID id = UUID.randomUUID();
+		String html = "<table width='600'><tr><td rowspan='2'><b>매출</b><table><tr><td>100</td></tr></table></td></tr></table>";
+		var source = new DisclosureDocument(UUID.randomUUID(), "original", 1, "hash", html,
+			List.of(new DisclosureSection(id, 0, SectionKind.TABLE, null, "매출 100", "[[\"매출\",\"100\"]]")));
+		var doc = Jsoup.parseBodyFragment(DisclosureHtmlRenderer.annotateOriginal(source));
+		assertThat(doc.text()).isEqualTo(Jsoup.parseBodyFragment(html).text());
+		assertThat(doc.select("table")).hasSize(2);
+		assertThat(doc.select("table[data-section-id]").attr("data-section-id")).isEqualTo(id.toString());
+		assertThat(doc.select("td").first().attr("rowspan")).isEqualTo("2");
+		assertThat(doc.select("b").text()).isEqualTo("매출");
+	}
+
+	@Test
+	void preservesExactWhitespaceWhenAnnotatingMergedLegacyText() {
+		String html = " 주식회사\n공시　제출 ";
+		var source = new DisclosureDocument(UUID.randomUUID(), "legacy", 1, "hash", html,
+			List.of(new DisclosureSection(UUID.randomUUID(), 0, SectionKind.TEXT, null, "주식회사", null),
+				new DisclosureSection(UUID.randomUUID(), 1, SectionKind.TEXT, null, "공시 제출", null)));
+		var doc = Jsoup.parseBodyFragment(DisclosureHtmlRenderer.annotateOriginal(source));
+		assertThat(doc.select("span")).hasSize(2);
+		assertThat(doc.body().wholeText()).isEqualTo(html);
+	}
+
+	@Test
+	void keepsUnmappedOriginalReadableWithoutInventingSelectionIds() {
+		var source = new DisclosureDocument(UUID.randomUUID(), "a", 1, "hash", "<p>미대응 원문</p>", List.of());
+		assertThat(DisclosureHtmlRenderer.annotateOriginal(source)).isEqualTo(source.originalHtml());
+	}
 
 	@Test
 	void translatesNestedTablesWithoutDuplicatingOrRemovingInnerCells() {

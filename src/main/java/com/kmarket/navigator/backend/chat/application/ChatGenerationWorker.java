@@ -40,6 +40,7 @@ public class ChatGenerationWorker {
 	private final AgentSafetyIdentifier safetyIdentifier;
 	private final DisclosureQuestionHandler disclosureQuestionHandler;
 	private final DisclosureRepository disclosureRepository;
+	private final com.kmarket.navigator.backend.translation.application.DisclosureSelectionValidator selectionValidator;
 	private final Clock clock;
 	private final String workerId = "chat-" + UUID.randomUUID();
 
@@ -49,7 +50,8 @@ public class ChatGenerationWorker {
 		AgentEvidenceProvider evidenceProvider,
 		AgentSafetyIdentifier safetyIdentifier,
 		DisclosureQuestionHandler disclosureQuestionHandler,
-		DisclosureRepository disclosureRepository
+		DisclosureRepository disclosureRepository,
+		com.kmarket.navigator.backend.translation.application.DisclosureSelectionValidator selectionValidator
 	) {
 		this.repository = repository;
 		this.agentGateway = agentGateway;
@@ -57,6 +59,7 @@ public class ChatGenerationWorker {
 		this.safetyIdentifier = safetyIdentifier;
 		this.disclosureQuestionHandler = disclosureQuestionHandler;
 		this.disclosureRepository = disclosureRepository;
+		this.selectionValidator = selectionValidator;
 		this.clock = Clock.systemUTC();
 	}
 
@@ -147,7 +150,7 @@ public class ChatGenerationWorker {
 		if (!DisclosureContentVersion.calculate(detail).equals(task.context().version())) {
 			throw new BusinessException(ErrorCode.CHAT_CONTEXT_STALE);
 		}
-		DisclosureQuestion.SelectedContext selected = selectedContext(task, detail);
+		DisclosureQuestion.SelectedContext selected = selectionValidator.validate(detail, task.selectedSectionId(), task.selectedText());
 		var answer = disclosureQuestionHandler.ask(
 			task.context().referenceId(),
 			new DisclosureQuestion(task.question(), selected)
@@ -176,27 +179,6 @@ public class ChatGenerationWorker {
 			title(null, task.question()),
 			task.generationId().toString()
 		);
-	}
-
-	private DisclosureQuestion.SelectedContext selectedContext(
-		ChatGenerationTask task,
-		DisclosureDetail detail
-	) {
-		if (task.selectedSectionId() == null) {
-			return null;
-		}
-		var section = detail.documents().stream()
-			.flatMap(document -> document.sections().stream())
-			.filter(candidate -> candidate.id().equals(task.selectedSectionId()))
-			.findFirst()
-			.orElseThrow(() -> new BusinessException(ErrorCode.INVALID_CHAT_SELECTION));
-		String source = section.text() == null || section.text().isBlank()
-			? section.tableData()
-			: section.text();
-		if (source == null || !source.contains(task.selectedText())) {
-			throw new BusinessException(ErrorCode.INVALID_CHAT_SELECTION);
-		}
-		return new DisclosureQuestion.SelectedContext(section.id(), task.selectedText());
 	}
 
 	private void fail(ChatGenerationTask task, String errorCode) {

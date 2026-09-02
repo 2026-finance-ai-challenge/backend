@@ -71,14 +71,15 @@ class AiDisclosureClient implements DisclosureRagGateway {
 					? null
 					: new SelectedContext(
 						question.selectedContext().sectionId(),
-						question.selectedContext().text()
+						question.selectedContext().text(),
+						question.selectedContext().translationSourceHash()
 					)
 			);
 		}
 	}
 
 	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-	private record SelectedContext(UUID sectionId, String text) {
+	private record SelectedContext(UUID sectionId, String text, String translationSourceHash) {
 	}
 
 	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)

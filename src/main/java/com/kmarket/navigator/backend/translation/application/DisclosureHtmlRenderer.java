@@ -41,6 +41,20 @@ public final class DisclosureHtmlRenderer {
 	}
 
 	public static String render(DisclosureDocument source, Map<UUID, TranslationView> translations) {
+		return render(source, translations, false);
+	}
+
+	public static String annotateOriginal(DisclosureDocument source) {
+		try { return render(source, Map.of(), true); }
+		catch (IllegalStateException exception) {
+			// 식별자 대응 실패가 원문 표시까지 막지는 않되 임의 섹션에 선택을 연결하지 않는다.
+			org.slf4j.LoggerFactory.getLogger(DisclosureHtmlRenderer.class)
+				.warn("Original selection mapping unavailable documentId={}", source.id());
+			return source.originalHtml();
+		}
+	}
+
+	private static String render(DisclosureDocument source, Map<UUID, TranslationView> translations, boolean originalMode) {
 		if (source.originalHtml() == null || source.originalHtml().isBlank()) return null;
 		var document = Jsoup.parseBodyFragment(source.originalHtml());
 		document.outputSettings().prettyPrint(false);
@@ -68,10 +82,18 @@ public final class DisclosureHtmlRenderer {
 					if (unmatched.isEmpty()) break;
 				}
 				if (unmatched.isEmpty() && !sections.isEmpty()) {
+					String raw = ((TextNode) node).getWholeText();
+					int offset = 0;
 					for (var section : sections) {
 						var span = new Element("span");
+						if (originalMode) {
+							int end = section == sections.getLast() ? raw.length()
+								: originalTextEnd(raw, offset, compact(section.text()).length());
+							span.text(raw.substring(offset, end));
+							offset = end;
+						}
 						node.before(span);
-						applySection(span, section, translations.get(section.id()), false);
+						applySection(span, section, translations.get(section.id()), false, originalMode);
 						remaining.remove(section);
 					}
 					node.remove();
@@ -84,9 +106,10 @@ public final class DisclosureHtmlRenderer {
 			remaining.remove(section);
 			if (node instanceof TextNode) {
 				var span = new Element("span");
+				if (originalMode) span.text(((TextNode) node).getWholeText());
 				node.replaceWith(span);
-				applySection(span, section, translations.get(section.id()), false);
-			} else applySection(node, section, translations.get(section.id()), table);
+				applySection(span, section, translations.get(section.id()), false, originalMode);
+			} else applySection(node, section, translations.get(section.id()), table, originalMode);
 		}
 		if (remaining.stream().anyMatch(section -> section.ordinal() != 0 || section.kind() != SectionKind.TITLE)) {
 			throw new IllegalStateException("Stored sections are missing from source HTML");
@@ -94,18 +117,29 @@ public final class DisclosureHtmlRenderer {
 		return document.body().html();
 	}
 
-	private static void applySection(Node node, DisclosureSection section, TranslationView translated, boolean table) {
-			boolean ready = translated != null && translated.status() == TranslationStatus.READY;
+	private static int originalTextEnd(String text, int start, int count) {
+		int end = start;
+		while (end < text.length() && count > 0) {
+			char character = text.charAt(end++);
+			if (!Character.isWhitespace(character) && !Character.isSpaceChar(character)) count--;
+		}
+		return end;
+	}
+
+	private static void applySection(Node node, DisclosureSection section, TranslationView translated, boolean table, boolean originalMode) {
+		boolean ready = translated != null && translated.status() == TranslationStatus.READY;
+		if (!originalMode) {
 			if (ready && table) applyTable((Element) node, translated.result().path("translatedTableData"));
 			else if (ready) replaceText(node, translated.result().path("translatedText").asString());
 			else {
 				replaceText(node, "…");
 				if (node instanceof Element element) element.addClass("translation-placeholder");
 			}
-			if (node instanceof Element element) {
-				element.attr("data-section-id", section.id().toString());
-				if (ready) element.addClass("selection-content");
-			}
+		}
+		if (node instanceof Element element) {
+			element.attr("data-section-id", section.id().toString());
+			if (ready || originalMode) element.addClass("selection-content");
+		}
 	}
 
 	private static void applyTable(Element table, JsonNode translated) {

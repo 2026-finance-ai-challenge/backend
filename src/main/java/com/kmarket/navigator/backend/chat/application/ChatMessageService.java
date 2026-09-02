@@ -131,7 +131,7 @@ public class ChatMessageService {
 		boolean hasText = selectedText != null && !selectedText.isBlank();
 		if (hasId != hasText
 			|| (hasId && contextType != ChatContextType.FILING)
-			|| (hasText && selectedText.strip().length() > 6_000)) {
+			|| (hasText && selectedText.strip().length() > 2_000)) {
 			throw new BusinessException(ErrorCode.INVALID_CHAT_SELECTION);
 		}
 	}

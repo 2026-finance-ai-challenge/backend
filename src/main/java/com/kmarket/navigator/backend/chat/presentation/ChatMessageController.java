@@ -114,7 +114,7 @@ public class ChatMessageController {
 		@NotNull UUID clientMessageId,
 		@NotBlank @Size(max = 4_000) String content,
 		UUID selectedSectionId,
-		@Size(max = 6_000) String selectedText
+		@Size(max = 2_000) String selectedText
 	) {
 		@AssertTrue(message = "selectedSectionId and selectedText must be supplied together")
 		public boolean selectionComplete() {
