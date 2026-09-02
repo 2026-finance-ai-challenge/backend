@@ -56,6 +56,7 @@ public class OpenApiConfig {
 		entry("ChatMessageController#submit", operation("AI 채팅 메시지 제출", "AI Chat", Access.AUTHENTICATED, "202")),
 		entry("ChatMessageController#messages", operation("AI 채팅 메시지 목록 조회", "AI Chat", Access.AUTHENTICATED)),
 		entry("ChatMessageController#generation", operation("AI 답변 생성 상태 조회", "AI Chat", Access.AUTHENTICATED)),
+		entry("ChatMessageController#latestGeneration", operation("대화 재진입 시 마지막 답변 생성 상태 복원", "AI Chat", Access.AUTHENTICATED)),
 		entry("ChatMessageController#stop", operation("AI 답변 생성 중단", "AI Chat", Access.AUTHENTICATED)),
 		entry("ChatMessageController#retry", operation("실패한 AI 답변 재시도", "AI Chat", Access.AUTHENTICATED)),
 

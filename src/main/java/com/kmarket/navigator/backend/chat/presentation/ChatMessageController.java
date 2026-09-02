@@ -57,7 +57,8 @@ public class ChatMessageController {
 			body.clientMessageId(),
 			body.content(),
 			body.selectedSectionId(),
-			body.selectedText()
+			body.selectedText(),
+			body.answerLocale()
 		);
 		return ResponseEntity.accepted()
 			.cacheControl(CacheControl.noStore())
@@ -88,6 +89,17 @@ public class ChatMessageController {
 		return noStore(GenerationResponse.from(service.generation(user, roomId, generationId)));
 	}
 
+	@GetMapping("/generations/latest")
+	public ResponseEntity<LatestGenerationResponse> latestGeneration(
+		@AuthenticationPrincipal AuthenticatedUser user,
+		@PathVariable UUID roomId
+	) {
+		return noStore(new LatestGenerationResponse(service.latestGeneration(user, roomId)
+			.map(GenerationResponse::from).orElse(null)));
+	}
+
+	public record LatestGenerationResponse(GenerationResponse generation) { }
+
 	@PostMapping("/generations/{generationId}/stop")
 	public ResponseEntity<GenerationResponse> stop(
 		@AuthenticationPrincipal AuthenticatedUser user,
@@ -114,7 +126,8 @@ public class ChatMessageController {
 		@NotNull UUID clientMessageId,
 		@NotBlank @Size(max = 4_000) String content,
 		UUID selectedSectionId,
-		@Size(max = 2_000) String selectedText
+		@Size(max = 2_000) String selectedText,
+		@jakarta.validation.constraints.Pattern(regexp = "en|ko") String answerLocale
 	) {
 		@AssertTrue(message = "selectedSectionId requires selectedText")
 		public boolean selectionComplete() {

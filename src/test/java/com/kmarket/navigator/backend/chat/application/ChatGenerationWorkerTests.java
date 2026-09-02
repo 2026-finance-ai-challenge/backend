@@ -31,11 +31,11 @@ class ChatGenerationWorkerTests {
 		var safety = mock(AgentSafetyIdentifier.class);
 		var context = new ChatContext(ChatContextType.GENERAL, null, null, "Market");
 		var task = new ChatGenerationTask(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
-			UUID.randomUUID(), null, 1, "Latest 005930 news", null, null, context, List.of());
+			UUID.randomUUID(), null, 1, "Latest 005930 news", null, null, context, List.of(), "en");
 		when(repository.claim(anyString(), anyInt(), any(), any())).thenReturn(List.of(task));
 		when(provider.evidence(context, task.question())).thenReturn(List.of());
 		when(safety.from(task.userId())).thenReturn("a".repeat(64));
-		when(gateway.answer(any(), anyString(), any(), any(), anyString()))
+		when(gateway.answer(any(), anyString(), any(), any(), anyString(), anyString()))
 			.thenThrow(new BusinessException(ErrorCode.AI_SERVICE_UNAVAILABLE));
 		var worker = new ChatGenerationWorker(repository, gateway, provider, safety,
 			mock(DisclosureQuestionHandler.class), mock(DisclosureRepository.class),

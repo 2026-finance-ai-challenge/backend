@@ -81,6 +81,7 @@ public class ChatGenerationWorker {
 	}
 
 	private void process(ChatGenerationTask task) {
+		var generationContext = org.slf4j.MDC.putCloseable("chatGenerationId", task.generationId().toString());
 		try {
 			CompletedChatAnswer answer = task.context().type() == ChatContextType.FILING
 				? filingAnswer(task)
@@ -92,6 +93,9 @@ public class ChatGenerationWorker {
 		}
 		catch (RuntimeException exception) {
 			fail(task, exception.getClass().getSimpleName());
+		}
+		finally {
+			generationContext.close();
 		}
 	}
 
@@ -106,7 +110,8 @@ public class ChatGenerationWorker {
 			task.question(),
 			task.history(),
 			evidence,
-			safetyIdentifier.from(task.userId())
+			safetyIdentifier.from(task.userId()),
+			task.answerLocale()
 		);
 		List<ChatCitation> citations = generated.evidenceIds().stream()
 			.distinct()
@@ -130,12 +135,12 @@ public class ChatGenerationWorker {
 			&& citations.isEmpty();
 		return new CompletedChatAnswer(
 			invalidEvidence
-				? "I could not verify this answer against the available server evidence."
+				? localized(task, generated.answer(), "I could not verify this answer against the available server evidence.", "서버 근거로 답변 내용을 검증하지 못했습니다.")
 				: generated.answer(),
 			citations,
 			generated.insufficientEvidence() || invalidEvidence,
 			invalidEvidence
-				? "The generated answer did not contain a verifiable source."
+				? localized(task, generated.answer(), "The generated answer did not contain a verifiable source.", "생성된 답변에 검증 가능한 출처가 없습니다.")
 				: generated.refusalReason(),
 			generated.disclaimer(),
 			generated.confidence(),
@@ -155,7 +160,7 @@ public class ChatGenerationWorker {
 		DisclosureQuestion.SelectedContext selected = selectionValidator.validate(detail, task.selectedSectionId(), task.selectedText());
 		var answer = disclosureQuestionHandler.ask(
 			task.context().referenceId(),
-			new DisclosureQuestion(task.question(), selected)
+			new DisclosureQuestion(task.question(), selected, task.answerLocale())
 		);
 		List<ChatCitation> citations = answer.citations().stream()
 			.map(citation -> new ChatCitation(
@@ -174,7 +179,7 @@ public class ChatGenerationWorker {
 			citations,
 			answer.refused(),
 			answer.refusalReason(),
-			"For information only. The answer is limited to this filing version.",
+			localized(task, answer.answer(), "For information only. The answer is limited to this filing version.", "정보 제공용이며, 답변은 현재 공시 버전의 근거로 한정됩니다."),
 			answer.refused() ? BigDecimal.ZERO : null,
 			answer.model(),
 			answer.promptVersion(),
@@ -205,6 +210,12 @@ public class ChatGenerationWorker {
 
 	private String excerpt(String content) {
 		return content.substring(0, Math.min(content.length(), 1_000));
+	}
+
+	private static String localized(ChatGenerationTask task, String validatedAnswer, String en, String ko) {
+		boolean korean = "ko".equals(task.answerLocale()) || "auto".equals(task.answerLocale())
+			&& validatedAnswer.codePoints().anyMatch(value -> value >= 0xAC00 && value <= 0xD7A3);
+		return korean ? ko : en;
 	}
 
 	private String title(String suggested, String question) {

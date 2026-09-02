@@ -19,6 +19,7 @@
 | `POST` | `/api/v1/me/chats/{roomId}/messages` | 사용자 메시지와 비동기 생성 작업을 멱등 생성 |
 | `GET` | `/api/v1/me/chats/{roomId}/messages` | 순서가 보존된 메시지와 검증된 인용 조회 |
 | `GET` | `/api/v1/me/chats/{roomId}/generations/{generationId}` | 생성·재시도·실패 상태 조회 |
+| `GET` | `/api/v1/me/chats/{roomId}/generations/latest` | 마지막 질문의 생성 상태 복원, 이력이 없으면 `generation: null` |
 | `POST` | `/api/v1/me/chats/{roomId}/generations/{generationId}/stop` | 대기 또는 처리 중 생성 중단 |
 | `POST` | `/api/v1/me/chats/{roomId}/generations/{generationId}/retry` | 답변을 받지 못한 AI 서비스 장애 건만 재시도 |
 
@@ -31,6 +32,9 @@
 ## 답변 생성
 
 - 메시지 제출은 `202 Accepted`와 `generation.id`를 반환하며 클라이언트는 생성 상태를 조회한다.
+- 대화 재진입은 마지막 생성 상태를 먼저 읽고 메시지를 조회한다. 진행 중 작업은 상태 조회를 재개하고 실패 작업은 서버의 `retryable`에 따라 표시한다. 조회 자체로 답변을 재생성하지 않는다.
+- 새 답변 언어는 현재 질문만으로 결정한다. 화면 EN/KR나 인용·이전 대화 언어는 사용하지 않는다. 신규 작업은 `answer_locale=auto`로 저장하고 AI가 로컬 언어 판별 후 언어별 단일 스키마를 선택한다. 기존 작업의 en/ko 설정은 유지한다.
+- 화면 언어를 전환해도 저장된 질문·답변·면책 문구를 변경하지 않는다. 인용 버튼의 제목과 UI만 현지화한다.
 - `clientMessageId`는 네트워크 재전송에도 중복 메시지·과금을 만들지 않는 멱등 키다. 정상 답변의 재생성 API는 제거했다.
 - 생성 작업은 PostgreSQL `SKIP LOCKED` 큐로 한 번에 하나의 worker만 점유하며, 중단된 worker의 잠금은 5분 뒤 복구한다.
 - 응답 실패는 첫 시도에서 `FAILED`로 전환한다. 추가 과금을 만드는 자동 재생성은 하지 않으며 사용자가 오류를 확인하고 명시적으로 재시도한다. 처리 중 worker가 사라진 경우의 잠금 복구는 별도다.

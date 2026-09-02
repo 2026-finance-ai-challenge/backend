@@ -63,7 +63,7 @@ class AiDisclosureClient implements DisclosureRagGateway {
 	}
 
 	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-	private record Request(String question, SelectedContext selectedContext) {
+	private record Request(String question, SelectedContext selectedContext, String answerLocale) {
 		private static Request from(DisclosureQuestion question) {
 			return new Request(
 				question.question(),
@@ -73,7 +73,8 @@ class AiDisclosureClient implements DisclosureRagGateway {
 						question.selectedContext().sectionId(),
 						question.selectedContext().text(),
 						question.selectedContext().translationSourceHash()
-					)
+					),
+				question.answerLocale()
 			);
 		}
 	}

@@ -66,6 +66,7 @@ public class JdbcChatMessageRepository implements ChatMessageRepository {
 		String content,
 		UUID selectedSectionId,
 		String selectedText,
+		String answerLocale,
 		Instant now
 	) {
 		ChatMessage message = insertOrFindUserMessage(userId, roomId, requestKey, content, now);
@@ -79,6 +80,7 @@ public class JdbcChatMessageRepository implements ChatMessageRepository {
 			requestKey,
 			selectedSectionId,
 			selectedText,
+			answerLocale,
 			now
 		);
 		jdbcClient.sql("""
@@ -178,6 +180,21 @@ public class JdbcChatMessageRepository implements ChatMessageRepository {
 			.param("userId", userId)
 			.query(this::mapGeneration)
 			.optional();
+	}
+
+	@Override
+	public Optional<ChatGeneration> findLatestGeneration(UUID userId, UUID roomId) {
+		return jdbcClient.sql("SELECT " + GENERATION_COLUMNS + """
+			 FROM chat_generation generation
+			 JOIN chat_room room ON room.id = generation.room_id
+			 JOIN chat_message message ON message.id = generation.user_message_id
+			 WHERE generation.room_id = :roomId
+			   AND room.user_id = :userId AND room.deleted_at IS NULL
+			 ORDER BY message.sequence_no DESC, generation.created_at DESC, generation.id DESC
+			 LIMIT 1
+			 """)
+			.param("roomId", roomId).param("userId", userId)
+			.query(this::mapGeneration).optional();
 	}
 
 	@Override
@@ -420,17 +437,18 @@ public class JdbcChatMessageRepository implements ChatMessageRepository {
 		UUID requestKey,
 		UUID selectedSectionId,
 		String selectedText,
+		String answerLocale,
 		Instant now
 	) {
 		JdbcClient.StatementSpec statement = jdbcClient.sql("""
 			INSERT INTO chat_generation (
 			    id, room_id, user_message_id, regeneration_of_message_id, request_key,
-			    selected_section_id, selected_text, status, attempts, available_at,
+			    selected_section_id, selected_text, answer_locale, status, attempts, available_at,
 			    created_at, updated_at
 			)
 			VALUES (
 			    :id, :roomId, :userMessageId, :regenerationOfMessageId, :requestKey,
-			    :selectedSectionId, :selectedText, 'PENDING', 0, :now, :now, :now
+			    :selectedSectionId, :selectedText, :answerLocale, 'PENDING', 0, :now, :now, :now
 			)
 			ON CONFLICT (room_id, request_key) DO NOTHING
 			""")
@@ -438,11 +456,21 @@ public class JdbcChatMessageRepository implements ChatMessageRepository {
 			.param("roomId", roomId)
 			.param("userMessageId", userMessageId)
 			.param("requestKey", requestKey)
+			.param("answerLocale", answerLocale)
 			.param("now", offset(now));
 		statement = nullable(statement, "regenerationOfMessageId", regenerationOfMessageId, Types.OTHER);
 		statement = nullable(statement, "selectedSectionId", selectedSectionId, Types.OTHER);
 		statement = nullable(statement, "selectedText", selectedText, Types.VARCHAR);
 		statement.update();
+		// 화면 언어가 바뀌어 재전송되어도 기존 생성을 유지하되 선택문 변경은 거절한다.
+		boolean sameRequest = jdbcClient.sql("""
+			SELECT selected_section_id IS NOT DISTINCT FROM :section
+			    AND selected_text IS NOT DISTINCT FROM :text
+			FROM chat_generation WHERE room_id = :room AND request_key = :key
+			""").param("section", selectedSectionId, Types.OTHER)
+			.param("text", selectedText, Types.VARCHAR).param("room", roomId).param("key", requestKey)
+			.query(Boolean.class).single();
+		if (!sameRequest) throw new BusinessException(ErrorCode.CHAT_IDEMPOTENCY_CONFLICT);
 	}
 
 	private ChatGeneration findGenerationByRequest(UUID roomId, UUID requestKey) {
@@ -461,7 +489,7 @@ public class JdbcChatMessageRepository implements ChatMessageRepository {
 			SELECT generation.id, generation.room_id, room.user_id,
 			       generation.user_message_id, generation.regeneration_of_message_id,
 			       generation.attempts, user_message.content, user_message.sequence_no,
-			       generation.selected_section_id, generation.selected_text,
+			       generation.selected_section_id, generation.selected_text, generation.answer_locale,
 			       room.context_type, room.context_reference_id, room.context_version,
 			       room.context_title
 			FROM chat_generation generation
@@ -481,6 +509,7 @@ public class JdbcChatMessageRepository implements ChatMessageRepository {
 				resultSet.getLong("sequence_no"),
 				resultSet.getObject("selected_section_id", UUID.class),
 				resultSet.getString("selected_text"),
+				resultSet.getString("answer_locale"),
 				new ChatContext(
 					ChatContextType.valueOf(resultSet.getString("context_type")),
 					resultSet.getString("context_reference_id"),
@@ -516,7 +545,8 @@ public class JdbcChatMessageRepository implements ChatMessageRepository {
 			row.selectedSectionId(),
 			row.selectedText(),
 			row.context(),
-			chronological
+			chronological,
+			row.answerLocale()
 		);
 	}
 
@@ -587,6 +617,7 @@ public class JdbcChatMessageRepository implements ChatMessageRepository {
 		long sequenceNo,
 		UUID selectedSectionId,
 		String selectedText,
+		String answerLocale,
 		ChatContext context
 	) {
 	}

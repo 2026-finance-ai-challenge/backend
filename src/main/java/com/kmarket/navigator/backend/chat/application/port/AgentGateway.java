@@ -14,6 +14,7 @@ public interface AgentGateway {
 		String question,
 		List<AgentHistoryMessage> history,
 		List<AgentEvidence> evidence,
-		String safetyIdentifier
+		String safetyIdentifier,
+		String answerLocale
 	);
 }

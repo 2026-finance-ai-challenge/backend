@@ -54,8 +54,14 @@ public class ChatMessageService {
 		UUID clientMessageId,
 		String requestedContent,
 		UUID selectedSectionId,
-		String selectedText
+		String selectedText,
+		String answerLocale
 	) {
+		if (answerLocale != null && !answerLocale.equals("en") && !answerLocale.equals("ko")) {
+			throw new BusinessException(ErrorCode.INVALID_CHAT_MESSAGE);
+		}
+		// 구버전 화면의 언어 힌트는 무시하고 현재 질문으로 답변 언어를 결정한다.
+		answerLocale = "auto";
 		var room = roomService.findOne(user, roomId);
 		if (room.context().type() == ChatContextType.FILING && content(requestedContent).length() > 2_000) {
 			throw new BusinessException(ErrorCode.INVALID_CHAT_MESSAGE);
@@ -69,6 +75,7 @@ public class ChatMessageService {
 			content(requestedContent),
 			selectedSectionId,
 			selectedText == null || selectedText.isBlank() ? null : selectedText.strip(),
+			answerLocale,
 			Instant.now(clock)
 		);
 	}
@@ -82,6 +89,12 @@ public class ChatMessageService {
 	) {
 		roomService.findOne(user, roomId);
 		return repository.findMessages(user.id(), roomId, afterSequence, limit);
+	}
+
+	@Transactional(readOnly = true)
+	public java.util.Optional<ChatGeneration> latestGeneration(AuthenticatedUser user, UUID roomId) {
+		roomService.findOne(user, roomId);
+		return repository.findLatestGeneration(user.id(), roomId);
 	}
 
 	@Transactional(readOnly = true)

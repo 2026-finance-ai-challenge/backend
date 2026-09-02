@@ -979,7 +979,7 @@ class BackendApplicationTests {
 			.content("{\"contextType\":\"GENERAL\"}"));
 		UUID roomId = UUID.fromString(room.get("id").stringValue());
 		UUID clientMessageId = UUID.randomUUID();
-		when(agentGateway.answer(any(), eq("What is the KOSPI snapshot?"), any(), any(), any()))
+		when(agentGateway.answer(any(), eq("What is the KOSPI snapshot?"), any(), any(), any(), any()))
 			.thenReturn(new AgentAnswer(
 				"The supplied KOSPI snapshot is currently unavailable. [E1]",
 				List.of("E1"),
@@ -1022,7 +1022,7 @@ class BackendApplicationTests {
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.name").value("KOSPI snapshot"));
 
-		when(agentGateway.answer(any(), eq("What is the KOSPI snapshot?"), any(), any(), any()))
+		when(agentGateway.answer(any(), eq("What is the KOSPI snapshot?"), any(), any(), any(), any()))
 			.thenReturn(new AgentAnswer(
 				"The current server snapshot is unavailable. [E1]",
 				List.of("E1"), false, null, "KOSPI snapshot", "For information only.",
@@ -1071,6 +1071,50 @@ class BackendApplicationTests {
 	}
 
 	@Test
+	void restoresLatestGenerationWithoutRetryingAndProtectsRoomOwnership() throws Exception {
+		AuthFixture owner = signupAndLogin("generation_recovery");
+		AuthFixture other = signupAndLogin("generation_intruder");
+		JsonNode room = createdResponse(post("/api/v1/me/chats")
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"contextType\":\"GENERAL\"}"));
+		UUID roomId = UUID.fromString(room.get("id").stringValue());
+		mockMvc.perform(get("/api/v1/me/chats/{roomId}/generations/latest", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.generation").doesNotExist())
+			.andExpect(header().string("Cache-Control", "no-store"));
+		JsonNode submitted = acceptedResponse(post("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"clientMessageId\":\"%s\",\"content\":\"Recover this question.\"}".formatted(UUID.randomUUID())));
+		String generationId = submitted.get("generation").get("id").stringValue();
+		mockMvc.perform(get("/api/v1/me/chats/{roomId}/generations/latest", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.generation.id").value(generationId))
+			.andExpect(jsonPath("$.generation.status").value("PENDING"));
+		when(agentGateway.answer(any(), any(), any(), any(), any(), any()))
+			.thenThrow(new com.kmarket.navigator.backend.global.error.BusinessException(
+				com.kmarket.navigator.backend.global.error.ErrorCode.AI_SERVICE_UNAVAILABLE));
+		chatGenerationWorker.process();
+		mockMvc.perform(get("/api/v1/me/chats/{roomId}/generations/latest", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.generation.id").value(generationId))
+			.andExpect(jsonPath("$.generation.status").value("FAILED"))
+			.andExpect(jsonPath("$.generation.retryable").value(true));
+		verify(agentGateway, times(1)).answer(any(), any(), any(), any(), any(), any());
+		mockMvc.perform(get("/api/v1/me/chats/{roomId}/generations/latest", roomId)
+			.header("Authorization", "Bearer " + other.accessToken())).andExpect(status().isNotFound());
+		acceptedResponse(post("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"clientMessageId\":\"%s\",\"content\":\"A newer question.\"}".formatted(UUID.randomUUID())));
+		mockMvc.perform(get("/api/v1/me/chats/{roomId}/generations/latest", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.generation.status").value("PENDING"));
+		mockMvc.perform(delete("/api/v1/me/chats/{roomId}", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken())).andExpect(status().isNoContent());
+		mockMvc.perform(get("/api/v1/me/chats/{roomId}/generations/latest", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken())).andExpect(status().isNotFound());
+	}
+
+	@Test
 	void localizesPreviouslySavedNewsCitationsWithoutGeneratingAgain() throws Exception {
 		activateCommonStocks("005930");
 		UUID articleId = insertReadyNews("삼성전자 생산 소식", "삼성전자 생산 계획을 설명하는 원문입니다.", Instant.now(), "HIGH");
@@ -1080,7 +1124,7 @@ class BackendApplicationTests {
 			.contentType(MediaType.APPLICATION_JSON)
 			.content("{\"contextType\":\"NEWS\",\"referenceId\":\"%s\"}".formatted(articleId)));
 		UUID roomId = UUID.fromString(room.get("id").stringValue());
-		when(agentGateway.answer(any(), any(), any(), any(), any())).thenReturn(new AgentAnswer(
+		when(agentGateway.answer(any(), any(), any(), any(), any(), any())).thenReturn(new AgentAnswer(
 			"The article describes a production update. [E1]", List.of("E1"), false, null,
 			"Production update", "For information only.", new BigDecimal("0.8"), "test-agent", "test-v1"));
 		acceptedResponse(post("/api/v1/me/chats/{roomId}/messages", roomId)
@@ -1096,7 +1140,63 @@ class BackendApplicationTests {
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$[1].citations[0].titleEn").value("Ready English news title"))
 			.andExpect(jsonPath("$[1].citations[0].titleKo").value("삼성전자 생산 소식"));
-		verify(agentGateway, times(1)).answer(any(), any(), any(), any(), any());
+		verify(agentGateway, times(1)).answer(any(), any(), any(), any(), any(), any());
+	}
+
+	@Test
+	void questionLanguagePolicySurvivesUiChangesAndRetryWithoutRewritingHistory() throws Exception {
+		AuthFixture owner = signupAndLogin("chat_locale");
+		JsonNode room = createdResponse(post("/api/v1/me/chats")
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"contextType\":\"GENERAL\"}"));
+		UUID roomId = UUID.fromString(room.get("id").stringValue());
+		UUID requestId = UUID.randomUUID();
+		String body = "{\"clientMessageId\":\"%s\",\"content\":\"위험이 무엇인가요?\",\"answerLocale\":\"ko\"}".formatted(requestId);
+		when(agentGateway.answer(any(), any(), any(), any(), any(), eq("auto")))
+			.thenThrow(new com.kmarket.navigator.backend.global.error.BusinessException(
+				com.kmarket.navigator.backend.global.error.ErrorCode.AI_SERVICE_UNAVAILABLE))
+			.thenReturn(new AgentAnswer("위험은 손실 가능성을 뜻합니다.", List.of(), false, null,
+				"위험 설명", "정보 제공용입니다.", new BigDecimal("0.8"), "test-agent", "test-locale"));
+		JsonNode submitted = acceptedResponse(post("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON).content(body));
+		String generationId = submitted.get("generation").get("id").stringValue();
+		JsonNode duplicate = acceptedResponse(post("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON).content(body));
+		assertThat(duplicate.get("generation").get("id").stringValue()).isEqualTo(generationId);
+		mockMvc.perform(post("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON)
+			.content(body.replace("\"ko\"", "\"en\"")))
+			.andExpect(status().isAccepted())
+			.andExpect(jsonPath("$.generation.id").value(generationId));
+		mockMvc.perform(post("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON)
+			.content(body.replace("\"ko\"", "\"fr\"")))
+			.andExpect(status().isBadRequest());
+		chatGenerationWorker.process();
+		mockMvc.perform(post("/api/v1/me/chats/{roomId}/generations/{id}/retry", roomId, generationId)
+			.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isOk());
+		chatGenerationWorker.process();
+		verify(agentGateway, times(2)).answer(any(), any(), any(), any(), any(), eq("auto"));
+		assertThat(jdbcClient.sql("SELECT answer_locale FROM chat_generation WHERE id = :id")
+			.param("id", UUID.fromString(generationId)).query(String.class).single()).isEqualTo("auto");
+		mockMvc.perform(get("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(jsonPath("$.length()").value(2))
+			.andExpect(jsonPath("$[1].content").value("위험은 손실 가능성을 뜻합니다."));
+		when(agentGateway.answer(any(), any(), any(), any(), any(), eq("auto"))).thenReturn(new AgentAnswer(
+			"Risk means the possibility of loss.", List.of(), false, null, "Risk", "For information only.",
+			new BigDecimal("0.8"), "test-agent", "test-locale"));
+		acceptedResponse(post("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"clientMessageId\":\"%s\",\"content\":\"Explain risk again.\"}".formatted(UUID.randomUUID())));
+		chatGenerationWorker.process();
+		verify(agentGateway).answer(any(), eq("Explain risk again."), any(), any(), any(), eq("auto"));
+		mockMvc.perform(get("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(jsonPath("$.length()").value(4))
+			.andExpect(jsonPath("$[1].content").value("위험은 손실 가능성을 뜻합니다."))
+			.andExpect(jsonPath("$[3].content").value("Risk means the possibility of loss."));
 	}
 
 	@Test
@@ -1117,7 +1217,7 @@ class BackendApplicationTests {
 			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON)
 			.content("{\"contextType\":\"NEWS\",\"referenceId\":\"%s\"}".formatted(articleId)));
 		UUID roomId = UUID.fromString(room.get("id").stringValue());
-		when(agentGateway.answer(any(), any(), any(), any(), any())).thenReturn(new AgentAnswer(
+		when(agentGateway.answer(any(), any(), any(), any(), any(), any())).thenReturn(new AgentAnswer(
 			"The plan is unconfirmed. [E1]", List.of("E1"), false, null, "Dividend plan", "For information only.",
 			new BigDecimal("0.8"), "test-agent", "test-v1"));
 		for (String selection : List.of("배당 계획은 아직 확정되지 않았다", "dividend plan is not confirmed")) {
@@ -1138,7 +1238,7 @@ class BackendApplicationTests {
 				.andExpect(jsonPath("$.attempts").value(1));
 		}
 		org.mockito.ArgumentCaptor<List<com.kmarket.navigator.backend.chat.domain.AgentEvidence>> evidence = org.mockito.ArgumentCaptor.captor();
-		verify(agentGateway, times(2)).answer(any(), any(), any(), evidence.capture(), any());
+		verify(agentGateway, times(2)).answer(any(), any(), any(), evidence.capture(), any(), any());
 		assertThat(evidence.getAllValues()).allSatisfy(items -> {
 			var packet = objectMapper.readTree(items.getFirst().content());
 			assertThat(packet.path("verifiedSelection").path("sourceHash").asString()).isEqualTo(cached.sourceHash());
@@ -1182,7 +1282,7 @@ class BackendApplicationTests {
 			.contentType(MediaType.APPLICATION_JSON)
 			.content("{\"contextType\":\"GENERAL\"}"));
 		UUID roomId = UUID.fromString(room.get("id").stringValue());
-		when(agentGateway.answer(any(), any(), any(), any(), any()))
+		when(agentGateway.answer(any(), any(), any(), any(), any(), any()))
 			.thenThrow(new com.kmarket.navigator.backend.global.error.BusinessException(
 				com.kmarket.navigator.backend.global.error.ErrorCode.AI_SERVICE_UNAVAILABLE
 			));

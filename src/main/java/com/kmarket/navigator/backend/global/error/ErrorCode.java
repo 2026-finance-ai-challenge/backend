@@ -190,6 +190,11 @@ public enum ErrorCode {
 		"AI_SERVICE_UNAVAILABLE",
 		"The AI service is temporarily unavailable."
 	),
+	AI_INVALID_OUTPUT(
+		HttpStatus.BAD_GATEWAY,
+		"AI_INVALID_OUTPUT",
+		"The AI answer did not pass validation."
+	),
 	INTERNAL_SERVER_ERROR(
 		HttpStatus.INTERNAL_SERVER_ERROR,
 		"INTERNAL_SERVER_ERROR",
