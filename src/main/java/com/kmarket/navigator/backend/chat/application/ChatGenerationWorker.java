@@ -96,7 +96,9 @@ public class ChatGenerationWorker {
 	}
 
 	private CompletedChatAnswer agentAnswer(ChatGenerationTask task) {
-		List<AgentEvidence> evidence = evidenceProvider.evidence(task.context(), task.question());
+		List<AgentEvidence> evidence = task.context().type() == ChatContextType.NEWS
+			? evidenceProvider.evidence(task.context(), task.question(), task.selectedText())
+			: evidenceProvider.evidence(task.context(), task.question());
 		Map<String, AgentEvidence> allowed = new LinkedHashMap<>();
 		evidence.forEach(item -> allowed.put(item.id(), item));
 		var generated = agentGateway.answer(

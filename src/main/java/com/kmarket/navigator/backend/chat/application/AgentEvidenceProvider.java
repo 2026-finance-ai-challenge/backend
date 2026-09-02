@@ -28,24 +28,31 @@ public class AgentEvidenceProvider {
 	private final NewsService newsService;
 	private final ObjectMapper objectMapper;
 	private final DisclosureQueryHandler disclosures;
+	private final com.kmarket.navigator.backend.translation.application.NewsSelectionValidator newsSelections;
 
 	public AgentEvidenceProvider(
 		MarketService marketService,
 		NewsService newsService,
 		ObjectMapper objectMapper,
-		DisclosureQueryHandler disclosures
+		DisclosureQueryHandler disclosures,
+		com.kmarket.navigator.backend.translation.application.NewsSelectionValidator newsSelections
 	) {
 		this.marketService = marketService;
 		this.newsService = newsService;
 		this.objectMapper = objectMapper;
 		this.disclosures = disclosures;
+		this.newsSelections = newsSelections;
 	}
 
 	public List<AgentEvidence> evidence(ChatContext context, String question) {
+		return evidence(context, question, null);
+	}
+
+	public List<AgentEvidence> evidence(ChatContext context, String question, String selectedText) {
 		List<AgentEvidence> retrieved = switch (context.type()) {
 			case GENERAL -> questionEvidence(context, question);
 			case STOCK -> questionEvidence(context, question);
-			case NEWS -> newsEvidence(context.referenceId());
+			case NEWS -> newsEvidence(context.referenceId(), selectedText);
 			case TAX_GUIDE -> List.of();
 			case FILING -> throw new IllegalArgumentException("Filing context uses disclosure RAG");
 		};
@@ -156,11 +163,15 @@ public class AgentEvidenceProvider {
 		));
 	}
 
-	private List<AgentEvidence> newsEvidence(String articleId) {
+	private List<AgentEvidence> newsEvidence(String articleId, String selectedText) {
 		var article = newsService.findOne(java.util.UUID.fromString(articleId));
+		var selection = newsSelections.validate(article, selectedText);
 		Map<String, Object> packet = new LinkedHashMap<>();
 		packet.put("title", article.originalTitle());
-		packet.put("sourceText", article.sourceText());
+		if (selection != null) packet.put("verifiedSelection", selection);
+		packet.put("sourceText", selection != null && selection.language().equals("ko")
+			? selection.context() : excerpt(article.sourceText(), 6_000));
+		packet.put("evidenceScope", "Excerpts from this article only, not the complete article.");
 		packet.put("what", article.whatEn());
 		packet.put("why", article.whyEn());
 		packet.put("impact", article.impactEn());
@@ -173,12 +184,26 @@ public class AgentEvidenceProvider {
 		return List.of(new AgentEvidence(
 			"E1",
 			article.englishTitle(),
-			json(packet),
+			newsJson(packet),
 			article.publisher() == null ? "Naver News" : article.publisher(),
 			article.publishedAt(),
 			article.id().toString(),
 			article.originalUrl()
 		));
+	}
+
+	private String newsJson(Map<String, Object> packet) {
+		String serialized = objectMapper.writeValueAsString(packet);
+		String source = (String) packet.get("sourceText");
+		// JSON 문자열 자체를 잘라 선택문이나 근거 구조를 손상시키지 않는다.
+		while (serialized.length() > MAX_EVIDENCE_CHARACTERS && !source.isEmpty()) {
+			source = source.substring(0, Math.max(0, source.length() - (serialized.length() - MAX_EVIDENCE_CHARACTERS)));
+			packet.put("sourceText", source);
+			serialized = objectMapper.writeValueAsString(packet);
+		}
+		if (serialized.length() > MAX_EVIDENCE_CHARACTERS) throw new com.kmarket.navigator.backend.global.error.BusinessException(
+			com.kmarket.navigator.backend.global.error.ErrorCode.INVALID_CHAT_SELECTION);
+		return serialized;
 	}
 
 	private String json(Object value) {

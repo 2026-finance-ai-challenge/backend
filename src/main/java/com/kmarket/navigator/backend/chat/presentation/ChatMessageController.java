@@ -116,9 +116,9 @@ public class ChatMessageController {
 		UUID selectedSectionId,
 		@Size(max = 2_000) String selectedText
 	) {
-		@AssertTrue(message = "selectedSectionId and selectedText must be supplied together")
+		@AssertTrue(message = "selectedSectionId requires selectedText")
 		public boolean selectionComplete() {
-			return (selectedSectionId == null) == (selectedText == null || selectedText.isBlank());
+			return selectedSectionId == null || selectedText != null && !selectedText.isBlank();
 		}
 	}
 

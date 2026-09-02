@@ -2,7 +2,6 @@ package com.kmarket.navigator.backend.translation.application;
 
 import java.time.Clock;
 import java.time.Instant;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -242,16 +241,7 @@ public class OnDemandTranslationService {
 			|| article.sourceText() == null || article.sourceText().isBlank()) {
 			throw new BusinessException(ErrorCode.SOURCE_CONTENT_UNAVAILABLE);
 		}
-		List<String> paragraphs = Arrays.stream(article.sourceText().split("\\R\\s*\\R"))
-			.map(String::strip)
-			.filter(value -> !value.isBlank())
-			.toList();
-		if (paragraphs.isEmpty()) {
-			throw new BusinessException(ErrorCode.SOURCE_CONTENT_UNAVAILABLE);
-		}
-		return new NewsSource(
-			canonicalizer.news(article.originalTitle(), paragraphs, article.contentAvailability().name())
-		);
+		return new NewsSource(canonicalizer.news(article));
 	}
 
 	private DisclosureSource disclosureSource(String receiptNumber, UUID sectionId) {

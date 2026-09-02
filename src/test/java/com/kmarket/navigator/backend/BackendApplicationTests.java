@@ -1100,6 +1100,81 @@ class BackendApplicationTests {
 	}
 
 	@Test
+	void persistsAndValidatesNewsSelectionWithoutAFilingSectionOrAnotherTranslation() throws Exception {
+		activateCommonStocks("005930");
+		String original = "삼성전자의 배당 계획은 아직 확정되지 않았다.";
+		UUID articleId = insertReadyNews("삼성전자 배당 전망", original, Instant.now(), "HIGH");
+		var cached = onDemandTranslationService.ensureNewsRequested(articleId, "en");
+		translationRepository.claimForKind(com.kmarket.navigator.backend.translation.domain.TranslationKind.NEWS_NARRATIVE,
+			1, "selection-test", Instant.now(), Instant.now().minusSeconds(300));
+		translationRepository.complete(cached.jobId(), new GeneratedTranslation(cached.sourceHash(), "en", cached.translationVersion(),
+			objectMapper.readTree("""
+				{"translatedParagraphs":["Samsung Electronics' dividend plan is not confirmed."],
+				 "what":"The dividend plan remains unconfirmed.","why":"No decision has been announced.","impact":"Future dividends remain uncertain."}
+				"""), "test-model", "test-news-selection"), Instant.now());
+		AuthFixture owner = signupAndLogin("news_selection");
+		JsonNode room = createdResponse(post("/api/v1/me/chats")
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"contextType\":\"NEWS\",\"referenceId\":\"%s\"}".formatted(articleId)));
+		UUID roomId = UUID.fromString(room.get("id").stringValue());
+		when(agentGateway.answer(any(), any(), any(), any(), any())).thenReturn(new AgentAnswer(
+			"The plan is unconfirmed. [E1]", List.of("E1"), false, null, "Dividend plan", "For information only.",
+			new BigDecimal("0.8"), "test-agent", "test-v1"));
+		for (String selection : List.of("배당 계획은 아직 확정되지 않았다", "dividend plan is not confirmed")) {
+			String body = objectMapper.writeValueAsString(Map.of("clientMessageId", UUID.randomUUID(),
+				"content", "Explain the selected passage.", "selectedText", selection));
+			JsonNode submitted = acceptedResponse(post("/api/v1/me/chats/{roomId}/messages", roomId)
+				.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON).content(body));
+			JsonNode duplicate = acceptedResponse(post("/api/v1/me/chats/{roomId}/messages", roomId)
+				.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON).content(body));
+			UUID generationId = UUID.fromString(submitted.path("generation").path("id").asString());
+			assertThat(duplicate.path("generation").path("id")).isEqualTo(submitted.path("generation").path("id"));
+			assertThat(jdbcClient.sql("SELECT selected_text FROM chat_generation WHERE id = :id AND selected_section_id IS NULL")
+				.param("id", generationId).query(String.class).single()).isEqualTo(selection);
+			chatGenerationWorker.process();
+			mockMvc.perform(get("/api/v1/me/chats/{roomId}/generations/{generationId}", roomId, generationId)
+				.header("Authorization", "Bearer " + owner.accessToken()))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.status").value("COMPLETED"))
+				.andExpect(jsonPath("$.attempts").value(1));
+		}
+		org.mockito.ArgumentCaptor<List<com.kmarket.navigator.backend.chat.domain.AgentEvidence>> evidence = org.mockito.ArgumentCaptor.captor();
+		verify(agentGateway, times(2)).answer(any(), any(), any(), evidence.capture(), any());
+		assertThat(evidence.getAllValues()).allSatisfy(items -> {
+			var packet = objectMapper.readTree(items.getFirst().content());
+			assertThat(packet.path("verifiedSelection").path("sourceHash").asString()).isEqualTo(cached.sourceHash());
+			assertThat(packet.path("verifiedSelection").path("context").asString()).contains(packet.path("verifiedSelection").path("text").asString());
+		});
+		org.mockito.Mockito.verifyNoInteractions(translationAiGateway);
+	}
+
+	@Test
+	void rejectsUnrelatedNewsSelectionBeforeCallingTheModel() throws Exception {
+		activateCommonStocks("005930");
+		UUID articleId = insertReadyNews("삼성전자 투자 계획", "삼성전자 투자 계획은 미정이다.", Instant.now(), "HIGH");
+		AuthFixture owner = signupAndLogin("news_invalid");
+		JsonNode room = createdResponse(post("/api/v1/me/chats")
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"contextType\":\"NEWS\",\"referenceId\":\"%s\"}".formatted(articleId)));
+		UUID roomId = UUID.fromString(room.path("id").asString());
+		mockMvc.perform(post("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON)
+			.content(objectMapper.writeValueAsString(Map.of("clientMessageId", UUID.randomUUID(), "content", "Explain this.",
+				"selectedText", "삼성전자", "selectedSectionId", UUID.randomUUID()))))
+			.andExpect(status().isBadRequest());
+		JsonNode submitted = acceptedResponse(post("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON)
+			.content(objectMapper.writeValueAsString(Map.of("clientMessageId", UUID.randomUUID(),
+				"content", "Explain this.", "selectedText", "An invented acquisition completed yesterday."))));
+		chatGenerationWorker.process();
+		mockMvc.perform(get("/api/v1/me/chats/{roomId}/generations/{generationId}", roomId, submitted.path("generation").path("id").asString())
+			.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.status").value("FAILED"))
+			.andExpect(jsonPath("$.errorCode").value("INVALID_CHAT_SELECTION"))
+			.andExpect(jsonPath("$.retryable").value(false));
+		org.mockito.Mockito.verifyNoInteractions(agentGateway, translationAiGateway);
+	}
+
+	@Test
 	void disablesAutomaticAgentRetriesAndAllowsExplicitRetryAfterFailure() throws Exception {
 		AuthFixture owner = signupAndLogin("agent_retry");
 		JsonNode room = createdResponse(post("/api/v1/me/chats")

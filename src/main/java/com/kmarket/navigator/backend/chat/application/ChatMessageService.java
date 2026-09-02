@@ -68,7 +68,7 @@ public class ChatMessageService {
 			clientMessageId,
 			content(requestedContent),
 			selectedSectionId,
-			selectedText == null ? null : selectedText.strip(),
+			selectedText == null || selectedText.isBlank() ? null : selectedText.strip(),
 			Instant.now(clock)
 		);
 	}
@@ -122,15 +122,19 @@ public class ChatMessageService {
 		return normalized;
 	}
 
-	private void validateSelection(
+	static void validateSelection(
 		ChatContextType contextType,
 		UUID selectedSectionId,
 		String selectedText
 	) {
 		boolean hasId = selectedSectionId != null;
 		boolean hasText = selectedText != null && !selectedText.isBlank();
-		if (hasId != hasText
-			|| (hasId && contextType != ChatContextType.FILING)
+		boolean invalidContext = switch (contextType) {
+			case FILING -> hasId != hasText;
+			case NEWS -> hasId;
+			default -> hasId || hasText;
+		};
+		if (invalidContext
 			|| (hasText && selectedText.strip().length() > 2_000)) {
 			throw new BusinessException(ErrorCode.INVALID_CHAT_SELECTION);
 		}

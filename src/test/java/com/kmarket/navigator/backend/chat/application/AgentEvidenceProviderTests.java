@@ -35,7 +35,8 @@ class AgentEvidenceProviderTests {
 	private final MarketService market = mock(MarketService.class);
 	private final NewsService news = mock(NewsService.class);
 	private final DisclosureQueryHandler filings = mock(DisclosureQueryHandler.class);
-	private final AgentEvidenceProvider provider = new AgentEvidenceProvider(market, news, new JsonMapper(), filings);
+	private final com.kmarket.navigator.backend.translation.application.NewsSelectionValidator selections = mock(com.kmarket.navigator.backend.translation.application.NewsSelectionValidator.class);
+	private final AgentEvidenceProvider provider = new AgentEvidenceProvider(market, news, new JsonMapper(), filings, selections);
 	private final ChatContext context = new ChatContext(ChatContextType.GENERAL, null, null, "Market assistant");
 
 	AgentEvidenceProviderTests() {
@@ -93,6 +94,30 @@ class AgentEvidenceProviderTests {
 		assertThat(evidence.getFirst().url()).isEqualTo("/disclosures/20260902800513");
 		assertThat(evidence.getFirst().content()).doesNotContain("dart.fss.or.kr");
 		verifyNoInteractions(news);
+	}
+
+	@Test
+	void preservesVerifiedSelectionAndValidJsonWhenArticleNeedsTrimming() {
+		var article = mock(NewsArticle.class);
+		UUID id = UUID.randomUUID();
+		when(article.id()).thenReturn(id);
+		when(article.originalTitle()).thenReturn("삼성전자 투자 전망");
+		when(article.sourceText()).thenReturn("\"".repeat(10_000));
+		when(news.findOne(id)).thenReturn(article);
+		String selected = "An acquisition remains unconfirmed.";
+		var selection = new com.kmarket.navigator.backend.translation.application.NewsSelectionValidator.Selection(
+			selected, "en", "a".repeat(64), "Before ".repeat(140) + selected + " After".repeat(140));
+		when(selections.validate(article, selected)).thenReturn(selection);
+
+		var evidence = provider.evidence(new ChatContext(ChatContextType.NEWS, id.toString(), null, "News"), "Explain this.", selected);
+		String serialized = evidence.getFirst().content();
+		var packet = new JsonMapper().readTree(serialized);
+		assertThat(serialized).hasSizeLessThanOrEqualTo(12_000);
+		assertThat(packet.path("verifiedSelection").path("text").asString()).isEqualTo(selected);
+		assertThat(packet.path("verifiedSelection").path("context").asString()).isEqualTo(selection.context());
+		assertThat(packet.path("sourceText").asString()).isNotEmpty();
+		assertThat(packet.path("evidenceScope").asString()).contains("not the complete article");
+		verifyNoInteractions(market, filings);
 	}
 
 	@Test
