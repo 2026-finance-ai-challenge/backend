@@ -73,7 +73,6 @@ class NewsCollectionServiceTests {
 		service.collect();
 
 		verify(repository, never()).saveCollected(any(NewsDraft.class));
-		verify(repository, never()).addClusterStockMappings(any(), any());
 	}
 
 	@Test
@@ -103,7 +102,6 @@ class NewsCollectionServiceTests {
 		service.collect();
 
 		verify(repository, never()).saveCollected(any(NewsDraft.class));
-		verify(repository).addClusterStockMappings(eq(clusterId), any());
 	}
 
 	@Test
@@ -116,7 +114,7 @@ class NewsCollectionServiceTests {
 		)));
 		when(originalArticleGateway.fetch(any())).thenReturn(java.util.Optional.of(
 			new OriginalNewsArticle(
-				"본문\n\n관련 기사: SK하이닉스와 기타 지원 종목 목록",
+				"삼성전자는 차세대 반도체 투자를 확대한다.\n\n관련 기사: SK하이닉스와 기타 지원 종목 목록",
 				"https://news.example.com/article",
 				null,
 				"publisher_public_article_v1"
@@ -130,6 +128,17 @@ class NewsCollectionServiceTests {
 		org.assertj.core.api.Assertions.assertThat(draft.getValue().excerpt()).isEqualTo(excerpt);
 		org.assertj.core.api.Assertions.assertThat(draft.getValue().stockConfidences().keySet())
 			.containsExactly("005930");
+	}
+
+	@Test
+	void rejectsBodyThatDoesNotCorroborateTheHeadlineIssuer() {
+		when(provider.search(eq("삼성전자"), anyInt())).thenReturn(List.of(article(
+			"삼성전자 차세대 반도체 투자 확대", "삼성전자 투자 소식", "news.example.com")));
+		when(originalArticleGateway.fetch(any())).thenReturn(java.util.Optional.of(new OriginalNewsArticle(
+			"SK하이닉스 투자 관련 다른 기사와 여러 광고 목록만 존재한다.", "https://news.example.com/article", null,
+			"publisher_public_article_v2")));
+		service.collect();
+		verify(repository, never()).saveCollected(any());
 	}
 
 	private List<NewsStockMapping> mappings() {

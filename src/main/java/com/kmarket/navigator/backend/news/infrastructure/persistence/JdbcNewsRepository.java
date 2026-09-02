@@ -191,13 +191,20 @@ class JdbcNewsRepository implements NewsRepository {
 	}
 
 	@Override
+	public java.util.Set<String> findCollectedProviderIds(Instant since) {
+		return java.util.Set.copyOf(jdbcClient.sql("SELECT provider_article_id FROM news_article WHERE collected_at >= :since")
+			.param("since", atUtc(since)).query(String.class).list());
+	}
+
+	@Override
 	public List<NewsDuplicateCandidate> findDuplicateCandidates(Instant since, int limit) {
 		return jdbcClient.sql("""
 			SELECT article.id, article.cluster_id, article.original_title,
 			       COALESCE(NULLIF(article.original_excerpt, ''), LEFT(article.original_body, 2000), '') AS source_text,
-			       article.publisher, article.published_at
+			       article.publisher, article.published_at, article.original_body
 			FROM news_article article
 			WHERE article.collected_at >= :since
+			  AND article.content_availability = 'FULL_ARTICLE'
 			ORDER BY article.published_at DESC
 			LIMIT :limit
 			""")
@@ -209,7 +216,8 @@ class JdbcNewsRepository implements NewsRepository {
 				resultSet.getString("original_title"),
 				resultSet.getString("source_text"),
 				resultSet.getString("publisher"),
-				instant(resultSet, "published_at")
+				instant(resultSet, "published_at"),
+				resultSet.getString("original_body")
 			))
 			.list();
 	}
@@ -426,30 +434,6 @@ class JdbcNewsRepository implements NewsRepository {
 			.param("now", atUtc(draft.collectedAt()))
 			.update();
 		return true;
-	}
-
-	@Override
-	@Transactional
-	public void addClusterStockMappings(UUID clusterId, Map<String, BigDecimal> stockConfidences) {
-		for (var match : stockConfidences.entrySet()) {
-			jdbcClient.sql("""
-				INSERT INTO news_article_security (article_id, security_id, match_confidence)
-				SELECT cluster.representative_article_id, security.id, :confidence
-				FROM news_cluster cluster
-				JOIN security ON security.stock_code = :stockCode
-				JOIN service_stock_universe universe ON universe.stock_code = security.stock_code
-				WHERE cluster.id = :clusterId AND cluster.representative_article_id IS NOT NULL
-				ON CONFLICT (article_id, security_id) DO UPDATE
-				SET match_confidence = GREATEST(
-				    news_article_security.match_confidence,
-				    EXCLUDED.match_confidence
-				)
-				""")
-				.param("clusterId", clusterId)
-				.param("stockCode", match.getKey())
-				.param("confidence", match.getValue())
-				.update();
-		}
 	}
 
 	@Override

@@ -61,22 +61,26 @@ public class NewsClusterReconciliationService {
 			.comparing(NewsDuplicateCandidate::publishedAt)
 			.thenComparing(NewsDuplicateCandidate::articleId));
 		NewsDuplicateIndex duplicateIndex = new NewsDuplicateIndex(fingerprint);
+		var mappings = repository.findStockMappings();
+		var matcher = new NewsStockMatcher();
 		ClusterUnion clusters = new ClusterUnion();
 		articles.forEach(article -> clusters.add(article.clusterId()));
 		long comparisons = 0;
 		for (NewsDuplicateCandidate article : articles) {
-			NewsFingerprint.Profile profile = fingerprint.profile(article.title(), article.excerpt());
+			var stocks = matcher.verifiedArticleMatches(article.title(), article.body(), mappings).keySet();
+			if (stocks.isEmpty() && article.body() != null && !article.body().isBlank()) continue;
+			NewsFingerprint.Profile profile = fingerprint.profile(article.title(), article.excerpt(), article.body());
 			NewsDuplicateIndex.Match match = duplicateIndex.findBest(
 				profile,
 				article.publishedAt(),
-				article.publisher()
+				article.publisher(), stocks
 			);
 			comparisons += match.comparisons();
 			if (match.targetClusterId() != null) {
 				clusters.mergeInto(article.clusterId(), match.targetClusterId());
 			}
 			UUID targetClusterId = clusters.find(article.clusterId());
-			duplicateIndex.add(targetClusterId, profile, article.publishedAt(), article.publisher());
+			duplicateIndex.add(targetClusterId, profile, article.publishedAt(), article.publisher(), stocks);
 		}
 		List<NewsClusterAssignment> assignments = articles.stream()
 			.filter(article -> !article.clusterId().equals(clusters.find(article.clusterId())))

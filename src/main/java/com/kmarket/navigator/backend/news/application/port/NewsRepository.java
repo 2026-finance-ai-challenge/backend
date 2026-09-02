@@ -1,10 +1,8 @@
 package com.kmarket.navigator.backend.news.application.port;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -29,6 +27,8 @@ public interface NewsRepository {
 
 	List<NewsDuplicateCandidate> findDuplicateCandidates(Instant since, int limit);
 
+	java.util.Set<String> findCollectedProviderIds(Instant since);
+
 	int replaceClusterAssignments(List<NewsClusterAssignment> assignments, Instant reconciledAt);
 
 	List<NewsStockMapping> findStockMappings();
@@ -38,8 +38,6 @@ public interface NewsRepository {
 	void markTargetCollected(String stockCode, Instant collectedAt);
 
 	boolean saveCollected(NewsDraft draft);
-
-	void addClusterStockMappings(UUID clusterId, Map<String, BigDecimal> stockConfidences);
 
 	boolean newsMaintenanceApplied(String version);
 
