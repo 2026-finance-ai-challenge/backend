@@ -30,6 +30,21 @@ class TranslationWorkerTests {
 	private static final Instant NOW = Instant.parse("2026-08-25T00:00:00Z");
 
 	@Test
+	void newsAndFilingWorkersClaimOnlyTheirReservedQueue() {
+		var repository = Mockito.mock(TranslationRepository.class);
+		var worker = new TranslationWorker(repository, Mockito.mock(TranslationAiGateway.class),
+			Mockito.mock(TranslationGenerationGuard.class), JsonMapper.builder().build(),
+			Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(15));
+		worker.processNews();
+		worker.process();
+		for (var kind : List.of(
+			com.kmarket.navigator.backend.translation.domain.TranslationKind.NEWS_NARRATIVE,
+			com.kmarket.navigator.backend.translation.domain.TranslationKind.DISCLOSURE_SECTION)) {
+			verify(repository).claimForKind(eq(kind), eq(2), anyString(), eq(NOW), eq(NOW.minusSeconds(300)));
+		}
+	}
+
+	@Test
 	void persistsRemainingTitlesWithoutRegeneratingAfterOneDatabaseFailure() {
 		TranslationRepository repository = Mockito.mock(TranslationRepository.class);
 		TranslationAiGateway gateway = Mockito.mock(TranslationAiGateway.class);

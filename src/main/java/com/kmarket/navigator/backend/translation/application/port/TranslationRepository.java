@@ -39,6 +39,7 @@ public interface TranslationRepository {
 	void prioritize(UUID id, Instant now);
 
 	List<TranslationJob> claim(int limit, String workerId, Instant now, Instant staleBefore);
+	List<TranslationJob> claimForKind(TranslationKind kind, int limit, String workerId, Instant now, Instant staleBefore);
 
 	List<TitleTranslationJob> claimNewsTitles(
 		int limit,

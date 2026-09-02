@@ -136,8 +136,7 @@ class JdbcTranslationRepository implements TranslationRepository {
 			if (coolingDown) return current;
 			jdbcClient.sql("""
 				UPDATE translation_memory
-				SET status = 'PENDING', result_payload = NULL, model_id = NULL,
-				    prompt_version = NULL, generated_at = NULL, updated_at = :now
+				SET status = 'PENDING', updated_at = :now
 				WHERE id = :id AND status = 'FAILED'
 				""")
 				.param("id", current.jobId())
@@ -182,6 +181,12 @@ class JdbcTranslationRepository implements TranslationRepository {
 	@Override
 	@Transactional
 	public List<TranslationJob> claim(int limit, String workerId, Instant now, Instant staleBefore) {
+		return claimForKind(null, limit, workerId, now, staleBefore);
+	}
+
+	@Override
+	@Transactional
+	public List<TranslationJob> claimForKind(TranslationKind kind, int limit, String workerId, Instant now, Instant staleBefore) {
 		markExhausted("NEWS_NARRATIVE", now);
 		markExhausted("DISCLOSURE_SECTION", now);
 		jdbcClient.sql("""
@@ -210,6 +215,7 @@ class JdbcTranslationRepository implements TranslationRepository {
 			    FROM translation_job job
 			    JOIN translation_memory memory ON memory.id = job.translation_memory_id
 			    WHERE memory.content_kind IN ('NEWS_NARRATIVE', 'DISCLOSURE_SECTION')
+			      AND (CAST(:kind AS varchar) IS NULL OR memory.content_kind = :kind)
 			      AND job.status = 'PENDING' AND job.attempts < :maxAttempts
 			      AND job.available_at <= :now
 			    ORDER BY job.priority, job.available_at, job.updated_at, job.translation_memory_id
@@ -235,6 +241,7 @@ class JdbcTranslationRepository implements TranslationRepository {
 			""")
 			.param("now", atUtc(now))
 			.param("workerId", workerId)
+			.param("kind", kind == null ? null : kind.name(), java.sql.Types.VARCHAR)
 			.param("limit", limit)
 			.param("maxAttempts", MAX_ATTEMPTS)
 			.query((resultSet, rowNumber) -> new TranslationJob(

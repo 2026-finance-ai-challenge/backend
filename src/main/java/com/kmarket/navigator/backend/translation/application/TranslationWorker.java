@@ -19,6 +19,7 @@ import com.kmarket.navigator.backend.translation.application.port.TranslationRep
 import com.kmarket.navigator.backend.translation.domain.GeneratedTranslation;
 import com.kmarket.navigator.backend.translation.domain.GeneratedTitle;
 import com.kmarket.navigator.backend.translation.domain.TranslationJob;
+import com.kmarket.navigator.backend.translation.domain.TranslationKind;
 import com.kmarket.navigator.backend.translation.domain.TitleTranslationJob;
 import com.kmarket.navigator.backend.global.error.BusinessException;
 import com.kmarket.navigator.backend.global.concurrent.BoundedTasks;
@@ -31,7 +32,7 @@ import tools.jackson.databind.ObjectMapper;
 public class TranslationWorker {
 
 	private static final Logger log = LoggerFactory.getLogger(TranslationWorker.class);
-	private static final int BATCH_SIZE = 4;
+	private static final int BATCH_SIZE = 2;
 	private static final int TITLE_BATCH_SIZE = 5;
 	private static final Duration TRANSIENT_FAILURE_COOLDOWN = Duration.ofSeconds(15);
 	private static final Duration RATE_LIMIT_COOLDOWN = Duration.ofMinutes(1);
@@ -77,12 +78,26 @@ public class TranslationWorker {
 	)
 	@SchedulerLock(name = "on-demand-translation", lockAtMostFor = "PT4M", lockAtLeastFor = "PT0.5S")
 	public void process() {
+		processKind(TranslationKind.DISCLOSURE_SECTION);
+	}
+
+	@Scheduled(
+		fixedDelayString = "${kmarket.translation.generation-interval:2s}",
+		initialDelayString = "${kmarket.translation.generation-initial-delay:30s}"
+	)
+	@SchedulerLock(name = "on-demand-news-translation", lockAtMostFor = "PT4M", lockAtLeastFor = "PT0.5S")
+	public void processNews() {
+		// 긴 공시의 모든 셀이 끝날 때까지 뉴스 요청이 대기하지 않도록 실행 슬롯을 분리한다.
+		processKind(TranslationKind.NEWS_NARRATIVE);
+	}
+
+	private void processKind(TranslationKind kind) {
 		Instant now = Instant.now(clock);
 		if (now.isBefore(nextProviderAttemptAt)) {
 			return;
 		}
-		List<TranslationJob> jobs = repository.claim(
-			BATCH_SIZE, workerId, now, now.minus(Duration.ofMinutes(5))
+		List<TranslationJob> jobs = repository.claimForKind(
+			kind, BATCH_SIZE, workerId, now, now.minus(Duration.ofMinutes(5))
 		);
 		BoundedTasks.forEach(jobs, BATCH_SIZE, this::process);
 	}
