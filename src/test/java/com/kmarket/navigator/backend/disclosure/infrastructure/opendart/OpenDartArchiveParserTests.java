@@ -23,6 +23,14 @@ class OpenDartArchiveParserTests {
 	private final OpenDartArchiveParser parser = new OpenDartArchiveParser(new ObjectMapper());
 
 	@Test
+	void preservesDartXmlNumericCellsAndNestedTableText() {
+		String html = "<TABLE><TR><TU ROWSPAN='2'>100</TU><TE>매출<TABLE><TR><TD>이익</TD></TR></TABLE></TE></TR></TABLE>";
+		var document = parser.parseDocuments(zip("filing.xml", html.getBytes(StandardCharsets.UTF_8))).getFirst();
+		assertThat(document.sections().getFirst().tableData()).isEqualTo("[[\"100\",\"매출\"],[\"이익\"]]");
+		assertThat(document.sanitizedHtml()).contains("<td rowspan=\"2\">100</td>");
+	}
+
+	@Test
 	void parsesKoreanDocumentAndPreservesTableStructure() {
 		String html = """
 			<html>

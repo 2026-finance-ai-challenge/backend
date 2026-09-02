@@ -10,7 +10,10 @@ public record DisclosureInsightGeneration(
 	boolean sufficientEvidence,
 	String refusalReason,
 	String modelId,
-	String promptVersion
+	String promptVersion,
+	String whatKo,
+	String whyKo,
+	String impactKo
 ) {
 	public DisclosureInsightGeneration {
 		evidenceIds = List.copyOf(evidenceIds);

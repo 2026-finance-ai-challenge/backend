@@ -153,6 +153,9 @@ class BackendApplicationTests {
 	JdbcClient jdbcClient;
 
 	@Autowired
+	com.kmarket.navigator.backend.disclosure.infrastructure.persistence.DisclosureDocumentRepairService documentRepair;
+
+	@Autowired
 	ObjectMapper objectMapper;
 
 	@Autowired
@@ -193,6 +196,12 @@ class BackendApplicationTests {
 	TranslationWorker translationWorker;
 
 	@Autowired
+	com.kmarket.navigator.backend.translation.application.OnDemandTranslationService onDemandTranslationService;
+
+	@Autowired
+	com.kmarket.navigator.backend.translation.application.port.TranslationRepository translationRepository;
+
+	@Autowired
 	TaxDocumentProperties taxDocumentProperties;
 
 	@Autowired
@@ -206,6 +215,52 @@ class BackendApplicationTests {
 
 	@Test
 	void contextLoads() {
+	}
+
+	@Test
+	@Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+	void concurrentLanguagesShareOneJobAndFailedRequestsDoNotRestartItImmediately() throws Exception {
+		UUID articleId = insertReadyNews("Concurrent news " + UUID.randomUUID(), "삼성전자가 새로운 투자를 발표했다.", Instant.now(), "HIGH");
+		UUID clusterId = jdbcClient.sql("SELECT cluster_id FROM news_article WHERE id = :id")
+			.param("id", articleId).query(UUID.class).single();
+		try (var executor = java.util.concurrent.Executors.newFixedThreadPool(8)) {
+			var tasks = new java.util.ArrayList<java.util.concurrent.Callable<com.kmarket.navigator.backend.translation.domain.TranslationView>>();
+			for (int index = 0; index < 32; index++) {
+				String locale = index % 2 == 0 ? "en" : "ko";
+				tasks.add(() -> onDemandTranslationService.ensureNewsRequested(articleId, locale));
+			}
+			var results = executor.invokeAll(tasks);
+			var ids = new java.util.HashSet<UUID>();
+			for (var result : results) ids.add(result.get().jobId());
+			assertThat(ids).hasSize(1);
+			UUID jobId = ids.iterator().next();
+			String sourceHash = results.getFirst().get().sourceHash();
+			assertThat(translationRepository.findMany(com.kmarket.navigator.backend.translation.domain.TranslationKind.NEWS_NARRATIVE,
+				List.of(sourceHash, "0".repeat(64)), "en", com.kmarket.navigator.backend.translation.application.OnDemandTranslationService.NEWS_VERSION)).containsOnlyKeys(sourceHash);
+			assertThat(translationRepository.findMany(com.kmarket.navigator.backend.translation.domain.TranslationKind.NEWS_NARRATIVE,
+				List.of(sourceHash), "ko", com.kmarket.navigator.backend.translation.application.OnDemandTranslationService.NEWS_VERSION)).isEmpty();
+			var calls = new java.util.concurrent.atomic.AtomicInteger();
+			when(translationAiGateway.streamNews(any(), any(), any(), any(), any(), any())).thenAnswer(invocation -> {
+				calls.incrementAndGet();
+				throw new com.kmarket.navigator.backend.translation.application.TranslationProviderException(
+					com.kmarket.navigator.backend.translation.application.TranslationProviderException.Failure.INVALID_OUTPUT);
+			});
+			translationWorker.process();
+			assertThat(calls.get()).isEqualTo(1);
+			for (var result : executor.invokeAll(tasks)) {
+				assertThat(result.get().jobId()).isEqualTo(jobId);
+				assertThat(result.get().status()).isEqualTo(com.kmarket.navigator.backend.translation.domain.TranslationStatus.FAILED);
+			}
+			translationWorker.process();
+			assertThat(calls.get()).isEqualTo(1);
+			assertThat(jdbcClient.sql("SELECT attempts FROM translation_job WHERE translation_memory_id = :id")
+				.param("id", jobId).query(Integer.class).single()).isEqualTo(1);
+		} finally {
+			jdbcClient.sql("DELETE FROM translation_memory WHERE request_context ->> 'article_id' = :id")
+				.param("id", articleId.toString()).update();
+			jdbcClient.sql("DELETE FROM news_article WHERE id = :id").param("id", articleId).update();
+			jdbcClient.sql("DELETE FROM news_cluster WHERE id = :id").param("id", clusterId).update();
+		}
 	}
 
 	@Test
@@ -538,7 +593,7 @@ class BackendApplicationTests {
 	@Test
 	void issuesJwtAndRotatesRefreshTokenWithRedisSessionValidation() throws Exception {
 		String loginId = "investor_" + UUID.randomUUID().toString().substring(0, 8);
-		String password = "Secure!Pass123";
+		String password = "orange!8";
 		mockMvc.perform(post("/api/v1/auth/signup")
 				.contentType(MediaType.APPLICATION_JSON)
 				.content("""
@@ -1417,14 +1472,14 @@ class BackendApplicationTests {
 	void reconcilesExistingCrossPublisherNewsAndReturnsOneStory() throws Exception {
 		Instant publishedAt = Instant.now().minus(Duration.ofHours(80));
 		UUID firstArticleId = insertReadyNews(
-			"네팔 중국 대홍수 사망자 584명 실종자 2500명 육박",
-			"네팔과 중국에서 발생한 홍수로 사망자가 584명으로 늘고 실종자가 2500명에 육박했다.",
+			"삼성전자 신규 투자 2500억원 발표",
+			"삼성전자는 반도체 생산시설에 2500억원을 투자한다고 발표했다. 생산 능력 확충과 고객사의 수요 대응이 목적이다. 회사는 단계적으로 장비를 도입하고 기존 제조 공정의 효율을 개선할 계획이라고 설명했다. 신규 시설은 기존 사업장 안에 마련되며 별도 해외 공장 신설은 포함하지 않는다. 투자 집행 일정은 이사회 승인과 장비 인도 일정에 따라 결정된다. 회사는 계획의 주요 내용과 자금 조달 방안을 공시했다.",
 			publishedAt,
 			"HIGH"
 		);
 		UUID duplicateArticleId = insertReadyNews(
-			"네팔 대홍수 사망자 584명 실종자 2천500명 육박",
-			"대홍수 피해가 이어져 사망자 584명과 실종자 약 2500명이 집계됐다.",
+			"삼성전자 신규 투자 2천500억원 발표",
+			"삼성전자는 반도체 생산시설에 2500억원을 투자한다고 발표했다. 생산 능력 확충과 고객사의 수요 대응이 목적이다. 회사는 단계적으로 장비를 도입하고 기존 제조 공정의 효율을 개선할 계획이라고 설명했다. 신규 시설은 기존 사업장 안에 마련되며 별도 해외 공장 신설은 포함하지 않는다. 투자 집행 일정은 이사회 승인과 장비 인도 일정에 따라 결정된다. 회사는 계획의 주요 내용과 자금 조달 방안을 공시했다.",
 			publishedAt.plusSeconds(600),
 			"HIGH"
 		);
@@ -1449,7 +1504,7 @@ class BackendApplicationTests {
 			.query(Long.class)
 			.single();
 		assertThat(clusters).isEqualTo(1);
-		mockMvc.perform(get("/api/v1/news").param("query", "대홍수"))
+		mockMvc.perform(get("/api/v1/news").param("query", "신규 투자"))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.items.length()").value(1))
 			.andExpect(jsonPath("$.items[0].relatedCoverageCount").value(2));
@@ -1730,7 +1785,7 @@ class BackendApplicationTests {
 			""")
 			.param("receiptNumber", filing.receiptNumber())
 			.query(String.class)
-			.single()).isEqualTo("opendart-html-v4");
+			.single()).isEqualTo("opendart-html-v5");
 		assertThat(jdbcClient.sql("""
 			SELECT status FROM ingestion_job
 			WHERE job_type = 'DISCLOSURE_EMBEDDING' AND business_key = :receiptNumber
@@ -1744,6 +1799,52 @@ class BackendApplicationTests {
 			.andExpect(jsonPath("$.receiptNumber").value(filing.receiptNumber()))
 			.andExpect(jsonPath("$.documents[0].version").value(2))
 			.andExpect(jsonPath("$.documents[0].sections[0].text").value("second"));
+	}
+
+	@Test
+	void preservesSectionIdsOnReplayAndVersionsParserChanges() {
+		var filing = filing("20260902999101");
+		disclosureRepository.saveFiling(filing);
+		var source = document("a", "first");
+		disclosureRepository.completeDocumentJob(filing.receiptNumber(), List.of(source), List.of());
+		var original = jdbcClient.sql("SELECT payload_zstd FROM disclosure_document WHERE is_current")
+			.query(byte[].class).single();
+		disclosureRepository.completeDocumentJob(filing.receiptNumber(), List.of(source), List.of());
+		assertThat(jdbcClient.sql("SELECT payload_zstd FROM disclosure_document WHERE is_current")
+			.query(byte[].class).single()).isEqualTo(original);
+		jdbcClient.sql("UPDATE disclosure_document SET parser_version = 'opendart-html-v3'").update();
+		disclosureRepository.completeDocumentJob(filing.receiptNumber(), List.of(source), List.of());
+		assertThat(jdbcClient.sql("SELECT version_no FROM disclosure_document WHERE is_current")
+			.query(Integer.class).single()).isEqualTo(2);
+		assertThat(jdbcClient.sql("SELECT payload_zstd FROM disclosure_document WHERE NOT is_current")
+			.query(byte[].class).single()).isEqualTo(original);
+	}
+
+	@Test
+	void repairsLegacyTablesWithNewVersionAndKeepsBackupSource() {
+		var filing = filing("20260902999102");
+		disclosureRepository.saveFiling(filing);
+		disclosureRepository.completeDocumentJob(filing.receiptNumber(), List.of(document("a", "old section")), List.of());
+		jdbcClient.sql("UPDATE disclosure_document SET parser_version = 'opendart-html-v3'").update();
+		jdbcClient.sql("UPDATE ingestion_job SET status = 'COMPLETED' WHERE job_type = 'DISCLOSURE_SIGNAL'").update();
+		var id = jdbcClient.sql("SELECT id FROM disclosure_document WHERE is_current").query(UUID.class).single();
+		var disclosureId = jdbcClient.sql("SELECT disclosure_id FROM disclosure_document WHERE id = :id")
+			.param("id", id).query(UUID.class).single();
+		var previous = jdbcClient.sql("SELECT payload_zstd FROM disclosure_document WHERE id = :id")
+			.param("id", id).query(byte[].class).single();
+		var fixed = new OpenDartDocument("report.xml", "a".repeat(64), "날짜 2026",
+			"<table><tr><td>날짜</td><td>2026</td></tr></table>",
+			List.of(new OpenDartSection(0, SectionKind.TABLE, null, "날짜 2026", "[[\"날짜\",\"2026\"]]")));
+		assertThat(documentRepair.restoreVersion(id, disclosureId, filing.receiptNumber(), new byte[]{1}, fixed)).isFalse();
+		assertThat(documentRepair.restoreVersion(id, disclosureId, filing.receiptNumber(), previous, fixed)).isTrue();
+		assertThat(documentRepair.restoreVersion(id, disclosureId, filing.receiptNumber(), previous, fixed)).isFalse();
+		assertThat(jdbcClient.sql("SELECT payload_zstd FROM disclosure_document WHERE id = :id")
+			.param("id", id).query(byte[].class).single()).isEqualTo(previous);
+		assertThat(jdbcClient.sql("SELECT version_no FROM disclosure_document WHERE is_current").query(Integer.class).single()).isEqualTo(2);
+		assertThat(jdbcClient.sql("SELECT status FROM ingestion_job WHERE job_type = 'DISCLOSURE_EMBEDDING'")
+			.query(String.class).single()).isEqualTo("PENDING");
+		assertThat(jdbcClient.sql("SELECT status FROM ingestion_job WHERE job_type = 'DISCLOSURE_SIGNAL'")
+			.query(String.class).single()).isEqualTo("COMPLETED");
 	}
 
 	@Test
@@ -1870,12 +1971,12 @@ class BackendApplicationTests {
 			FROM translation_memory memory
 			JOIN translation_job job ON job.translation_memory_id = memory.id
 			WHERE memory.content_kind = 'NEWS_NARRATIVE'
-			  AND memory.translation_version = 'news-narrative-v12'
+			  AND memory.translation_version = 'news-bilingual-v1'
 			  AND memory.request_context ->> 'article_id' = :articleId
 			""")
 			.param("articleId", articleId.toString())
 			.query(Long.class)
-			.single()).isEqualTo(2);
+			.single()).isEqualTo(1);
 
 		OpenDartFiling filing = filing("20260823800003");
 		disclosureRepository.saveFiling(filing);
@@ -1941,9 +2042,9 @@ class BackendApplicationTests {
 			.andExpect(status().isAccepted());
 		mockMvc.perform(post("/api/v1/news/{articleId}/translation?locale=ko", articleId))
 			.andExpect(status().isAccepted());
-		when(translationAiGateway.translateNews(any(), any(), any(), any(), any(), any()))
+		when(translationAiGateway.streamNews(any(), any(), any(), any(), any(), any()))
 			.thenAnswer(invocation -> {
-				String targetLocale = invocation.getArgument(4);
+				String targetLocale = "en";
 				var result = objectMapper.createObjectNode();
 				result.putArray("translatedParagraphs")
 					.add("ko".equals(targetLocale)
@@ -1957,11 +2058,18 @@ class BackendApplicationTests {
 					: "The filing cites capacity expansion.");
 				result.put("impact", "ko".equals(targetLocale)
 					? "향후 생산 능력이 늘어날 수 있다."
-					: "The investment may increase future capacity.");
+						: "The investment may increase future capacity.");
+				var summaries = result.putObject("summaries");
+				var en = summaries.putObject("en");
+				for (String key : List.of("what", "why", "impact")) en.set(key, result.path(key));
+				var ko = summaries.putObject("ko");
+				ko.put("what", "회사가 신규 반도체 투자를 발표했다.");
+				ko.put("why", "생산 능력 확대가 필요했다.");
+				ko.put("impact", "향후 생산 능력이 늘어날 수 있다.");
 				return new GeneratedTranslation(
 					invocation.getArgument(0),
 					targetLocale,
-					invocation.getArgument(5),
+					invocation.getArgument(4),
 					result,
 					"translation-test-model",
 					"news-narrative-v12"
@@ -2015,8 +2123,11 @@ class BackendApplicationTests {
 				List.of(evidence.getFirst().id()),
 				true,
 				null,
-				"gpt-5-mini",
-					"filing-summary-v2"
+				"gpt-5-nano",
+				"filing-summary-v3",
+				"회사가 신규 반도체 설비를 승인했습니다.",
+				"공시에 추가 이유는 기재되어 있지 않습니다.",
+				"설비가 생산 능력에 영향을 줄 수 있습니다."
 			);
 		});
 
@@ -2034,7 +2145,8 @@ class BackendApplicationTests {
 			))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.sufficientEvidence").value(true))
-				.andExpect(jsonPath("$.promptVersion").value("filing-summary-v2"));
+			.andExpect(jsonPath("$.promptVersion").value("filing-summary-v3"))
+			.andExpect(jsonPath("$.whatKo").value("회사가 신규 반도체 설비를 승인했습니다."));
 		verify(disclosureInsightGateway, times(1)).summarize(
 			eq(filing.receiptNumber()),
 			eq(filing.reportName()),

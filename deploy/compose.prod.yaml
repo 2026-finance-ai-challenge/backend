@@ -91,10 +91,10 @@ services:
       KMARKET_AI_MODEL_BUNDLE_COMMIT: ${KMARKET_AI_MODEL_BUNDLE_COMMIT:?required}
       KMARKET_AI_TERM_PROMPT_VERSION: ${KMARKET_AI_TERM_PROMPT_VERSION:-financial-term-v1}
       KMARKET_AI_TRANSLATION_MODEL: ${KMARKET_AI_TRANSLATION_MODEL:-gpt-5-nano}
-      KMARKET_AI_TITLE_TRANSLATION_PROMPT_VERSION: ${KMARKET_AI_TITLE_TRANSLATION_PROMPT_VERSION:-financial-title-translation-v5}
+      KMARKET_AI_TITLE_TRANSLATION_PROMPT_VERSION: ${KMARKET_AI_TITLE_TRANSLATION_PROMPT_VERSION:-financial-title-translation-v7}
       KMARKET_AI_NEWS_NARRATIVE_PROMPT_VERSION: ${KMARKET_AI_NEWS_NARRATIVE_PROMPT_VERSION:-news-narrative-v12}
-      KMARKET_AI_DISCLOSURE_SECTION_PROMPT_VERSION: ${KMARKET_AI_DISCLOSURE_SECTION_PROMPT_VERSION:-disclosure-section-translation-v5}
-      KMARKET_AI_FILING_SUMMARY_PROMPT_VERSION: ${KMARKET_AI_FILING_SUMMARY_PROMPT_VERSION:-filing-summary-v2}
+      KMARKET_AI_DISCLOSURE_SECTION_PROMPT_VERSION: ${KMARKET_AI_DISCLOSURE_SECTION_PROMPT_VERSION:-disclosure-section-translation-v7}
+      KMARKET_AI_FILING_SUMMARY_PROMPT_VERSION: ${KMARKET_AI_FILING_SUMMARY_PROMPT_VERSION:-filing-summary-v3}
       KMARKET_AI_AGENT_MODEL: ${KMARKET_AI_AGENT_MODEL:-gpt-5-nano}
       KMARKET_AI_AGENT_PROMPT_VERSION: ${KMARKET_AI_AGENT_PROMPT_VERSION:-market-agent-v1}
       KMARKET_AI_TAX_DOCUMENT_MODEL: ${KMARKET_AI_TAX_DOCUMENT_MODEL:-gpt-5-nano}
@@ -104,8 +104,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      model-cache-init:
+        condition: service_completed_successfully
     volumes:
       - ./kmarket-model-runtime:/opt/kmarket-model-runtime:ro
+      - model-cache:/home/kmarket/.cache
     healthcheck:
       test:
         - CMD
@@ -127,7 +130,6 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command: ["chown root:root /cache && chmod 700 /cache && chown 10001:10001 /cache"]
     user: "0:0"
-    profiles: ["worker"]
     volumes:
       - model-cache:/cache
     restart: "no"
@@ -195,7 +197,7 @@ services:
       KMARKET_NEWS_COLLECTION_INTERVAL: ${KMARKET_NEWS_COLLECTION_INTERVAL:-2m}
       KMARKET_NEWS_MAX_ARTICLE_AGE: ${KMARKET_NEWS_MAX_ARTICLE_AGE:-36h}
       KMARKET_NAVER_NEWS_QUERIES: ${KMARKET_NAVER_NEWS_QUERIES:-}
-      KMARKET_NEWS_MAINTENANCE_ENABLED: ${KMARKET_NEWS_MAINTENANCE_ENABLED:-true}
+      KMARKET_NEWS_MAINTENANCE_ENABLED: ${KMARKET_NEWS_MAINTENANCE_ENABLED:-false}
       KMARKET_NEWS_MAINTENANCE_INITIAL_DELAY: ${KMARKET_NEWS_MAINTENANCE_INITIAL_DELAY:-5s}
       KMARKET_GLOBAL_PEER_DATA_VERSION: ${KMARKET_GLOBAL_PEER_DATA_VERSION:-kmarket-global-peer-2026-09-01-openai-v2}
       KMARKET_TRANSLATION_PROVIDER_FAILURE_COOLDOWN: ${KMARKET_TRANSLATION_PROVIDER_FAILURE_COOLDOWN:-15m}

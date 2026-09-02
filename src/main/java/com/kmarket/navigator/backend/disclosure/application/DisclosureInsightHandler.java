@@ -26,7 +26,7 @@ public class DisclosureInsightHandler {
 	private static final int MAX_EVIDENCE_ITEMS = 100;
 	private static final int MAX_ITEM_CHARACTERS = 6_000;
 	private static final int MAX_TOTAL_CHARACTERS = 60_000;
-	private static final String SUMMARY_PROMPT_VERSION = "filing-summary-v2";
+	private static final String SUMMARY_PROMPT_VERSION = "filing-summary-v3";
 	private final DisclosureRepository repository;
 	private final DisclosureInsightGateway gateway;
 	private final DisclosureInsightGenerationGuard generationGuard;
@@ -120,7 +120,10 @@ public class DisclosureInsightHandler {
 			sufficient ? null : refusalReason(generated, sources),
 			generated.modelId(),
 			generated.promptVersion(),
-			Instant.now(clock)
+			Instant.now(clock),
+			sufficient ? generated.whatKo() : null,
+			sufficient ? generated.whyKo() : null,
+			sufficient ? generated.impactKo() : null
 		);
 		repository.saveInsight(insight);
 		return insight;

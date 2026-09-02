@@ -65,6 +65,27 @@ class JdbcTranslationRepository implements TranslationRepository {
 	}
 
 	@Override
+	public java.util.Map<String, TranslationView> findMany(TranslationKind kind, List<String> sourceHashes, String targetLocale, String version) {
+		var results = new java.util.HashMap<String, TranslationView>();
+		var hashes = sourceHashes.stream().distinct().toList();
+		// 섹션마다 조회하지 않고 문서 캐시를 제한된 묶음으로 읽는다.
+		for (int start = 0; start < hashes.size(); start += 500) {
+			jdbcClient.sql("""
+				SELECT memory.id, memory.source_hash, memory.target_locale, memory.translation_version,
+				    memory.status, memory.result_payload, memory.model_id, memory.prompt_version,
+				    memory.generated_at, job.last_error_code
+				FROM translation_memory memory
+				LEFT JOIN translation_job job ON job.translation_memory_id = memory.id
+				WHERE memory.content_kind = :kind AND memory.source_hash IN (:hashes)
+				    AND memory.target_locale = :locale AND memory.translation_version = :version
+				""").param("kind", kind.name()).param("hashes", hashes.subList(start, Math.min(start + 500, hashes.size())))
+				.param("locale", targetLocale).param("version", version).query(this::mapView).list()
+				.forEach(view -> results.put(view.sourceHash(), view));
+		}
+		return java.util.Map.copyOf(results);
+	}
+
+	@Override
 	@Transactional
 	public TranslationView request(
 		TranslationKind kind,
@@ -98,8 +119,21 @@ class JdbcTranslationRepository implements TranslationRepository {
 			.param("context", objectMapper.writeValueAsString(context))
 			.param("now", atUtc(now))
 			.update();
+		// 실패 작업 재등록도 같은 메모리 행을 잠가 동시 요청이 상태를 되돌리지 못하게 한다.
+		jdbcClient.sql("""
+			SELECT id FROM translation_memory
+			WHERE content_kind = :kind AND source_hash = :hash AND target_locale = :locale
+			  AND translation_version = :version FOR UPDATE
+			""").param("kind", kind.name()).param("hash", sourceHash).param("locale", targetLocale)
+			.param("version", version).query(UUID.class).single();
 		TranslationView current = find(kind, sourceHash, targetLocale, version).orElseThrow();
 		if (current.status() == TranslationStatus.FAILED) {
+			boolean coolingDown = jdbcClient.sql("""
+				SELECT EXISTS (SELECT 1 FROM translation_job WHERE translation_memory_id = :id
+				  AND (updated_at > :before OR available_at > :now))
+				""").param("id", current.jobId()).param("before", atUtc(now.minus(Duration.ofMinutes(15))))
+				.param("now", atUtc(now)).query(Boolean.class).single();
+			if (coolingDown) return current;
 			jdbcClient.sql("""
 				UPDATE translation_memory
 				SET status = 'PENDING', result_payload = NULL, model_id = NULL,
@@ -282,7 +316,7 @@ class JdbcTranslationRepository implements TranslationRepository {
 			.map(TranslationKind::valueOf)
 			.orElseThrow(() -> new IllegalStateException("Claimed translation no longer exists"));
 		if ("en".equals(generated.targetLocale())) {
-			EnglishTextPolicy.requireAllTextValid(generated.result());
+			validateGenerated(generated);
 		}
 		int updated = jdbcClient.sql("""
 			UPDATE translation_memory
@@ -332,6 +366,40 @@ class JdbcTranslationRepository implements TranslationRepository {
 		if (updated != 1) {
 			throw new IllegalStateException("News narrative target no longer exists");
 		}
+		if (result.path("summaries").has("ko")) {
+			copyKoreanNewsNarrative(id, result.path("summaries").path("ko"));
+		}
+	}
+
+	@Override
+	@Transactional
+	public void progress(UUID id, GeneratedTranslation generated, Instant now) {
+		validateGenerated(generated);
+		int updated = jdbcClient.sql("""
+			UPDATE translation_memory SET result_payload = CAST(:payload AS jsonb),
+			    model_id = :model, prompt_version = :prompt, updated_at = :now
+			WHERE id = :id AND status = 'PROCESSING' AND source_hash = :hash
+			  AND target_locale = :locale AND translation_version = :version
+			""")
+			.param("id", id).param("payload", objectMapper.writeValueAsString(generated.result()))
+			.param("model", generated.modelId()).param("prompt", generated.promptVersion())
+			.param("now", atUtc(now)).param("hash", generated.sourceHash())
+			.param("locale", generated.targetLocale()).param("version", generated.translationVersion())
+			.update();
+		if (updated != 1) throw new IllegalStateException("Translation progress lease expired");
+	}
+
+	private void validateGenerated(GeneratedTranslation generated) {
+		var result = generated.result();
+		if (result.has("summaries")) {
+			var english = ((tools.jackson.databind.node.ObjectNode) result).deepCopy();
+			english.remove("summaries");
+			EnglishTextPolicy.requireAllTextValid(english);
+			EnglishTextPolicy.requireAllTextValid(result.path("summaries").path("en"));
+			for (String key : List.of("what", "why", "impact")) {
+				requireKoreanSummary(result.path("summaries").path("ko").path(key).asString());
+			}
+		} else EnglishTextPolicy.requireAllTextValid(result);
 	}
 
 	private int copyEnglishNewsNarrative(UUID id, JsonNode result, List<String> paragraphs) {
@@ -364,7 +432,7 @@ class JdbcTranslationRepository implements TranslationRepository {
 			FROM translation_memory memory
 			WHERE memory.id = :id
 			  AND memory.content_kind = 'NEWS_NARRATIVE'
-			  AND memory.target_locale = 'ko'
+			  AND (memory.target_locale = 'ko' OR jsonb_exists(memory.result_payload, 'summaries'))
 			  AND article.id = CAST(memory.request_context ->> 'article_id' AS uuid)
 			""")
 			.param("id", id)

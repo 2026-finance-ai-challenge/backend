@@ -20,6 +20,7 @@ import com.kmarket.navigator.backend.translation.domain.GeneratedTranslation;
 import com.kmarket.navigator.backend.translation.domain.TranslationJob;
 import com.kmarket.navigator.backend.translation.domain.TitleTranslationJob;
 import com.kmarket.navigator.backend.global.error.BusinessException;
+import com.kmarket.navigator.backend.global.concurrent.BoundedTasks;
 
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import tools.jackson.databind.JsonNode;
@@ -29,7 +30,7 @@ import tools.jackson.databind.ObjectMapper;
 public class TranslationWorker {
 
 	private static final Logger log = LoggerFactory.getLogger(TranslationWorker.class);
-	private static final int BATCH_SIZE = 1;
+	private static final int BATCH_SIZE = 4;
 	private static final int TITLE_BATCH_SIZE = 5;
 	private static final Duration TRANSIENT_FAILURE_COOLDOWN = Duration.ofSeconds(15);
 	private static final Duration RATE_LIMIT_COOLDOWN = Duration.ofMinutes(1);
@@ -82,9 +83,7 @@ public class TranslationWorker {
 		List<TranslationJob> jobs = repository.claim(
 			BATCH_SIZE, workerId, now, now.minus(Duration.ofMinutes(5))
 		);
-		for (TranslationJob job : jobs) {
-			process(job);
-		}
+		BoundedTasks.forEach(jobs, BATCH_SIZE, this::process);
 	}
 
 	@Scheduled(
@@ -116,7 +115,7 @@ public class TranslationWorker {
 		}
 		catch (RuntimeException exception) {
 			Duration cooldown = cooldown(exception);
-			nextProviderAttemptAt = now.plus(cooldown);
+			deferProvider(now.plus(cooldown));
 			String errorCode = errorCode(exception);
 			for (TitleTranslationJob job : jobs) {
 				repository.fail(job.id(), job.attempts(), errorCode,
@@ -130,7 +129,7 @@ public class TranslationWorker {
 	private Duration cooldown(RuntimeException exception) {
 		if (exception instanceof TranslationProviderException providerException) {
 			return switch (providerException.failure()) {
-				case INVALID_OUTPUT -> TRANSIENT_FAILURE_COOLDOWN;
+				case INVALID_OUTPUT, INCOMPLETE -> Duration.ZERO;
 				case QUOTA_EXHAUSTED -> providerFailureCooldown;
 				case RATE_LIMITED -> RATE_LIMIT_COOLDOWN;
 				case TIMEOUT, UNAVAILABLE -> TRANSIENT_FAILURE_COOLDOWN;
@@ -157,7 +156,7 @@ public class TranslationWorker {
 		}
 		catch (RuntimeException exception) {
 			Duration delay = cooldown(exception);
-			nextProviderAttemptAt = Instant.now(clock).plus(delay);
+			deferProvider(Instant.now(clock).plus(delay));
 			String code = errorCode(exception);
 			repository.fail(job.id(), job.attempts(), code, Instant.now(clock), delay);
 			log.warn("Translation generation failed id={} kind={} error={}",
@@ -165,10 +164,19 @@ public class TranslationWorker {
 		}
 	}
 
+	private synchronized void deferProvider(Instant until) {
+		if (until.isAfter(nextProviderAttemptAt)) nextProviderAttemptAt = until;
+	}
+
 	private GeneratedTranslation generateNews(TranslationJob job) {
 		JsonNode source = objectMapper.readTree(job.canonicalSource());
 		List<String> paragraphs = new ArrayList<>();
 		source.path("paragraphs").forEach(value -> paragraphs.add(value.asString()));
+		if ("news-bilingual-v1".equals(job.translationVersion())) {
+			return aiGateway.streamNews(job.sourceHash(), source.path("title").asString(), paragraphs,
+				source.path("content_availability").asString(), job.translationVersion(),
+				partial -> repository.progress(job.id(), partial, Instant.now(clock)));
+		}
 		return aiGateway.translateNews(
 			job.sourceHash(), source.path("title").asString(), paragraphs,
 			source.path("content_availability").asString(), job.targetLocale(),

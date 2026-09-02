@@ -1,0 +1,11 @@
+spring:
+  main:
+    web-application-type: none
+  flyway:
+    enabled: false
+  datasource:
+    hikari:
+      read-only: true
+  jpa:
+    hibernate:
+      ddl-auto: none

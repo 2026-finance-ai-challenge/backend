@@ -83,6 +83,7 @@ public class OpenApiConfig {
 		entry("DisclosureController#findAll", operation("공시 목록 조회", "Disclosures")),
 		entry("DisclosureController#findOne", operation("공시 상세 조회", "Disclosures")),
 		entry("DisclosureController#findSectionTranslation", operation("공시 섹션 번역 상태 조회", "Disclosures")),
+		entry("DisclosureController#findDocumentTranslations", operation("원본 HTML 구조의 공시 번역 상태 조회", "Disclosures")),
 		entry("DisclosureController#requestDisclosureTranslation", operation("공시 전체 번역 일괄 요청", "Disclosures")),
 		entry("DisclosureController#requestSectionTranslation", operation("공시 섹션 번역 요청", "Disclosures")),
 		entry("DisclosureController#ask", operation("공시 근거 기반 질의", "Disclosures")),

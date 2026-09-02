@@ -15,7 +15,7 @@ import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
-@Profile("!test")
+@Profile("!test & !html-backfill")
 @EnableScheduling
 @EnableSchedulerLock(defaultLockAtMostFor = "PT15M")
 @Configuration(proxyBeanMethods = false)
@@ -39,8 +39,8 @@ class SchedulingConfig {
 	@Bean
 	TaskScheduler taskScheduler() {
 		ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
-		scheduler.setPoolSize(4);
-		scheduler.setThreadNamePrefix("disclosure-scheduler-");
+		scheduler.setPoolSize(16);
+		scheduler.setThreadNamePrefix("pipeline-scheduler-");
 		scheduler.setWaitForTasksToCompleteOnShutdown(true);
 		scheduler.setAwaitTerminationSeconds(20);
 		return scheduler;

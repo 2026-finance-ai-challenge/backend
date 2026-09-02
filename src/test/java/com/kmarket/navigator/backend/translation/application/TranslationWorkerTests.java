@@ -157,10 +157,10 @@ class TranslationWorkerTests {
 
 		verify(gateway, times(1)).translateTitles(List.of(valid, invalid));
 		verify(repository).fail(
-			eq(valid.id()), eq(1), eq("AI_INVALID_OUTPUT"), eq(NOW), eq(Duration.ofSeconds(15))
+			eq(valid.id()), eq(1), eq("AI_INVALID_OUTPUT"), eq(NOW), eq(Duration.ZERO)
 		);
 		verify(repository).fail(
-			eq(invalid.id()), eq(1), eq("AI_INVALID_OUTPUT"), eq(NOW), eq(Duration.ofSeconds(15))
+			eq(invalid.id()), eq(1), eq("AI_INVALID_OUTPUT"), eq(NOW), eq(Duration.ZERO)
 		);
 	}
 }

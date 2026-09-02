@@ -63,10 +63,10 @@ services:
       KMARKET_AI_MODEL_BUNDLE_COMMIT: ${KMARKET_AI_MODEL_BUNDLE_COMMIT:-ab82ccc51cb096872f9a110a85c027a4158a147f}
       KMARKET_AI_TERM_PROMPT_VERSION: ${KMARKET_AI_TERM_PROMPT_VERSION:-financial-term-v1}
       KMARKET_AI_TRANSLATION_MODEL: ${KMARKET_AI_TRANSLATION_MODEL:-gpt-5-nano}
-      KMARKET_AI_TITLE_TRANSLATION_PROMPT_VERSION: ${KMARKET_AI_TITLE_TRANSLATION_PROMPT_VERSION:-financial-title-translation-v5}
+      KMARKET_AI_TITLE_TRANSLATION_PROMPT_VERSION: ${KMARKET_AI_TITLE_TRANSLATION_PROMPT_VERSION:-financial-title-translation-v7}
       KMARKET_AI_NEWS_NARRATIVE_PROMPT_VERSION: ${KMARKET_AI_NEWS_NARRATIVE_PROMPT_VERSION:-news-narrative-v12}
-      KMARKET_AI_DISCLOSURE_SECTION_PROMPT_VERSION: ${KMARKET_AI_DISCLOSURE_SECTION_PROMPT_VERSION:-disclosure-section-translation-v5}
-      KMARKET_AI_FILING_SUMMARY_PROMPT_VERSION: ${KMARKET_AI_FILING_SUMMARY_PROMPT_VERSION:-filing-summary-v2}
+      KMARKET_AI_DISCLOSURE_SECTION_PROMPT_VERSION: ${KMARKET_AI_DISCLOSURE_SECTION_PROMPT_VERSION:-disclosure-section-translation-v7}
+      KMARKET_AI_FILING_SUMMARY_PROMPT_VERSION: ${KMARKET_AI_FILING_SUMMARY_PROMPT_VERSION:-filing-summary-v3}
       KMARKET_AI_AGENT_MODEL: ${KMARKET_AI_AGENT_MODEL:-gpt-5-nano}
       KMARKET_AI_AGENT_PROMPT_VERSION: ${KMARKET_AI_AGENT_PROMPT_VERSION:-market-agent-v1}
       KMARKET_AI_TAX_DOCUMENT_MODEL: ${KMARKET_AI_TAX_DOCUMENT_MODEL:-gpt-5-nano}
@@ -78,6 +78,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      model-cache-init:
+        condition: service_completed_successfully
     healthcheck:
       test:
         - CMD
@@ -95,11 +97,26 @@ services:
         source: ${KMARKET_MODEL_BUNDLE_ROOT:-../kmarket-model-runtime}
         target: /opt/kmarket-model-runtime
         read_only: true
+      - model-cache:/home/kmarket/.cache
     cap_drop:
       - ALL
     security_opt:
       - no-new-privileges:true
     stop_grace_period: 20s
+
+  model-cache-init:
+    image: python:3.14-slim-bookworm
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["chown root:root /cache && chmod 700 /cache && chown 10001:10001 /cache"]
+    user: "0:0"
+    volumes:
+      - model-cache:/cache
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN]
+    security_opt:
+      - no-new-privileges:true
 
   rag-worker:
     build:
@@ -113,6 +130,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      model-cache-init:
+        condition: service_completed_successfully
     read_only: true
     tmpfs:
       - /tmp:size=128m,mode=1777

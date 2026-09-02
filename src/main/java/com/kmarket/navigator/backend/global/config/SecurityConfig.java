@@ -89,7 +89,8 @@ public class SecurityConfig {
 				).permitAll()
 				.requestMatchers(
 					HttpMethod.GET,
-					"/api/v1/disclosures/{receiptNumber:[0-9]{14}}/sections/{sectionId}/translation"
+					"/api/v1/disclosures/{receiptNumber:[0-9]{14}}/sections/{sectionId}/translation",
+					"/api/v1/disclosures/{receiptNumber:[0-9]{14}}/translation"
 				).permitAll()
 				.requestMatchers(
 					HttpMethod.POST,

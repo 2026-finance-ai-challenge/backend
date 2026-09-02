@@ -24,6 +24,8 @@ public interface TranslationRepository {
 		String version
 	);
 
+	java.util.Map<String, TranslationView> findMany(TranslationKind kind, List<String> sourceHashes, String targetLocale, String version);
+
 	TranslationView request(
 		TranslationKind kind,
 		String sourceHash,
@@ -46,6 +48,8 @@ public interface TranslationRepository {
 	);
 
 	void complete(UUID id, GeneratedTranslation generated, Instant now);
+
+	void progress(UUID id, GeneratedTranslation generated, Instant now);
 
 	void completeNewsTitle(GeneratedTitle generated, Instant now);
 

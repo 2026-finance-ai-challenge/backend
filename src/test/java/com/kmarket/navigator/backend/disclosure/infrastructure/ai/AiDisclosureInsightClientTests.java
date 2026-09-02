@@ -48,11 +48,14 @@ class AiDisclosureInsightClientTests {
 				  "what": "A facility was approved.",
 				  "why": "The filing states an expansion purpose.",
 				  "impact": "Capacity may increase.",
+				  "what_ko": "설비가 승인되었습니다.",
+				  "why_ko": "공시에 증설 목적이 기재되어 있습니다.",
+				  "impact_ko": "생산 능력에 영향을 줄 수 있습니다.",
 				  "evidence_ids": ["S1"],
 				  "sufficient_evidence": true,
 				  "refusal_reason": null,
-				  "model": "gpt-5-mini",
-				  "prompt_version": "filing-summary-v1"
+				  "model": "gpt-5-nano",
+				  "prompt_version": "filing-summary-v3"
 				}
 				""", MediaType.APPLICATION_JSON));
 
@@ -67,6 +70,7 @@ class AiDisclosureInsightClientTests {
 		);
 
 		assertThat(result.what()).isEqualTo("A facility was approved.");
+		assertThat(result.whatKo()).isEqualTo("설비가 승인되었습니다.");
 		assertThat(result.evidenceIds()).containsExactly("S1");
 		server.verify();
 	}

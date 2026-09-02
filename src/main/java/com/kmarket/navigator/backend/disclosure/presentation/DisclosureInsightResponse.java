@@ -17,7 +17,10 @@ record DisclosureInsightResponse(
 	String refusalReason,
 	String modelId,
 	String promptVersion,
-	Instant generatedAt
+	Instant generatedAt,
+	String whatKo,
+	String whyKo,
+	String impactKo
 ) {
 	static DisclosureInsightResponse from(DisclosureInsight insight) {
 		return new DisclosureInsightResponse(
@@ -31,7 +34,10 @@ record DisclosureInsightResponse(
 			insight.refusalReason(),
 			insight.modelId(),
 			insight.promptVersion(),
-			insight.generatedAt()
+			insight.generatedAt(),
+			insight.whatKo(),
+			insight.whyKo(),
+			insight.impactKo()
 		);
 	}
 }

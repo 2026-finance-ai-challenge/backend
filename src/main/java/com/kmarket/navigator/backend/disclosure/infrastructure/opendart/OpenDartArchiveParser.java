@@ -222,7 +222,9 @@ class OpenDartArchiveParser {
 
 	private OpenDartDocument parseDocument(ArchiveEntry entry) {
 		rejectXmlEntityDeclarations(entry.content());
-		Document document = Jsoup.parse(decodeDocument(entry.content()));
+		// HTML 파싱 전에 DART 전용 셀을 변환해야 값이 표 밖으로 이동하지 않는다.
+		String markup = decodeDocument(entry.content()).replaceAll("(?i)<(/?)(?:TU|TE)(?=[\\s>])", "<$1td");
+		Document document = Jsoup.parse(markup);
 		List<OpenDartSection> sections = extractSections(document);
 		if (sections.stream().anyMatch(section -> section.text().contains("\uFFFD"))) {
 			throw new OpenDartException("SOURCE_TEXT_CORRUPTED");
@@ -359,7 +361,11 @@ class OpenDartArchiveParser {
 		List<List<String>> rows = table.select("tr").stream()
 			.map(row -> row.children().stream()
 				.filter(cell -> cell.tagName().equals("th") || cell.tagName().equals("td"))
-				.map(cell -> normalize(cell.text()))
+				.map(cell -> {
+					var own = cell.clone();
+					own.select("table").remove();
+					return normalize(own.text());
+				})
 				.toList())
 			.filter(row -> !row.isEmpty())
 			.toList();
