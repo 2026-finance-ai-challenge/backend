@@ -13,6 +13,7 @@
 | DART Intelligence | 영어 제목 목록, 목차·표·문단, 섹션 온디맨드 번역, 버전·원문, AI 요약·질문 | ZIP·SHA-256 카탈로그, 제목 번역 메모리, 구조화 payload, 공시별 HALFVEC 한글 검색·영어 답변 | RAG 격리·인용·거절, 제목 백필, 현재 버전 섹션 공유 캐시와 표 구조 검증 완료 |
 | 글로벌 피어 | 종목 상세의 비교 탭과 분석 액션 | 검증 참고 카탈로그, OpenAI 구조화 설명, PostgreSQL 캐시·Redis 잠금 | 참고 데이터 없는 `0126Z0`은 임의 피어 대신 `Unavailable` |
 | 실시간 스크리너 | 시장/업종/등락률/거래량/관심/주의 필터, 종목 상세 배지 | KIS 시세·상태, KRX 외국인 보유, 신선도·회로 차단 | 미연결·지연 값을 0으로 치환하지 않음 |
+| 실시간 지수·종목 차트 | 홈 KOSPI·KOSDAQ, 종목 현재가, 기간별 OHLCV·거래량·툴팁 | KIS `H0UPCNT0`·`H0STCNT0`, SSE, 40개 LRU, REST 분봉 백필 | 1D 10분봉·1W 1시간봉·1M/3M/1Y 일봉, 장외 마지막 종가 유지 |
 | 외국인 한도 | 4종목 게이지, 임계치 경고, Min/Base/Max 밴드 | 003490·015760·017670·032640 정책, 일별 예측 엔진 | 기본 90% 임계값, source/asOf/confidence/modelVersion 노출 |
 | 범용 AI Agent | 전 화면 패널, 문맥 배지, 방 생성/검색/전환/이름/삭제, 메시지 액션 | 서버 Evidence Provider, 비동기 생성 작업, 채팅 보존·소유권·요청 제한 | Stock/News/Filing/Tax 문맥 고정, 삭제 방 Not Found, 최신 사실 임의 생성 금지 |
 | 세무 가이드 | 국가·투자자 유형 비교, 문서 카드, 업로드·검증 상태, 제출 절차 | 조세조약 데이터, MIME/magic byte 검사, AES-GCM 저장, OpenAI OCR·일관성 검증 | Verified/Review Required/Rejected 구분, 세무 승인으로 표현하지 않음 |

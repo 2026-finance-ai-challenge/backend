@@ -29,16 +29,33 @@ class TranslationRequestRateLimiter {
 	}
 
 	void check(String clientHash) {
-		long minute = System.currentTimeMillis() / 60_000L;
-		increment("kmarket:translation:rate:client:" + clientHash + ":" + minute,
-			perClientMinute, Duration.ofMinutes(2));
-		String date = LocalDate.now(ZoneOffset.UTC).toString();
-		increment("kmarket:translation:rate:global:" + date, globalDaily, Duration.ofDays(2));
+		check(clientHash, 1);
 	}
 
-	private void increment(String key, int limit, Duration ttl) {
-		Long count = redisTemplate.opsForValue().increment(key);
-		if (count != null && count == 1L) {
+	void checkBatch(String clientHash, int workUnits) {
+		if (workUnits < 1) {
+			return;
+		}
+		long minute = System.currentTimeMillis() / 60_000L;
+		increment("kmarket:translation:rate:client:" + clientHash + ":" + minute,
+			1, perClientMinute, Duration.ofMinutes(2));
+		String date = LocalDate.now(ZoneOffset.UTC).toString();
+		increment("kmarket:translation:rate:global:" + date,
+			workUnits, globalDaily, Duration.ofDays(2));
+	}
+
+	private void check(String clientHash, int workUnits) {
+		long minute = System.currentTimeMillis() / 60_000L;
+		increment("kmarket:translation:rate:client:" + clientHash + ":" + minute,
+			workUnits, perClientMinute, Duration.ofMinutes(2));
+		String date = LocalDate.now(ZoneOffset.UTC).toString();
+		increment("kmarket:translation:rate:global:" + date,
+			workUnits, globalDaily, Duration.ofDays(2));
+	}
+
+	private void increment(String key, int amount, int limit, Duration ttl) {
+		Long count = redisTemplate.opsForValue().increment(key, amount);
+		if (count != null && count == amount) {
 			redisTemplate.expire(key, ttl);
 		}
 		if (count == null || count > limit) {

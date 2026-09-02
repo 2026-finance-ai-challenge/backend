@@ -25,6 +25,7 @@ public class OpenApiConfig {
 	private static final String BEARER_AUTH = "bearerAuth";
 	private static final Set<String> IMMEDIATE_OR_ACCEPTED_OPERATIONS = Set.of(
 		"NewsController#requestTranslation",
+		"DisclosureController#requestDisclosureTranslation",
 		"DisclosureController#requestSectionTranslation"
 	);
 	private static final Map<String, ApiOperation> OPERATIONS = Map.ofEntries(
@@ -67,6 +68,8 @@ public class OpenApiConfig {
 		entry("MarketController#foreignLimits", operation("외국인 보유 한도 모니터 조회", "Market", Access.OPTIONAL)),
 		entry("MarketController#foreignNetFlow", operation("시장 전체 외국인 순매수 조회", "Market")),
 		entry("MarketController#history", operation("종목 가격 이력 조회", "Market")),
+		entry("MarketController#chart", operation("기간별 종목 차트 조회", "Market")),
+		entry("MarketController#stream", operation("실시간 시장·종목 시세 구독", "Market")),
 		entry("MarketController#globalPeers", operation("글로벌 피어 비교 조회", "Market")),
 
 		entry("NewsController#findAll", operation("검증된 종목 뉴스 목록 조회", "News", Access.OPTIONAL)),
@@ -80,6 +83,7 @@ public class OpenApiConfig {
 		entry("DisclosureController#findAll", operation("공시 목록 조회", "Disclosures")),
 		entry("DisclosureController#findOne", operation("공시 상세 조회", "Disclosures")),
 		entry("DisclosureController#findSectionTranslation", operation("공시 섹션 번역 상태 조회", "Disclosures")),
+		entry("DisclosureController#requestDisclosureTranslation", operation("공시 전체 번역 일괄 요청", "Disclosures")),
 		entry("DisclosureController#requestSectionTranslation", operation("공시 섹션 번역 요청", "Disclosures")),
 		entry("DisclosureController#ask", operation("공시 근거 기반 질의", "Disclosures")),
 		entry("DisclosureController#requestIndexing", operation("공시 온디맨드 색인 요청", "Disclosures", Access.PUBLIC, "202")),

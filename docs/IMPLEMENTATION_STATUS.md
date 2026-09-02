@@ -1,12 +1,13 @@
 # 기능정의서 v2.0 구현 현황
 
-기준일: 2026-08-28
+기준일: 2026-09-02
 
 `완료`는 API 계약, Backend 연동 프로토타입과 자동 검증이 구현됐다는 뜻이다. 외부 공급자의 실시간 응답까지 항상 존재한다는 뜻은 아니다.
 
 | 기능정의 영역 | 구현 | 외부 조건·명시적 제한 |
 | --- | --- | --- |
 | 75종목 검색·시세·스크리너 | 완료 | 실시간 시세·거래 상태는 KIS 자격증명 필요 |
+| KOSPI·KOSDAQ·종목 실시간과 OHLCV 차트 | 완료 | KIS WebSocket 지수·종목 체결, 종목 LRU 40개, 1D 10분봉·1W 1시간봉·장기 일봉 |
 | 뉴스 수집·중복·분류·용어 해설 | 완료 | 동일 URL 멱등 저장, 제목·요약 독립 유사도 사건 군집, 대표기사 목록, 6시간 재군집. 분류 모델은 검증된 Hana 모델과 K-FNSPID 사용 |
 | 뉴스 제목 선번역·본문/Insight 온디맨드 공유 캐시 | 완료 | 제목은 중복 해시별 비동기 배치, EN/KR What/Why/Impact는 최초 호버·상세 요청 후 언어별 공유 |
 | DART 목록·상세·버전·무결성 | 완료 | 누적 로컬 데이터 사용 가능. 신규 수집은 OpenDART 키 필요 |
@@ -23,9 +24,9 @@
 
 ## 검증 증거
 
-- Backend: `./gradlew check --no-daemon` 통과
+- Backend: `./gradlew test` 통과
 - 공시 제목 백필: `READY 2,834`, `PENDING/PROCESSING/FAILED 0`, 지원 공시 `234,071/234,071` 영문 제목 연결
-- AI: Ruff, 포맷, mypy, 40개 테스트 통과
+- AI: `uv run pytest -q`, 69개 테스트 통과
 - Frontend: Node 테스트 3개와 프로덕션 빌드 통과
 - Docker: PostgreSQL, Redis, AI API, Backend, Frontend 헬스체크 통과
 - 통합 보안: 실제 회원가입·로그인으로 Access JWT 발급, Redis 세션 응답, CSP 등 보안 헤더 확인

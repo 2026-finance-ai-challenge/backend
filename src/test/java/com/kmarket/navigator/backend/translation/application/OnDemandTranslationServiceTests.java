@@ -107,6 +107,29 @@ class OnDemandTranslationServiceTests {
 		);
 	}
 
+	@Test
+	void requestsAnEntireDisclosureWithOneClientRateLimitUnit() {
+		UUID sectionId = UUID.randomUUID();
+		UUID translationId = UUID.randomUUID();
+		when(disclosureQueryHandler.findOne(RECEIPT_NUMBER)).thenReturn(detail(sectionId));
+		when(translationRepository.request(
+			Mockito.eq(TranslationKind.DISCLOSURE_SECTION),
+			Mockito.anyString(), Mockito.anyString(), Mockito.any(),
+			Mockito.eq("en"),
+			Mockito.eq(OnDemandTranslationService.DISCLOSURE_SECTION_VERSION),
+			Mockito.any()
+		)).thenReturn(new TranslationView(
+			translationId, "source-hash", "en",
+			OnDemandTranslationService.DISCLOSURE_SECTION_VERSION,
+			TranslationStatus.PENDING, null, null, null, null, null
+		));
+
+		var result = service.requestDisclosure(RECEIPT_NUMBER, "client-hash");
+
+		assertThat(result).hasSize(1);
+		verify(rateLimiter).checkBatch("client-hash", 1);
+	}
+
 	private static DisclosureDetail detail(UUID sectionId) {
 		DisclosureSection section = new DisclosureSection(
 			sectionId, 1, SectionKind.TEXT, "제목", "본문", "{\"항목\":\"값\"}"

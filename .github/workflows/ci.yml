@@ -182,6 +182,9 @@ jobs:
             printf 'KMARKET_KIS_ENABLED=true\n'
             printf 'KMARKET_KIS_APP_KEY=%s\n' "$KMARKET_KIS_APP_KEY"
             printf 'KMARKET_KIS_APP_SECRET=%s\n' "$KMARKET_KIS_APP_SECRET"
+            printf 'KMARKET_KIS_REALTIME_ENABLED=true\n'
+            printf 'KMARKET_KIS_MAX_REALTIME_STOCKS=40\n'
+            printf 'KMARKET_MARKET_FOREIGN_FLOW_INTERVAL=1m\n'
             printf 'KMARKET_KRX_ENABLED=false\n'
             printf 'KMARKET_KRX_MEMBER_ID=\n'
             printf 'KMARKET_KRX_PASSWORD=\n'
