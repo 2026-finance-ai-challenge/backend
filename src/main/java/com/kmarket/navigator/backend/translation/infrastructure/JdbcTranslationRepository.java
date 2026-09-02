@@ -489,21 +489,19 @@ class JdbcTranslationRepository implements TranslationRepository {
 	public void fail(UUID id, int attempts, String errorCode, Instant now, Duration delay) {
 		String status = attempts >= MAX_ATTEMPTS ? "FAILED" : "PENDING";
 		jdbcClient.sql("""
-			UPDATE translation_memory SET status = :status, updated_at = :now
-			WHERE id = :id AND status = 'PROCESSING'
+			WITH failed AS (
+			    UPDATE translation_job
+			    SET status = :status, available_at = :availableAt,
+			        locked_at = NULL, locked_by = NULL, last_error_code = :errorCode,
+			        updated_at = :now
+			    WHERE translation_memory_id = :id AND status = 'PROCESSING' AND attempts = :attempts
+			    RETURNING translation_memory_id
+			)
+			UPDATE translation_memory memory SET status = :status, updated_at = :now
+			FROM failed WHERE memory.id = failed.translation_memory_id AND memory.status = 'PROCESSING'
 			""")
 			.param("id", id)
-			.param("status", status)
-			.param("now", atUtc(now))
-			.update();
-		jdbcClient.sql("""
-			UPDATE translation_job
-			SET status = :status, available_at = :availableAt,
-			    locked_at = NULL, locked_by = NULL, last_error_code = :errorCode,
-			    updated_at = :now
-			WHERE translation_memory_id = :id
-			""")
-			.param("id", id)
+			.param("attempts", attempts)
 			.param("status", status)
 			.param("availableAt", atUtc(now.plus(delay)))
 			.param("errorCode", abbreviate(errorCode))

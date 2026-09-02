@@ -103,11 +103,9 @@ public class DisclosureTitleTranslationWorker {
 				DisclosureTitlePolicy.TRANSLATION_VERSION, job.attempts()
 			))
 			.toList();
+		List<com.kmarket.navigator.backend.translation.domain.GeneratedTitle> generatedTitles;
 		try {
-			aiGateway.translateTitles(requests).forEach(generated -> repository.complete(
-				generated.id(), generated.translatedText(), generated.modelId(),
-				generated.promptVersion(), Instant.now(clock)
-			));
+			generatedTitles = aiGateway.translateTitles(requests);
 		}
 		catch (RuntimeException exception) {
 			Instant failedAt = Instant.now(clock);
@@ -117,6 +115,18 @@ public class DisclosureTitleTranslationWorker {
 				);
 			}
 			log.warn("공시 제목 AI 번역 실패: count={}, error={}", jobs.size(), errorCode(exception));
+			return;
+		}
+		for (var generated : generatedTitles) {
+			try {
+				repository.complete(generated.id(), generated.translatedText(), generated.modelId(),
+					generated.promptVersion(), Instant.now(clock));
+			}
+			catch (RuntimeException exception) {
+				var job = jobs.stream().filter(value -> value.translationId().equals(generated.id())).findFirst().orElseThrow();
+				translationRepository.fail(job.translationId(), job.attempts(), errorCode(exception), Instant.now(clock), RETRY_DELAY);
+				log.warn("공시 제목 저장 실패: id={}, error={}", job.translationId(), errorCode(exception));
+			}
 		}
 	}
 

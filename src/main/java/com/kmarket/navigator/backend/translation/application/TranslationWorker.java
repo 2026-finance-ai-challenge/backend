@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import com.kmarket.navigator.backend.translation.application.port.TranslationAiGateway;
 import com.kmarket.navigator.backend.translation.application.port.TranslationRepository;
 import com.kmarket.navigator.backend.translation.domain.GeneratedTranslation;
+import com.kmarket.navigator.backend.translation.domain.GeneratedTitle;
 import com.kmarket.navigator.backend.translation.domain.TranslationJob;
 import com.kmarket.navigator.backend.translation.domain.TitleTranslationJob;
 import com.kmarket.navigator.backend.global.error.BusinessException;
@@ -109,9 +110,9 @@ public class TranslationWorker {
 	}
 
 	private void processTitleSubset(List<TitleTranslationJob> jobs, Instant now) {
+		List<GeneratedTitle> generated;
 		try {
-			var generated = aiGateway.translateTitles(jobs);
-			generated.forEach(title -> repository.completeNewsTitle(title, Instant.now(clock)));
+			generated = aiGateway.translateTitles(jobs);
 		}
 		catch (RuntimeException exception) {
 			Duration cooldown = cooldown(exception);
@@ -123,6 +124,19 @@ public class TranslationWorker {
 			}
 			log.warn("News title translation batch failed size={} error={} cooldownSeconds={}",
 				jobs.size(), errorCode, cooldown.toSeconds());
+			return;
+		}
+		// 저장 실패를 해당 제목에만 한정해 다른 제목의 결과를 보존한다.
+		for (var title : generated) {
+			try {
+				repository.completeNewsTitle(title, Instant.now(clock));
+			}
+			catch (RuntimeException exception) {
+				var job = jobs.stream().filter(value -> value.id().equals(title.id())).findFirst().orElseThrow();
+				repository.fail(job.id(), job.attempts(), errorCode(exception),
+					Instant.now(clock), providerFailureCooldown);
+				log.warn("News title persistence failed id={} error={}", job.id(), errorCode(exception));
+			}
 		}
 	}
 

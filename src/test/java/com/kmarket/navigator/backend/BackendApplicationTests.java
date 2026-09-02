@@ -152,6 +152,45 @@ class BackendApplicationTests {
 	@Autowired
 	JdbcClient jdbcClient;
 
+	@Test
+	void databaseEnglishTitleChecksMatchCurrencyAndPersonNamePolicy() {
+		List<String> titles = List.of("Jo discusses earnings", "Samjeonnix rallies", "Sales of KRW 3 trillion",
+			"Sales of 3 jo", "Sales of 3jo", "Sales of 3.2 eok", "Sales of eok won", "Sales of man-won",
+			"삼성 earnings", "東京 earnings", "㐀 earnings");
+		for (String table : List.of("translation_memory", "news_article")) {
+			String check = jdbcClient.sql("SELECT pg_get_expr(conbin, conrelid) FROM pg_constraint WHERE conname=:name")
+				.param("name", table + "_english_title_script").query(String.class).single();
+			for (String title : titles) {
+				boolean accepted = jdbcClient.sql("SELECT " + check + " FROM (SELECT CAST(:title AS text) AS translated_text, "
+					+ "CAST(:title AS text) AS english_title, 'NEWS_TITLE' AS content_kind, 'en' AS target_locale, 'READY' AS status) value")
+					.param("title", title).query(Boolean.class).single();
+				assertThat(accepted).as("%s: %s", table, title)
+					.isEqualTo(com.kmarket.navigator.backend.global.text.EnglishTextPolicy.isValid(title));
+			}
+		}
+	}
+
+	@Test
+	void staleFailureCannotReopenCompletedTranslationJob() {
+		UUID id = UUID.randomUUID();
+		jdbcClient.sql("""
+			INSERT INTO translation_memory (id,content_kind,source_locale,target_locale,translation_version,
+			    source_hash,source_text,normalized_source_text,translated_text,status,model_id,prompt_version,
+			    generated_at,created_at,updated_at)
+			VALUES (:id,'NEWS_TITLE','ko','en','news-title-v3',repeat('a',64),'조 회장','조 회장',
+			    'Chairman Jo','READY','gpt-5-nano','financial-title-translation-v8',now(),now(),now())
+			""").param("id", id).update();
+		jdbcClient.sql("""
+			INSERT INTO translation_job (translation_memory_id,status,attempts,available_at,created_at,updated_at)
+			VALUES (:id,'READY',1,now(),now(),now())
+			""").param("id", id).update();
+		translationRepository.fail(id, 1, "STALE_FAILURE", Instant.now(), Duration.ZERO);
+		assertThat(jdbcClient.sql("SELECT status FROM translation_job WHERE translation_memory_id=:id")
+			.param("id", id).query(String.class).single()).isEqualTo("READY");
+		assertThat(jdbcClient.sql("SELECT status FROM translation_memory WHERE id=:id")
+			.param("id", id).query(String.class).single()).isEqualTo("READY");
+	}
+
 	@Autowired
 	com.kmarket.navigator.backend.disclosure.infrastructure.persistence.DisclosureDocumentRepairService documentRepair;
 
