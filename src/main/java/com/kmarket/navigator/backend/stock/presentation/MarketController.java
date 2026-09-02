@@ -170,7 +170,7 @@ public class MarketController {
 	@GetMapping("/stocks/{stockCode}/chart")
 	public ResponseEntity<MarketChart> chart(
 		@PathVariable @Pattern(regexp = STOCK_CODE_PATTERN) String stockCode,
-		@RequestParam(defaultValue = "1M") @Pattern(regexp = "1D|1W|1M|3M|1Y") String period
+		@RequestParam(defaultValue = "1D") @Pattern(regexp = "1D|1W|1M|3M|1Y") String period
 	) {
 		MarketChartPeriod resolved = switch (period) {
 			case "1D" -> MarketChartPeriod.ONE_DAY;

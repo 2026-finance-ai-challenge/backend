@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
+import java.math.BigDecimal;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -62,6 +64,14 @@ class KisRealtimeMarketServiceTests {
 		assertThat(captor.getValue().indexName()).isEqualTo("KOSPI");
 		assertThat(captor.getValue().currentValue()).isEqualByComparingTo("2850.50");
 		assertThat(captor.getValue().changeRate()).isEqualByComparingTo("0.3591");
+	}
+
+	@Test
+	void keepsAlreadySignedRealtimeDecreaseNegative() {
+		assertThat(KisRealtimeMarketService.signed(new BigDecimal("-8500"), "5"))
+			.isEqualByComparingTo("-8500");
+		assertThat(KisRealtimeMarketService.signed(new BigDecimal("8500"), "5"))
+			.isEqualByComparingTo("-8500");
 	}
 
 	private static KisRealtimeMarketService service(
