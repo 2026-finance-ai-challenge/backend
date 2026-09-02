@@ -17,7 +17,7 @@
 | `GET` | `/api/v1/market/indices` | KOSPI·KOSDAQ·KOSPI 200 스냅샷 |
 | `GET` | `/api/v1/market/exchange-rates/USD` | 원/달러 환율 스냅샷과 데이터 상태 |
 | `GET` | `/api/v1/market/foreign-limits` | 4개 종목 한도 게이지와 Min/Base/Max 예측 |
-| `GET` | `/api/v1/market/foreign-net-flow` | KOSPI·KOSDAQ 합산 외국인 순매수와 동일 방향 연속 일수 |
+| `GET` | `/api/v1/market/foreign-net-flow` | KOSPI·KOSDAQ 합산 외국인 순매수와 동일 방향 연속 일수. 장중 1분 REST 갱신은 `DELAYED`, 장 종료 후 최종값은 `CLOSED` |
 | `GET` | `/api/v1/market/stocks/{stockCode}/history` | 일별 OHLCV 차트 데이터 |
 | `GET` | `/api/v1/market/stocks/{stockCode}/chart?period=1D\|1W\|1M\|3M\|1Y` | 1D 10분봉, 1W 1시간봉, 장기 일봉 OHLCV |
 | `GET` | `/api/v1/market/stream?stockCode=` | KOSPI·KOSDAQ과 선택 종목 실시간 SSE 스트림 |

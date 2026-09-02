@@ -5,6 +5,8 @@ import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -39,6 +41,8 @@ import com.kmarket.navigator.backend.stock.domain.StockMarketView;
 public class MarketService {
 
 	private static final Duration LIVE_QUOTE_MAX_AGE = Duration.ofMinutes(2);
+	private static final Duration FOREIGN_FLOW_MAX_AGE = Duration.ofMinutes(3);
+	private static final ZoneId KOREA_ZONE = ZoneId.of("Asia/Seoul");
 	private static final int FOREIGN_HISTORY_LIMIT = 120;
 	private static final Map<String, String> INDEX_NAMES = Map.of(
 		"0001", "KOSPI",
@@ -177,7 +181,31 @@ public class MarketService {
 
 	@Transactional(readOnly = true)
 	public MarketForeignNetFlowSummary foreignNetFlow() {
-		return repository.findLatestForeignNetFlow().orElse(null);
+		return repository.findLatestForeignNetFlow()
+			.map(this::normalizeForeignNetFlow)
+			.orElse(null);
+	}
+
+	private MarketForeignNetFlowSummary normalizeForeignNetFlow(
+		MarketForeignNetFlowSummary summary
+	) {
+		var now = clock.instant();
+		var koreaNow = now.atZone(KOREA_ZONE);
+		var time = koreaNow.toLocalTime();
+		boolean regularSession = koreaNow.getDayOfWeek().getValue() <= 5
+			&& !time.isBefore(LocalTime.of(9, 0))
+			&& !time.isAfter(LocalTime.of(15, 30));
+		boolean currentAndFresh = summary.tradingDate().equals(koreaNow.toLocalDate())
+			&& summary.asOf() != null
+			&& !summary.asOf().isAfter(now)
+			&& Duration.between(summary.asOf(), now).compareTo(FOREIGN_FLOW_MAX_AGE) <= 0;
+		MarketDataStatus status = regularSession && currentAndFresh
+			? MarketDataStatus.DELAYED
+			: MarketDataStatus.CLOSED;
+		return new MarketForeignNetFlowSummary(
+			summary.tradingDate(), summary.netPurchaseAmountKrw(), summary.consecutiveDays(),
+			status, summary.asOf(), summary.source()
+		);
 	}
 
 	@Transactional(readOnly = true)
