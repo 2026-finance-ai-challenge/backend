@@ -322,8 +322,9 @@ public class KisRealtimeMarketService {
 		catch (NumberFormatException exception) { return 0L; }
 	}
 
-	private static BigDecimal signed(BigDecimal value, String sign) {
-		return Set.of("4", "5").contains(sign) ? value.negate() : value;
+	static BigDecimal signed(BigDecimal value, String sign) {
+		BigDecimal magnitude = value.abs();
+		return Set.of("4", "5").contains(sign) ? magnitude.negate() : magnitude;
 	}
 
 	private static String rootType(Throwable error) {
