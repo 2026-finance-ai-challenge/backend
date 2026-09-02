@@ -21,6 +21,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.ResourceAccessException;
@@ -63,17 +64,23 @@ class KisMarketDataGateway implements MarketDataGateway {
 	private final Clock clock;
 	private final Map<String, CachedIntradayPrices> intradayCache = new ConcurrentHashMap<>();
 
+	@Autowired
 	KisMarketDataGateway(
 		@Qualifier("kisMarketRestClient") RestClient restClient,
 		KisMarketProperties properties,
 		KisAccessTokenProvider tokenProvider,
 		KisCircuitBreaker circuitBreaker
 	) {
+		this(restClient, properties, tokenProvider, circuitBreaker, Clock.system(KOREA_ZONE));
+	}
+
+	KisMarketDataGateway(RestClient restClient, KisMarketProperties properties,
+		KisAccessTokenProvider tokenProvider, KisCircuitBreaker circuitBreaker, Clock clock) {
 		this.restClient = restClient;
 		this.properties = properties;
 		this.tokenProvider = tokenProvider;
 		this.circuitBreaker = circuitBreaker;
-		this.clock = Clock.system(KOREA_ZONE);
+		this.clock = clock.withZone(KOREA_ZONE);
 	}
 
 	@Override
