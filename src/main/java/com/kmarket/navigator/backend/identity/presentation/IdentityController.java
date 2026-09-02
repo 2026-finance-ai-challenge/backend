@@ -38,8 +38,7 @@ public class IdentityController {
 
 	private static final String LOGIN_ID_PATTERN = "^[A-Za-z0-9][A-Za-z0-9._-]{3,29}$";
 	private static final String TOKEN_PATTERN = "^kmr_[A-Za-z0-9_-]{64}$";
-	private static final String PASSWORD_PATTERN =
-		"^(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?=.*[^A-Za-z0-9\\s])\\S{12,128}$";
+	private static final String PASSWORD_PATTERN = com.kmarket.navigator.backend.identity.domain.PasswordPolicy.PATTERN;
 	private final IdentityService identityService;
 	private final ClientContextResolver contextResolver;
 

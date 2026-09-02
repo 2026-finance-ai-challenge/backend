@@ -75,7 +75,8 @@ public class IdentityService {
 		boolean privacyAccepted,
 		ClientContext context
 	) {
-		if (!password.equals(passwordConfirm) || !termsAccepted || !privacyAccepted) {
+		if (!com.kmarket.navigator.backend.identity.domain.PasswordPolicy.isValid(password)
+			|| !password.equals(passwordConfirm) || !termsAccepted || !privacyAccepted) {
 			throw new BusinessException(ErrorCode.INVALID_REQUEST);
 		}
 		String normalizedLoginId = normalizeLoginId(loginId);
@@ -210,7 +211,8 @@ public class IdentityService {
 		String newPasswordConfirm,
 		ClientContext context
 	) {
-		if (!newPassword.equals(newPasswordConfirm)) {
+		if (!com.kmarket.navigator.backend.identity.domain.PasswordPolicy.isValid(newPassword)
+			|| !newPassword.equals(newPasswordConfirm)) {
 			throw new BusinessException(ErrorCode.INVALID_REQUEST);
 		}
 		UserAccount account = profile(user);
