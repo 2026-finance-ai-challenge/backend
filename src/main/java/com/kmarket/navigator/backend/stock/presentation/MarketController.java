@@ -16,6 +16,7 @@ import jakarta.validation.constraints.Size;
 
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.MediaType;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,12 +24,16 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.kmarket.navigator.backend.identity.domain.AuthenticatedUser;
 import com.kmarket.navigator.backend.identity.infrastructure.ClientContextResolver;
 import com.kmarket.navigator.backend.stock.application.ForeignLimitMonitor;
 import com.kmarket.navigator.backend.stock.application.GlobalPeerService;
 import com.kmarket.navigator.backend.stock.application.MarketHistory;
+import com.kmarket.navigator.backend.stock.application.MarketChartService;
+import com.kmarket.navigator.backend.stock.application.MarketChartService.MarketChart;
+import com.kmarket.navigator.backend.stock.application.MarketChartService.MarketChartPeriod;
 import com.kmarket.navigator.backend.stock.application.MarketService;
 import com.kmarket.navigator.backend.stock.application.MarketStockDetail;
 import com.kmarket.navigator.backend.stock.domain.ExchangeRateSnapshot;
@@ -46,6 +51,7 @@ import com.kmarket.navigator.backend.stock.domain.ScreenerQuery;
 import com.kmarket.navigator.backend.stock.domain.ScreenerSort;
 import com.kmarket.navigator.backend.stock.domain.StockIdentity;
 import com.kmarket.navigator.backend.stock.domain.StockMarketView;
+import com.kmarket.navigator.backend.stock.infrastructure.kis.KisRealtimeMarketService;
 
 @Validated
 @RestController
@@ -56,15 +62,21 @@ public class MarketController {
 	private final MarketService service;
 	private final GlobalPeerService globalPeerService;
 	private final ClientContextResolver clientContextResolver;
+	private final MarketChartService chartService;
+	private final KisRealtimeMarketService realtimeMarketService;
 
 	public MarketController(
 		MarketService service,
 		GlobalPeerService globalPeerService,
-		ClientContextResolver clientContextResolver
+		ClientContextResolver clientContextResolver,
+		MarketChartService chartService,
+		KisRealtimeMarketService realtimeMarketService
 	) {
 		this.service = service;
 		this.globalPeerService = globalPeerService;
 		this.clientContextResolver = clientContextResolver;
+		this.chartService = chartService;
+		this.realtimeMarketService = realtimeMarketService;
 	}
 
 	@GetMapping("/stocks/search")
@@ -153,6 +165,28 @@ public class MarketController {
 		@RequestParam(defaultValue = "365") @Min(1) @Max(1250) int limit
 	) {
 		return noStore(MarketHistoryResponse.from(service.history(stockCode, from, to, limit)));
+	}
+
+	@GetMapping("/stocks/{stockCode}/chart")
+	public ResponseEntity<MarketChart> chart(
+		@PathVariable @Pattern(regexp = STOCK_CODE_PATTERN) String stockCode,
+		@RequestParam(defaultValue = "1M") @Pattern(regexp = "1D|1W|1M|3M|1Y") String period
+	) {
+		MarketChartPeriod resolved = switch (period) {
+			case "1D" -> MarketChartPeriod.ONE_DAY;
+			case "1W" -> MarketChartPeriod.ONE_WEEK;
+			case "3M" -> MarketChartPeriod.THREE_MONTH;
+			case "1Y" -> MarketChartPeriod.ONE_YEAR;
+			default -> MarketChartPeriod.ONE_MONTH;
+		};
+		return noStore(chartService.chart(stockCode, resolved));
+	}
+
+	@GetMapping(path = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+	public SseEmitter stream(
+		@RequestParam(required = false) @Pattern(regexp = STOCK_CODE_PATTERN) String stockCode
+	) {
+		return realtimeMarketService.stream(stockCode);
 	}
 
 	@GetMapping("/stocks/{stockCode}/global-peers")

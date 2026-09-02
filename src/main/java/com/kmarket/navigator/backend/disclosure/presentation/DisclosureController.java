@@ -147,6 +147,24 @@ class DisclosureController {
 		);
 	}
 
+	@PostMapping("/{receiptNumber}/translation")
+	ResponseEntity<DisclosureTranslationBatchResponse> requestDisclosureTranslation(
+		@PathVariable @Pattern(regexp = "^[0-9]{14}$") String receiptNumber,
+		HttpServletRequest request
+	) {
+		var results = translationService.requestDisclosure(
+			receiptNumber,
+			clientContextResolver.resolve(request).ipHash()
+		);
+		long ready = results.stream()
+			.filter(result -> result.status() == TranslationStatus.READY)
+			.count();
+		var response = new DisclosureTranslationBatchResponse(results.size(), ready);
+		return ready == results.size()
+			? ResponseEntity.ok(response)
+			: ResponseEntity.accepted().header(HttpHeaders.RETRY_AFTER, "2").body(response);
+	}
+
 	@PostMapping("/{receiptNumber}/sections/{sectionId}/translation")
 	ResponseEntity<TranslationResponse> requestSectionTranslation(
 		@PathVariable @Pattern(regexp = "^[0-9]{14}$") String receiptNumber,

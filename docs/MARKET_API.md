@@ -19,6 +19,8 @@
 | `GET` | `/api/v1/market/foreign-limits` | 4개 종목 한도 게이지와 Min/Base/Max 예측 |
 | `GET` | `/api/v1/market/foreign-net-flow` | KOSPI·KOSDAQ 합산 외국인 순매수와 동일 방향 연속 일수 |
 | `GET` | `/api/v1/market/stocks/{stockCode}/history` | 일별 OHLCV 차트 데이터 |
+| `GET` | `/api/v1/market/stocks/{stockCode}/chart?period=1D\|1W\|1M\|3M\|1Y` | 1D 10분봉, 1W 1시간봉, 장기 일봉 OHLCV |
+| `GET` | `/api/v1/market/stream?stockCode=` | KOSPI·KOSDAQ과 선택 종목 실시간 SSE 스트림 |
 | `GET` | `/api/v1/market/stocks/{stockCode}/global-peers` | 데이터 랭커와 OpenAI 구조화 설명 기반 글로벌 피어 분석 |
 
 글로벌 피어 분석은 하나금융 프로젝트에서 검증한 산업·사업모델·규모·재무 하이브리드 랭킹 아티팩트를 사용한다. 서버가 고정한 상위 3개 피어와 4개 강점 키를 OpenAI가 변경할 수 없도록 계약을 검증하며, OpenAI는 영문 설명만 생성한다. 생성 결과는 데이터 버전별로 저장해 중복 비용을 막고 Redis 분산 잠금과 IP 해시별 요청 제한을 적용한다. 피어 자료가 없는 종목은 임의 결과 대신 `GLOBAL_PEER_DATA_UNAVAILABLE`을 반환한다.
@@ -39,7 +41,9 @@ KIS REST 현재가는 실시간 WebSocket과 구분해 `DELAYED`로 표시한다
 
 ## KIS 수집
 
-서버는 [한국투자증권 공식 Open API 예제](https://github.com/koreainvestment/open-trading-api/tree/main/examples_llm/domestic_stock)의 현재가·일별 시세·시장별 투자자 매매동향 계약을 사용한다. Access Token은 Redis에 유효기간보다 60초 짧게 저장하고 분산 잠금으로 중복 발급을 억제한다. 5회 연속 실패 시 1분 회로 차단을 적용한다. 일별 OHLCV는 시작 후와 평일 장 마감 후 갱신하고, KOSPI·KOSDAQ 외국인 순매수는 10분마다 멱등 저장한다.
+서버는 [한국투자증권 공식 Open API 예제](https://github.com/koreainvestment/open-trading-api/tree/main/examples_llm/domestic_stock)의 현재가·분봉·일별 시세·시장별 투자자 매매동향 계약을 사용한다. Access Token은 Redis에 유효기간보다 60초 짧게 저장하고 분산 잠금으로 중복 발급을 억제한다. 5회 연속 실패 시 1분 회로 차단을 적용한다. 일별 OHLCV는 시작 후와 평일 장 마감 후 갱신한다. 분봉 백필은 종목·거래일별로 공유해 동일 구간 요청이 KIS 호출을 반복하지 않는다.
+
+KOSPI·KOSDAQ은 `H0UPCNT0`, 종목 체결은 `H0STCNT0` WebSocket을 사용한다. 종목 구독은 최대 40개 LRU로 관리하고 한도 도달 시 가장 오래 사용하지 않은 종목을 해제한 뒤 새 종목을 구독한다. 브라우저에는 KIS 연결을 노출하지 않고 Backend가 검증한 SSE만 제공한다. 장외에는 저장된 마지막 종가를 유지한다. 시장 전체 외국인 순매수는 KIS가 동일 범위의 실시간 WebSocket TR을 제공하지 않으므로 정규장에 REST 투자자 매매동향을 1분 주기로 갱신한다.
 
 원/달러 환율은 Frankfurter v2의 `USD/KRW` 공식 일별 기준값을 10분마다 확인해 저장한다. 제공일 기준 종가 데이터이므로 `CLOSED` 상태로 반환한다.
 
@@ -48,7 +52,11 @@ KIS REST 현재가는 실시간 WebSocket과 구분해 `DELAYED`로 표시한다
 | `KMARKET_KIS_ENABLED` | 수집기 활성화, 기본 `false` |
 | `KMARKET_KIS_APP_KEY` | 서버에만 저장하는 KIS App Key |
 | `KMARKET_KIS_APP_SECRET` | 서버에만 저장하는 KIS App Secret |
+| `KMARKET_KIS_REALTIME_ENABLED` | KIS WebSocket 활성화, 기본 `true` |
+| `KMARKET_KIS_WEBSOCKET_URL` | KIS 실시간 WebSocket 주소 |
+| `KMARKET_KIS_MAX_REALTIME_STOCKS` | 체결 구독 LRU 상한, 최대 40 |
 | `KMARKET_MARKET_COLLECTION_INTERVAL` | 전체 지원 종목 수집 주기, 기본 60초 |
+| `KMARKET_MARKET_FOREIGN_FLOW_INTERVAL` | 시장 전체 외국인 순매수 갱신 주기, 기본 1분 |
 
 ## 외국인 보유 수집·예측
 

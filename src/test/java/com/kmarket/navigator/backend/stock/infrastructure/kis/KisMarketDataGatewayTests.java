@@ -222,6 +222,44 @@ class KisMarketDataGatewayTests {
 		server.verify();
 	}
 
+	@Test
+	void mapsOfficialIntradayPriceContract() {
+		KisMarketProperties properties = configuredProperties();
+		properties.setCollectionDelay(Duration.ZERO);
+		RestClient.Builder builder = RestClient.builder();
+		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+		KisAccessTokenProvider tokenProvider = mock(KisAccessTokenProvider.class);
+		when(tokenProvider.accessToken()).thenReturn("access-token");
+		KisMarketDataGateway gateway = new KisMarketDataGateway(
+			builder.baseUrl("https://example.test").build(),
+			properties,
+			tokenProvider,
+			new KisCircuitBreaker()
+		);
+		LocalDate today = LocalDate.now();
+
+		server.expect(header("tr_id", "FHKST03010200"))
+			.andExpect(queryParam("FID_INPUT_ISCD", "005930"))
+			.andExpect(queryParam("FID_INPUT_HOUR_1", org.hamcrest.Matchers.matchesPattern("[0-9]{6}")))
+			.andRespond(withSuccess("""
+				{"rt_cd":"0","output2":[
+				  {"stck_bsop_date":"%s","stck_cntg_hour":"090000","stck_oprc":"70000",
+				   "stck_hgpr":"70100","stck_lwpr":"69900","stck_prpr":"70050","cntg_vol":"321"}
+				]}
+				""".formatted(today.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE)), MediaType.APPLICATION_JSON));
+
+		var prices = gateway.fetchIntradayPrices("005930", today, today);
+		var cachedPrices = gateway.fetchIntradayPrices("005930", today, today);
+
+		assertThat(prices).singleElement().satisfies(price -> {
+			assertThat(price.closePriceKrw()).isEqualByComparingTo("70050");
+			assertThat(price.volume()).isEqualTo(321L);
+			assertThat(price.source()).isEqualTo("KIS_REST_MINUTE_PRICE");
+		});
+		assertThat(cachedPrices).isEqualTo(prices);
+		server.verify();
+	}
+
 	private static KisMarketProperties configuredProperties() {
 		KisMarketProperties properties = new KisMarketProperties();
 		properties.setEnabled(true);

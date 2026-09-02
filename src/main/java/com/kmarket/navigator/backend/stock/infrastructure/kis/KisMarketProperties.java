@@ -12,6 +12,9 @@ public class KisMarketProperties {
 	private URI baseUrl = URI.create("https://openapi.koreainvestment.com:9443");
 	private String appKey = "";
 	private String appSecret = "";
+	private boolean realtimeEnabled = true;
+	private URI websocketUrl = URI.create("ws://ops.koreainvestment.com:21000/tryitout");
+	private int maxRealtimeStocks = 40;
 	private Duration connectTimeout = Duration.ofSeconds(3);
 	private Duration readTimeout = Duration.ofSeconds(5);
 	private Duration collectionDelay = Duration.ofMillis(125);
@@ -54,6 +57,30 @@ public class KisMarketProperties {
 
 	public void setAppSecret(String appSecret) {
 		this.appSecret = appSecret;
+	}
+
+	public boolean isRealtimeEnabled() {
+		return realtimeEnabled;
+	}
+
+	public void setRealtimeEnabled(boolean realtimeEnabled) {
+		this.realtimeEnabled = realtimeEnabled;
+	}
+
+	public URI getWebsocketUrl() {
+		return websocketUrl;
+	}
+
+	public void setWebsocketUrl(URI websocketUrl) {
+		this.websocketUrl = websocketUrl;
+	}
+
+	public int getMaxRealtimeStocks() {
+		return maxRealtimeStocks;
+	}
+
+	public void setMaxRealtimeStocks(int maxRealtimeStocks) {
+		this.maxRealtimeStocks = maxRealtimeStocks;
 	}
 
 	public Duration getConnectTimeout() {
