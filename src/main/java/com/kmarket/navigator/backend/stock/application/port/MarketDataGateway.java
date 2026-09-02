@@ -8,6 +8,7 @@ import com.kmarket.navigator.backend.stock.domain.ForeignOwnershipSnapshot;
 import com.kmarket.navigator.backend.stock.domain.MarketDailyPrice;
 import com.kmarket.navigator.backend.stock.domain.MarketForeignNetFlow;
 import com.kmarket.navigator.backend.stock.domain.MarketIndexSnapshot;
+import com.kmarket.navigator.backend.stock.domain.MarketIntradayPrice;
 import com.kmarket.navigator.backend.stock.domain.MarketQuoteSnapshot;
 
 public interface MarketDataGateway {
@@ -27,6 +28,10 @@ public interface MarketDataGateway {
 	}
 
 	default List<MarketForeignNetFlow> fetchForeignNetFlows(LocalDate tradingDate) {
+		return List.of();
+	}
+
+	default List<MarketIntradayPrice> fetchIntradayPrices(String stockCode, LocalDate from, LocalDate to) {
 		return List.of();
 	}
 }

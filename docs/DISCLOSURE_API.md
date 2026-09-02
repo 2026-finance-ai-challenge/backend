@@ -22,6 +22,7 @@
 | `POST` | `/api/v1/disclosures/{receiptNumber}/questions` | 현재 공시 또는 선택 문단 범위 RAG 질의응답 |
 | `POST` | `/api/v1/disclosures/{receiptNumber}/index` | 온디맨드 색인 요청 |
 | `GET` | `/api/v1/disclosures/{receiptNumber}/sections/{sectionId}/translation` | 현재 문서 버전의 저장된 영어 섹션 번역 또는 생성 상태 조회 |
+| `POST` | `/api/v1/disclosures/{receiptNumber}/translation` | 공시 전체 섹션 번역을 한 번에 요청하고 기존 캐시·작업 재사용 |
 | `POST` | `/api/v1/disclosures/{receiptNumber}/sections/{sectionId}/translation` | 영어 섹션 번역 온디맨드 생성 요청 또는 캐시 재사용 |
 
 목록 항목의 `filedDateTotal`은 현재 페이지 크기가 아닌 해당 `filedDate` 전체 공시 건수다.
@@ -52,4 +53,4 @@
 
 번역 캐시가 있으면 `POST`도 `200 READY`, 최초 또는 동시 요청은 `202`와 동일 작업 ID·`Retry-After`를 반환한다. 원문 문서·섹션이 없으면 `409`, 사용량 제한은 `429`, 공급자 장애·회로 차단은 `503`으로 구분한다.
 
-현재 공시 RAG는 한글 원문 다국어 검색과 영어 답변을 사용한다. 제목 번역 메모리는 목록·상세·영문 검색에서 `titleEn`을 재사용한다. 섹션 번역 API는 현재 상세 응답에 속한 섹션만 허용하고, 같은 원문 해시의 `READY` 결과를 모든 사용자에게 재사용한다.
+현재 공시 RAG는 한글 원문 다국어 검색과 영어 답변을 사용한다. 제목 번역 메모리는 목록·상세·영문 검색에서 `titleEn`을 재사용한다. 상세 최초 진입은 문서 단위 API 한 번으로 전체 섹션을 등록하고, 섹션 조회 API가 완료 상태를 갱신한다. 같은 원문 해시의 작업과 `READY` 결과는 모든 사용자에게 재사용한다.

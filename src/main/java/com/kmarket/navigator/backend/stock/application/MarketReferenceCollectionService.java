@@ -40,14 +40,19 @@ public class MarketReferenceCollectionService {
 	}
 
 	@Scheduled(fixedDelayString = "${kmarket.market.reference-interval:10m}", initialDelayString = "20s")
-	@SchedulerLock(name = "market-reference-collection", lockAtMostFor = "PT9M")
-	public void collectReferences() {
+	@SchedulerLock(name = "market-exchange-rate-collection", lockAtMostFor = "PT9M")
+	public void collectExchangeRate() {
 		try {
 			exchangeRateGateway.fetchUsdKrw().ifPresent(repository::saveExchangeRate);
 		} catch (RuntimeException exception) {
 			log.warn("Frankfurter exchange-rate collection failed type={}",
 				exception.getClass().getSimpleName());
 		}
+	}
+
+	@Scheduled(fixedDelayString = "${kmarket.market.foreign-flow-interval:1m}", initialDelayString = "25s")
+	@SchedulerLock(name = "market-foreign-flow-collection", lockAtMostFor = "PT50S")
+	public void collectForeignNetFlow() {
 		if (!marketGateway.configured()) {
 			return;
 		}

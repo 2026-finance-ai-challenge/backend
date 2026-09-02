@@ -122,10 +122,26 @@ public class OnDemandTranslationService {
 	) {
 		rateLimiter.check(clientHash);
 		DisclosureSource source = disclosureSource(receiptNumber, sectionId);
+		return requestDisclosureSource(receiptNumber, source);
+	}
+
+	public List<TranslationView> requestDisclosure(String receiptNumber, String clientHash) {
+		var detail = disclosureQueryHandler.findOne(receiptNumber);
+		List<DisclosureSource> sources = detail.documents().stream()
+			.flatMap(document -> document.sections().stream()
+				.map(section -> disclosureSource(document, section)))
+			.toList();
+		rateLimiter.checkBatch(clientHash, sources.size());
+		return sources.stream()
+			.map(source -> requestDisclosureSource(receiptNumber, source))
+			.toList();
+	}
+
+	private TranslationView requestDisclosureSource(String receiptNumber, DisclosureSource source) {
 		ObjectNode context = objectMapper.createObjectNode();
 		context.put("receipt_number", receiptNumber);
 		context.put("document_version", source.document().version());
-		context.put("section_id", sectionId.toString());
+		context.put("section_id", source.sectionId().toString());
 		TranslationView view = translationRepository.request(
 			TranslationKind.DISCLOSURE_SECTION,
 			source.source().hash(),
@@ -177,20 +193,27 @@ public class OnDemandTranslationService {
 		for (DisclosureDocument document : detail.documents()) {
 			for (DisclosureSection section : document.sections()) {
 				if (section.id().equals(sectionId)) {
-					if (section.heading() == null && section.text() == null
-						&& section.tableData() == null) {
-						throw new BusinessException(ErrorCode.SOURCE_CONTENT_UNAVAILABLE);
-					}
-					return new DisclosureSource(
-						document,
-						canonicalizer.disclosureSection(
-							section.heading(), section.text(), section.tableData()
-						)
-					);
+					return disclosureSource(document, section);
 				}
 			}
 		}
 		throw new BusinessException(ErrorCode.DISCLOSURE_SECTION_NOT_FOUND);
+	}
+
+	private DisclosureSource disclosureSource(
+		DisclosureDocument document,
+		DisclosureSection section
+	) {
+		if (section.heading() == null && section.text() == null && section.tableData() == null) {
+			throw new BusinessException(ErrorCode.SOURCE_CONTENT_UNAVAILABLE);
+		}
+		return new DisclosureSource(
+			document,
+			section.id(),
+			canonicalizer.disclosureSection(
+				section.heading(), section.text(), section.tableData()
+			)
+		);
 	}
 
 	private record NewsSource(TranslationCanonicalizer.Source source) {
@@ -198,6 +221,7 @@ public class OnDemandTranslationService {
 
 	private record DisclosureSource(
 		DisclosureDocument document,
+		UUID sectionId,
 		TranslationCanonicalizer.Source source
 	) {
 	}

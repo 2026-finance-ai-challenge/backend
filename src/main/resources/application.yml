@@ -127,6 +127,7 @@ kmarket:
     collection-interval: ${KMARKET_MARKET_COLLECTION_INTERVAL:60s}
     collection-initial-delay: ${KMARKET_MARKET_COLLECTION_INITIAL_DELAY:15s}
     reference-interval: ${KMARKET_MARKET_REFERENCE_INTERVAL:10m}
+    foreign-flow-interval: ${KMARKET_MARKET_FOREIGN_FLOW_INTERVAL:1m}
     history-cron: ${KMARKET_MARKET_HISTORY_CRON:0 20 18 * * MON-FRI}
     foreign-prediction-cron: ${KMARKET_FOREIGN_PREDICTION_CRON:0 40 18 * * MON-FRI}
     frankfurter:
@@ -139,6 +140,9 @@ kmarket:
       base-url: ${KMARKET_KIS_BASE_URL:https://openapi.koreainvestment.com:9443}
       app-key: ${KMARKET_KIS_APP_KEY:}
       app-secret: ${KMARKET_KIS_APP_SECRET:}
+      realtime-enabled: ${KMARKET_KIS_REALTIME_ENABLED:true}
+      websocket-url: ${KMARKET_KIS_WEBSOCKET_URL:ws://ops.koreainvestment.com:21000/tryitout}
+      max-realtime-stocks: ${KMARKET_KIS_MAX_REALTIME_STOCKS:40}
       connect-timeout: ${KMARKET_KIS_CONNECT_TIMEOUT:3s}
       read-timeout: ${KMARKET_KIS_READ_TIMEOUT:5s}
       collection-delay: ${KMARKET_KIS_COLLECTION_DELAY:125ms}

@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -32,6 +33,7 @@ import com.kmarket.navigator.backend.stock.domain.MarketDataStatus;
 import com.kmarket.navigator.backend.stock.domain.MarketDailyPrice;
 import com.kmarket.navigator.backend.stock.domain.MarketForeignNetFlow;
 import com.kmarket.navigator.backend.stock.domain.MarketIndexSnapshot;
+import com.kmarket.navigator.backend.stock.domain.MarketIntradayPrice;
 import com.kmarket.navigator.backend.stock.domain.MarketQuoteSnapshot;
 import com.kmarket.navigator.backend.stock.domain.PriceLimitState;
 
@@ -44,6 +46,9 @@ class KisMarketDataGateway implements MarketDataGateway {
 	private static final String INDEX_TRANSACTION_ID = "FHPUP02100000";
 	private static final String DAILY_PRICE_TRANSACTION_ID = "FHKST03010100";
 	private static final String FOREIGN_FLOW_TRANSACTION_ID = "FHPTJ04040000";
+	private static final String TODAY_MINUTE_TRANSACTION_ID = "FHKST03010200";
+	private static final String HISTORICAL_MINUTE_TRANSACTION_ID = "FHKST03010230";
+	private static final DateTimeFormatter KIS_TIME = DateTimeFormatter.ofPattern("HHmmss");
 	private static final DateTimeFormatter KIS_DATE = DateTimeFormatter.BASIC_ISO_DATE;
 	private static final ZoneId KOREA_ZONE = ZoneId.of("Asia/Seoul");
 	private static final Map<String, String> INDEX_NAMES = Map.of(
@@ -56,6 +61,7 @@ class KisMarketDataGateway implements MarketDataGateway {
 	private final KisAccessTokenProvider tokenProvider;
 	private final KisCircuitBreaker circuitBreaker;
 	private final Clock clock;
+	private final Map<String, CachedIntradayPrices> intradayCache = new ConcurrentHashMap<>();
 
 	KisMarketDataGateway(
 		@Qualifier("kisMarketRestClient") RestClient restClient,
@@ -298,6 +304,95 @@ class KisMarketDataGateway implements MarketDataGateway {
 			}
 		}
 		return List.copyOf(flows);
+	}
+
+	@Override
+	public List<MarketIntradayPrice> fetchIntradayPrices(String stockCode, LocalDate from, LocalDate to) {
+		if (!configured()) return List.of();
+		List<MarketIntradayPrice> prices = new ArrayList<>();
+		for (LocalDate date = from; !date.isAfter(to); date = date.plusDays(1)) {
+			if (date.getDayOfWeek() == DayOfWeek.SATURDAY || date.getDayOfWeek() == DayOfWeek.SUNDAY) continue;
+			prices.addAll(cachedMinutePricesForDate(stockCode, date));
+		}
+		return prices.stream().sorted(java.util.Comparator.comparing(MarketIntradayPrice::timestamp)).toList();
+	}
+
+	private List<MarketIntradayPrice> cachedMinutePricesForDate(String stockCode, LocalDate tradingDate) {
+		String key = stockCode + ":" + tradingDate;
+		Instant now = clock.instant();
+		CachedIntradayPrices cached = intradayCache.get(key);
+		if (cached != null && cached.expiresAt().isAfter(now)) return cached.items();
+		List<MarketIntradayPrice> fresh = fetchMinutePricesForDate(stockCode, tradingDate);
+		Duration ttl = tradingDate.equals(LocalDate.now(clock)) ? Duration.ofSeconds(30) : Duration.ofHours(12);
+		intradayCache.put(key, new CachedIntradayPrices(fresh, now.plus(ttl)));
+		if (intradayCache.size() > 1_000) {
+			intradayCache.entrySet().removeIf(entry -> !entry.getValue().expiresAt().isAfter(now));
+		}
+		return fresh;
+	}
+
+	private List<MarketIntradayPrice> fetchMinutePricesForDate(String stockCode, LocalDate tradingDate) {
+		boolean today = tradingDate.equals(LocalDate.now(clock));
+		LocalTime now = LocalTime.now(clock);
+		LocalTime marketClose = LocalTime.of(15, 30);
+		String cursor = KIS_TIME.format(today && now.isBefore(marketClose) ? now : marketClose);
+		Map<Instant, MarketIntradayPrice> collected = new TreeMap<>();
+		for (int page = 0; page < 14; page++) {
+			Map<String, String> parameters = new LinkedHashMap<>();
+			parameters.put("FID_COND_MRKT_DIV_CODE", "J");
+			parameters.put("FID_INPUT_ISCD", stockCode);
+			parameters.put("FID_INPUT_HOUR_1", cursor);
+			parameters.put("FID_PW_DATA_INCU_YN", "Y");
+			if (today) parameters.put("FID_ETC_CLS_CODE", "");
+			else {
+				parameters.put("FID_INPUT_DATE_1", KIS_DATE.format(tradingDate));
+				parameters.put("FID_FAKE_TICK_INCU_YN", "");
+			}
+			JsonNode rows = requestRoot(
+				today ? "/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice"
+					: "/uapi/domestic-stock/v1/quotations/inquire-time-dailychartprice",
+				today ? TODAY_MINUTE_TRANSACTION_ID : HISTORICAL_MINUTE_TRANSACTION_ID,
+				parameters
+			).path("output2");
+			if (!rows.isArray() || rows.isEmpty()) break;
+			LocalTime earliest = null;
+			for (JsonNode row : rows) {
+				LocalDate date = date(row, "stck_bsop_date");
+				if (date == null) date = tradingDate;
+				String timeText = text(row, "stck_cntg_hour");
+				if (timeText == null || timeText.length() < 6) continue;
+				LocalTime time;
+				try { time = LocalTime.parse(timeText.substring(0, 6), KIS_TIME); }
+				catch (RuntimeException exception) { continue; }
+				if (time.isBefore(LocalTime.of(9, 0)) || time.isAfter(LocalTime.of(15, 30))) continue;
+				BigDecimal close = firstDecimal(row, "stck_prpr", "stck_clpr");
+				if (close == null) continue;
+				Instant timestamp = LocalDateTime.of(date, time).atZone(KOREA_ZONE).toInstant();
+				collected.put(timestamp, new MarketIntradayPrice(
+					timestamp,
+					valueOr(firstDecimal(row, "stck_oprc"), close),
+					valueOr(firstDecimal(row, "stck_hgpr"), close),
+					valueOr(firstDecimal(row, "stck_lwpr"), close),
+					close,
+					longValue(row, "cntg_vol", 0L),
+					"KIS_REST_MINUTE_PRICE"
+				));
+				if (earliest == null || time.isBefore(earliest)) earliest = time;
+			}
+			if (earliest == null || !earliest.isAfter(LocalTime.of(9, 0))) break;
+			String nextCursor = KIS_TIME.format(earliest.minusSeconds(1));
+			if (nextCursor.equals(cursor)) break;
+			cursor = nextCursor;
+			pauseBetweenRequests();
+		}
+		return List.copyOf(collected.values());
+	}
+
+	private static BigDecimal valueOr(BigDecimal value, BigDecimal fallback) {
+		return value == null ? fallback : value;
+	}
+
+	private record CachedIntradayPrices(List<MarketIntradayPrice> items, Instant expiresAt) {
 	}
 
 	private JsonNode request(String path, String transactionId, String marketCode, String code) {

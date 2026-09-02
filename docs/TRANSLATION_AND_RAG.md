@@ -20,6 +20,7 @@
 - 수집 트랜잭션은 OpenAI 응답을 기다리지 않는다. 원문 저장과 제목 번역 작업 등록만 같은 트랜잭션에서 멱등 처리한다.
 - 본문 일괄 선번역 작업은 만들지 않는다. 기존 데이터 백필도 제목에만 적용한다.
 - 한국어 원문, 구조화 표, 공시 인용 위치는 번역 성공 여부와 무관하게 유지한다.
+- DART 병합셀을 표현하는 빈 표 셀은 유효한 구조로 보존하며, 내용이 있는 셀만 비어 있는 번역 결과를 실패로 판정한다.
 - 번역이 없거나 실패했으면 한국어 원문과 `PENDING`, `FAILED`, `UNAVAILABLE` 상태를 명확히 반환한다. 빈 문자열이나 생성된 대체 내용을 사용하지 않는다.
 - Naver Search API가 제공하는 데이터는 제목과 검색 요약이다. 합법적인 전문 공급 계약이 없는 기사를 `FULL_ARTICLE`로 표시하거나 전문 번역을 제공하지 않는다.
 
@@ -47,6 +48,7 @@
 | `GET` | `/api/v1/news/{articleId}/translation?locale=en|ko` | 언어별 본문·Insight 캐시 또는 현재 생성 상태 조회 |
 | `POST` | `/api/v1/news/{articleId}/translation?locale=en|ko` | 언어별 본문·Insight 생성 요청 또는 캐시 재사용 |
 | `GET` | `/api/v1/disclosures/{receiptNumber}/sections/{sectionId}/translation` | 저장된 영어 섹션 번역 또는 현재 생성 상태 조회 |
+| `POST` | `/api/v1/disclosures/{receiptNumber}/translation` | 상세 최초 진입 시 전체 섹션을 한 번에 요청하고 섹션별 공유 작업을 재사용 |
 | `POST` | `/api/v1/disclosures/{receiptNumber}/sections/{sectionId}/translation` | 현재 문서 버전의 섹션 번역 생성 요청 또는 캐시 재사용 |
 
 - 캐시가 있으면 `200 OK`와 `READY`를 반환한다.
@@ -58,6 +60,7 @@
 ## 저장·동시성 기준
 
 - PostgreSQL 번역 메모리는 `contentKind + sourceHash + targetLocale + translationVersion`을 유일 키로 사용해 EN과 KR을 분리 저장한다.
+- 공시 상세는 섹션 수와 무관하게 클라이언트 요청 한 건으로 일괄 등록한다. 전역 한도는 실제 섹션 작업 수로 계산하고 유일 키로 동시 사용자 중복 생성을 막는다.
 - 작업 상태는 `PENDING`, `PROCESSING`, `READY`, `FAILED`로 분리하고 시도 횟수, 다음 시도 시각, 마지막 오류 코드를 기록한다.
 - Redis 분산 잠금은 원문을 포함하지 않은 해시 키를 사용하고 TTL을 둔다. Redis 잠금은 최적화이며 PostgreSQL 유일 제약이 최종 중복 방지 장치다.
 - 오래된 `PROCESSING` 작업은 임대 만료 후 회수하고, 지수 백오프와 최대 시도 횟수를 적용한다.
