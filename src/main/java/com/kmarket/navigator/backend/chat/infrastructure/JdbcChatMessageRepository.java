@@ -94,53 +94,8 @@ public class JdbcChatMessageRepository implements ChatMessageRepository {
 	}
 
 	@Override
-	@Transactional
-	public ChatGeneration regenerate(
-		UUID userId,
-		UUID roomId,
-		UUID assistantMessageId,
-		UUID requestKey,
-		Instant now
-	) {
-		RegenerationSource source = jdbcClient.sql("""
-			SELECT assistant.reply_to_message_id,
-			       source_generation.selected_section_id,
-			       source_generation.selected_text
-			FROM chat_message assistant
-			JOIN chat_room room ON room.id = assistant.room_id
-			LEFT JOIN chat_generation source_generation
-			       ON source_generation.assistant_message_id = assistant.id
-			WHERE assistant.id = :assistantMessageId
-			  AND assistant.room_id = :roomId
-			  AND assistant.role = 'ASSISTANT'
-			  AND room.user_id = :userId
-			  AND room.deleted_at IS NULL
-			""")
-			.param("assistantMessageId", assistantMessageId)
-			.param("roomId", roomId)
-			.param("userId", userId)
-			.query((resultSet, rowNumber) -> new RegenerationSource(
-				resultSet.getObject("reply_to_message_id", UUID.class),
-				resultSet.getObject("selected_section_id", UUID.class),
-				resultSet.getString("selected_text")
-			))
-			.optional()
-			.orElseThrow(() -> new BusinessException(ErrorCode.CHAT_MESSAGE_NOT_FOUND));
-		insertGeneration(
-			roomId,
-			source.userMessageId(),
-			assistantMessageId,
-			requestKey,
-			source.selectedSectionId(),
-			source.selectedText(),
-			now
-		);
-		return findGenerationByRequest(roomId, requestKey);
-	}
-
-	@Override
 	public List<ChatMessage> findMessages(UUID userId, UUID roomId, long afterSequence, int limit) {
-		return jdbcClient.sql("SELECT " + MESSAGE_COLUMNS + """
+		var messages = jdbcClient.sql("SELECT " + MESSAGE_COLUMNS + """
 			 FROM chat_message message
 			 JOIN chat_room room ON room.id = message.room_id
 			 WHERE message.room_id = :roomId
@@ -156,7 +111,57 @@ public class JdbcChatMessageRepository implements ChatMessageRepository {
 			.param("limit", limit)
 			.query((resultSet, rowNumber) -> mapMessageRow(resultSet))
 			.list();
+		return localizeNewsCitations(localizeFilingCitations(messages));
 	}
+
+	private List<ChatMessage> localizeNewsCitations(List<ChatMessage> messages) {
+		var ids = messages.stream().flatMap(message -> message.citations().stream())
+			.map(ChatCitation::referenceId).filter(value -> value != null
+				&& value.matches("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"))
+			.map(UUID::fromString).distinct().toList();
+		if (ids.isEmpty()) return messages;
+		var titles = jdbcClient.sql("""
+			SELECT id, english_title, original_title FROM news_article WHERE id IN (:ids)
+			""").param("ids", ids)
+			.query((row, index) -> new FilingTitles(row.getObject("id", UUID.class).toString(),
+				row.getString("english_title"), row.getString("original_title")))
+			.list().stream().collect(java.util.stream.Collectors.toMap(FilingTitles::receipt, value -> value));
+		return messages.stream().map(message -> message.withCitations(message.citations().stream().map(citation -> {
+			var title = titles.get(citation.referenceId());
+			return title == null ? citation : new ChatCitation(citation.id(), "NEWS", citation.referenceId(),
+				citation.title(), citation.excerpt(), citation.url(), citation.asOf(), citation.sectionIds(), title.en(), title.ko());
+		}).toList())).toList();
+	}
+
+	private List<ChatMessage> localizeFilingCitations(List<ChatMessage> messages) {
+		var receipts = messages.stream().flatMap(message -> message.citations().stream())
+			.map(ChatCitation::referenceId).filter(value -> value != null && value.matches("[0-9]{14}"))
+			.distinct().toList();
+		if (receipts.isEmpty()) return messages;
+		// 저장된 대화도 현재 원문의 검증된 한·영 제목을 한 번에 조회한다.
+		var titles = jdbcClient.sql("""
+			SELECT disclosure.receipt_number, disclosure.title_ko,
+			       CASE WHEN translation.status = 'READY' THEN translation.translated_text END AS title_en
+			FROM disclosure
+			LEFT JOIN translation_memory translation
+			  ON translation.content_kind = 'DISCLOSURE_TITLE'
+			 AND translation.source_hash = disclosure.title_source_hash
+			 AND translation.target_locale = 'en'
+			 AND translation.translation_version = :version
+			WHERE disclosure.receipt_number IN (:receipts)
+			""").param("receipts", receipts)
+			.param("version", com.kmarket.navigator.backend.disclosure.application.DisclosureTitlePolicy.TRANSLATION_VERSION)
+			.query((row, index) -> new FilingTitles(row.getString("receipt_number"), row.getString("title_en"), row.getString("title_ko")))
+			.list().stream().collect(java.util.stream.Collectors.toMap(FilingTitles::receipt, value -> value));
+		return messages.stream().map(message -> message.withCitations(message.citations().stream().map(citation -> {
+			var title = titles.get(citation.referenceId());
+			return title == null ? citation : new ChatCitation(citation.id(), "FILING", title.receipt(),
+				citation.title(), citation.excerpt(), "/disclosures/" + title.receipt(), citation.asOf(), citation.sectionIds(),
+				title.en(), title.ko());
+		}).toList())).toList();
+	}
+
+	private record FilingTitles(String receipt, String en, String ko) { }
 
 	@Override
 	public Optional<ChatGeneration> findGeneration(UUID userId, UUID roomId, UUID generationId) {
@@ -210,6 +215,14 @@ public class JdbcChatMessageRepository implements ChatMessageRepository {
 			  AND room.user_id = :userId
 			  AND room.deleted_at IS NULL
 			  AND generation.status = 'FAILED'
+			  AND generation.assistant_message_id IS NULL
+			  AND generation.last_error_code = 'AI_SERVICE_UNAVAILABLE'
+			  AND NOT EXISTS (
+			      SELECT 1 FROM chat_message answered
+			      WHERE answered.room_id = generation.room_id
+			        AND answered.reply_to_message_id = generation.user_message_id
+			        AND answered.role = 'ASSISTANT'
+			  )
 			""")
 			.param("now", offset(now))
 			.param("generationId", generationId)
@@ -558,13 +571,6 @@ public class JdbcChatMessageRepository implements ChatMessageRepository {
 		int type
 	) {
 		return statement.param(name, value, type);
-	}
-
-	private record RegenerationSource(
-		UUID userMessageId,
-		UUID selectedSectionId,
-		String selectedText
-	) {
 	}
 
 	private record CompletionTarget(UUID roomId, UUID userMessageId) {

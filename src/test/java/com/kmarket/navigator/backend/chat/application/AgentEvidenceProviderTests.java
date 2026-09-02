@@ -90,6 +90,8 @@ class AgentEvidenceProviderTests {
 		assertThat(evidence).hasSize(1);
 		assertThat(evidence.getFirst().id()).matches("^E[0-9]{1,3}$");
 		assertThat(evidence.getFirst().content()).contains("FILING_METADATA", "do not infer document contents");
+		assertThat(evidence.getFirst().url()).isEqualTo("/disclosures/20260902800513");
+		assertThat(evidence.getFirst().content()).doesNotContain("dart.fss.or.kr");
 		verifyNoInteractions(news);
 	}
 

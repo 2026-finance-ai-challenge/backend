@@ -20,8 +20,7 @@
 | `GET` | `/api/v1/me/chats/{roomId}/messages` | 순서가 보존된 메시지와 검증된 인용 조회 |
 | `GET` | `/api/v1/me/chats/{roomId}/generations/{generationId}` | 생성·재시도·실패 상태 조회 |
 | `POST` | `/api/v1/me/chats/{roomId}/generations/{generationId}/stop` | 대기 또는 처리 중 생성 중단 |
-| `POST` | `/api/v1/me/chats/{roomId}/generations/{generationId}/retry` | 최종 실패 작업 재시도 |
-| `POST` | `/api/v1/me/chats/{roomId}/messages/{assistantMessageId}/regenerate` | 동일 사용자 질문으로 새 답변 생성 |
+| `POST` | `/api/v1/me/chats/{roomId}/generations/{generationId}/retry` | 답변을 받지 못한 AI 서비스 장애 건만 재시도 |
 
 `contextType`은 `GENERAL`, `STOCK`, `NEWS`, `FILING`, `TAX_GUIDE` 중 하나다. 클라이언트가 제공한 표시명이나 문서 버전은 신뢰하지 않는다. 종목·뉴스·공시는 서버 데이터에서 실제 표시명과 참조를 다시 조회하며, 공시는 현재 구조화 원문의 SHA-256 조합에 바인딩한다.
 
@@ -32,9 +31,12 @@
 ## 답변 생성
 
 - 메시지 제출은 `202 Accepted`와 `generation.id`를 반환하며 클라이언트는 생성 상태를 조회한다.
-- `clientMessageId`와 재생성 `requestKey`는 네트워크 재전송에도 중복 메시지·과금을 만들지 않는 멱등 키다.
+- `clientMessageId`는 네트워크 재전송에도 중복 메시지·과금을 만들지 않는 멱등 키다. 정상 답변의 재생성 API는 제거했다.
 - 생성 작업은 PostgreSQL `SKIP LOCKED` 큐로 한 번에 하나의 worker만 점유하며, 중단된 worker의 잠금은 5분 뒤 복구한다.
 - 응답 실패는 첫 시도에서 `FAILED`로 전환한다. 추가 과금을 만드는 자동 재생성은 하지 않으며 사용자가 오류를 확인하고 명시적으로 재시도한다. 처리 중 worker가 사라진 경우의 잠금 복구는 별도다.
+- `retryable`은 FAILED·AI_SERVICE_UNAVAILABLE일 때만 참이다. 재시도 SQL은 해당 질문에 AI 답변이 없는지도 검사한다. 정상 답변·근거 부족 답변·사용자 중단·오래된 문맥·잘못된 선택은 재시도하지 않는다.
+- 공시 인용은 `/disclosures/{receiptNumber}` 내부 상세 주소와 `FILING` 출처 유형을 반환한다. 답변 본문에는 출처 ID를 쓰고 프론트가 이동 버튼을 표시한다.
+- 뉴스·공시 인용의 `titleEn`과 `titleKo`는 메시지 조회 시 실제 기사·공시에서 일괄 조회한다. 기존 대화의 한글 섹션 제목도 화면 언어에 맞는 실제 제목으로 표시한다. 영문 제목이 없으면 한글이나 가공한 영문을 대신 넣지 않으며, 언어 전환은 AI 생성을 요청하지 않는다.
 - 사용자별 생성 요청은 Redis의 고정 시간창으로 제한한다.
 - OpenAI에는 직접 사용자 ID 대신 서버 비밀 pepper로 만든 HMAC-SHA-256 식별자만 전달하고 응답 저장은 비활성화한다.
 - 종목·뉴스·시장 답변은 서버가 만든 근거 묶음만 사용한다. 반환 인용 ID는 허용 목록과 대조하며 검증되지 않은 인용이 있는 답변은 근거 부족 상태로 바꾼다.

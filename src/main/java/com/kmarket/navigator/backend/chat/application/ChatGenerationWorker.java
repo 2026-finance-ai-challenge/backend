@@ -109,7 +109,8 @@ public class ChatGenerationWorker {
 			.filter(java.util.Objects::nonNull)
 			.map(item -> new ChatCitation(
 				item.id(),
-				task.context().type().name(),
+				item.url() != null && item.url().matches("/disclosures/[0-9]{14}")
+					? "FILING" : task.context().type().name(),
 				item.referenceId(),
 				item.title(),
 				excerpt(item.content()),
@@ -156,9 +157,9 @@ public class ChatGenerationWorker {
 				citation.id(),
 				"FILING",
 				task.context().referenceId(),
-				citation.heading(),
+				detail.titleEn() == null || detail.titleEn().isBlank() ? citation.heading() : detail.titleEn(),
 				citation.excerpt(),
-				detail.officialUrl(),
+				"/disclosures/" + task.context().referenceId(),
 				detail.detectedAt(),
 				citation.sectionIds()
 			))

@@ -23,14 +23,6 @@ public interface ChatMessageRepository {
 		Instant now
 	);
 
-	ChatGeneration regenerate(
-		UUID userId,
-		UUID roomId,
-		UUID assistantMessageId,
-		UUID requestKey,
-		Instant now
-	);
-
 	List<ChatMessage> findMessages(UUID userId, UUID roomId, long afterSequence, int limit);
 
 	Optional<ChatGeneration> findGeneration(UUID userId, UUID roomId, UUID generationId);

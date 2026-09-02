@@ -107,11 +107,11 @@ public class AgentEvidenceProvider {
 				packet.put("kind", "FILING_METADATA"); packet.put("stockCode", filing.stockCode());
 				packet.put("issuer", filing.issuerNameEn()); packet.put("title", filing.titleEn());
 				packet.put("originalTitle", filing.titleKo()); packet.put("filedDate", filing.filedDate());
-				packet.put("sourceUrl", filing.officialUrl()); packet.put("receiptNumber", filing.receiptNumber());
+				packet.put("sourceUrl", "/disclosures/" + filing.receiptNumber()); packet.put("receiptNumber", filing.receiptNumber());
 				packet.put("evidenceScope", "Filing metadata only; do not infer document contents.");
 				String key = "F" + filing.receiptNumber();
 				found.putIfAbsent(key, new AgentEvidence(key, filing.titleEn(), objectMapper.writeValueAsString(packet),
-					"OpenDART", filing.detectedAt(), filing.receiptNumber(), filing.officialUrl()));
+					"OpenDART", filing.detectedAt(), filing.receiptNumber(), "/disclosures/" + filing.receiptNumber()));
 			}
 		}
 	}
@@ -172,7 +172,7 @@ public class AgentEvidenceProvider {
 		packet.put("analysisStatus", article.analysisStatus());
 		return List.of(new AgentEvidence(
 			"E1",
-			article.originalTitle(),
+			article.englishTitle(),
 			json(packet),
 			article.publisher() == null ? "Naver News" : article.publisher(),
 			article.publishedAt(),

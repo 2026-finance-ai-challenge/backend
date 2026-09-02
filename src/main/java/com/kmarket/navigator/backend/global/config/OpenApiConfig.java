@@ -58,7 +58,6 @@ public class OpenApiConfig {
 		entry("ChatMessageController#generation", operation("AI 답변 생성 상태 조회", "AI Chat", Access.AUTHENTICATED)),
 		entry("ChatMessageController#stop", operation("AI 답변 생성 중단", "AI Chat", Access.AUTHENTICATED)),
 		entry("ChatMessageController#retry", operation("실패한 AI 답변 재시도", "AI Chat", Access.AUTHENTICATED)),
-		entry("ChatMessageController#regenerate", operation("AI 답변 다시 생성", "AI Chat", Access.AUTHENTICATED, "202")),
 
 		entry("MarketController#search", operation("종목 검색", "Market", Access.OPTIONAL)),
 		entry("MarketController#screener", operation("종목 스크리너 조회", "Market", Access.OPTIONAL)),

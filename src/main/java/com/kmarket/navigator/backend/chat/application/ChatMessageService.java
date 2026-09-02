@@ -57,6 +57,9 @@ public class ChatMessageService {
 		String selectedText
 	) {
 		var room = roomService.findOne(user, roomId);
+		if (room.context().type() == ChatContextType.FILING && content(requestedContent).length() > 2_000) {
+			throw new BusinessException(ErrorCode.INVALID_CHAT_MESSAGE);
+		}
 		validateSelection(room.context().type(), selectedSectionId, selectedText);
 		rateLimiter.check(user.id());
 		return repository.submit(
@@ -88,20 +91,6 @@ public class ChatMessageService {
 	}
 
 	@Transactional
-	public ChatGeneration regenerate(
-		AuthenticatedUser user,
-		UUID roomId,
-		UUID assistantMessageId,
-		UUID requestKey
-	) {
-		roomService.findOne(user, roomId);
-		rateLimiter.check(user.id());
-		return repository.regenerate(
-			user.id(), roomId, assistantMessageId, requestKey, Instant.now(clock)
-		);
-	}
-
-	@Transactional
 	public ChatGeneration stop(AuthenticatedUser user, UUID roomId, UUID generationId) {
 		roomService.findOne(user, roomId);
 		if (!repository.stop(user.id(), roomId, generationId, Instant.now(clock))) {
@@ -113,6 +102,9 @@ public class ChatMessageService {
 	@Transactional
 	public ChatGeneration retry(AuthenticatedUser user, UUID roomId, UUID generationId) {
 		roomService.findOne(user, roomId);
+		if (!generation(user, roomId, generationId).retryable()) {
+			throw new BusinessException(ErrorCode.CHAT_GENERATION_NOT_RETRYABLE);
+		}
 		rateLimiter.check(user.id());
 		if (!repository.retry(user.id(), roomId, generationId, Instant.now(clock))) {
 			throw new BusinessException(ErrorCode.CHAT_GENERATION_NOT_RETRYABLE);

@@ -284,13 +284,13 @@ class BackendApplicationTests {
 				throw new com.kmarket.navigator.backend.translation.application.TranslationProviderException(
 					com.kmarket.navigator.backend.translation.application.TranslationProviderException.Failure.INVALID_OUTPUT);
 			});
-			translationWorker.process();
+			translationWorker.processNews();
 			assertThat(calls.get()).isEqualTo(1);
 			for (var result : executor.invokeAll(tasks)) {
 				assertThat(result.get().jobId()).isEqualTo(jobId);
 				assertThat(result.get().status()).isEqualTo(com.kmarket.navigator.backend.translation.domain.TranslationStatus.FAILED);
 			}
-			translationWorker.process();
+			translationWorker.processNews();
 			assertThat(calls.get()).isEqualTo(1);
 			assertThat(jdbcClient.sql("SELECT attempts FROM translation_job WHERE translation_memory_id = :id")
 				.param("id", jobId).query(Integer.class).single()).isEqualTo(1);
@@ -970,7 +970,7 @@ class BackendApplicationTests {
 	}
 
 	@Test
-	void generatesStopsAndRegeneratesOwnedAgentMessagesWithVerifiedCitations() throws Exception {
+	void generatesStopsAndRejectsRegenerationOfAnsweredMessages() throws Exception {
 		AuthFixture owner = signupAndLogin("agent_owner");
 		AuthFixture other = signupAndLogin("agent_other");
 		JsonNode room = createdResponse(post("/api/v1/me/chats")
@@ -1028,19 +1028,20 @@ class BackendApplicationTests {
 				List.of("E1"), false, null, "KOSPI snapshot", "For information only.",
 				new BigDecimal("0.80"), "test-agent", "market-agent-test-v1"
 			));
-		acceptedResponse(post(
+		mockMvc.perform(post(
 				"/api/v1/me/chats/{roomId}/messages/{assistantMessageId}/regenerate",
 				roomId,
 				assistantId
 			)
 			.header("Authorization", "Bearer " + owner.accessToken())
 			.contentType(MediaType.APPLICATION_JSON)
-			.content("{\"requestKey\":\"%s\"}".formatted(UUID.randomUUID())));
+			.content("{\"requestKey\":\"%s\"}".formatted(UUID.randomUUID())))
+			.andExpect(status().isNotFound());
 		chatGenerationWorker.process();
 		mockMvc.perform(get("/api/v1/me/chats/{roomId}/messages", roomId)
 				.header("Authorization", "Bearer " + owner.accessToken()))
 			.andExpect(status().isOk())
-			.andExpect(jsonPath("$.length()").value(3));
+			.andExpect(jsonPath("$.length()").value(2));
 
 		JsonNode stoppedSubmission = acceptedResponse(post("/api/v1/me/chats/{roomId}/messages", roomId)
 			.header("Authorization", "Bearer " + owner.accessToken())
@@ -1067,6 +1068,35 @@ class BackendApplicationTests {
 			.header("Authorization", "Bearer " + other.accessToken()))
 			.andExpect(status().isNotFound())
 			.andExpect(jsonPath("$.code").value("CHAT_GENERATION_NOT_FOUND"));
+	}
+
+	@Test
+	void localizesPreviouslySavedNewsCitationsWithoutGeneratingAgain() throws Exception {
+		activateCommonStocks("005930");
+		UUID articleId = insertReadyNews("삼성전자 생산 소식", "삼성전자 생산 계획을 설명하는 원문입니다.", Instant.now(), "HIGH");
+		AuthFixture owner = signupAndLogin("news_citation");
+		JsonNode room = createdResponse(post("/api/v1/me/chats")
+			.header("Authorization", "Bearer " + owner.accessToken())
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("{\"contextType\":\"NEWS\",\"referenceId\":\"%s\"}".formatted(articleId)));
+		UUID roomId = UUID.fromString(room.get("id").stringValue());
+		when(agentGateway.answer(any(), any(), any(), any(), any())).thenReturn(new AgentAnswer(
+			"The article describes a production update. [E1]", List.of("E1"), false, null,
+			"Production update", "For information only.", new BigDecimal("0.8"), "test-agent", "test-v1"));
+		acceptedResponse(post("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"clientMessageId\":\"%s\",\"content\":\"What happened?\"}".formatted(UUID.randomUUID())));
+		chatGenerationWorker.process();
+		jdbcClient.sql("""
+			UPDATE chat_message SET citations = jsonb_set(citations, '{0,title}', '"옛 한글 제목"')
+			WHERE room_id = :room AND role = 'ASSISTANT'
+			""").param("room", roomId).update();
+		mockMvc.perform(get("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$[1].citations[0].titleEn").value("Ready English news title"))
+			.andExpect(jsonPath("$[1].citations[0].titleKo").value("삼성전자 생산 소식"));
+		verify(agentGateway, times(1)).answer(any(), any(), any(), any(), any());
 	}
 
 	@Test
@@ -1101,6 +1131,7 @@ class BackendApplicationTests {
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.status").value("FAILED"))
 			.andExpect(jsonPath("$.attempts").value(1))
+			.andExpect(jsonPath("$.retryable").value(true))
 			.andExpect(jsonPath("$.errorCode").value("AI_SERVICE_UNAVAILABLE"));
 		mockMvc.perform(post(
 				"/api/v1/me/chats/{roomId}/generations/{generationId}/retry",
@@ -1114,9 +1145,51 @@ class BackendApplicationTests {
 	}
 
 	@Test
+	void reservesNewsTranslationClaimsWithoutWaitingForOlderFilingSections() {
+		var now = java.time.Instant.now();
+		var kind = com.kmarket.navigator.backend.translation.domain.TranslationKind.NEWS_NARRATIVE;
+		var filingKind = com.kmarket.navigator.backend.translation.domain.TranslationKind.DISCLOSURE_SECTION;
+		var mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+		var context = mapper.createObjectNode();
+		var filing = translationRepository.request(filingKind, "a".repeat(64), "공시", context,
+			"en", "queue-isolation-test", now.minusSeconds(60));
+		var news = translationRepository.request(kind, "b".repeat(64), "뉴스", context,
+			"en", "queue-isolation-test", now);
+		var newsJobs = translationRepository.claimForKind(kind, 2, "news-test", now, now.minusSeconds(300));
+		assertThat(newsJobs).extracting(com.kmarket.navigator.backend.translation.domain.TranslationJob::id)
+			.containsExactly(news.jobId());
+		var filingJobs = translationRepository.claimForKind(filingKind, 2, "filing-test", now, now.minusSeconds(300));
+		assertThat(filingJobs).extracting(com.kmarket.navigator.backend.translation.domain.TranslationJob::id)
+			.containsExactly(filing.jobId());
+	}
+
+	@Test
+	void preservesVerifiedSummaryWhenFailedBodyIsRequestedAgain() {
+		var now = java.time.Instant.now();
+		var kind = com.kmarket.navigator.backend.translation.domain.TranslationKind.NEWS_NARRATIVE;
+		var mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+		var context = mapper.createObjectNode();
+		var view = translationRepository.request(kind, "c".repeat(64), "원문", context,
+			"en", "partial-cache-test", now);
+		translationRepository.claimForKind(kind, 2, "partial-test", now, now.minusSeconds(300));
+		var result = mapper.createObjectNode().put("what", "An investment was announced.")
+			.put("why", "The company cited expansion.").put("impact", "No impact was stated.")
+			.put("summaryReady", true).put("bodyReady", false);
+		translationRepository.progress(view.jobId(), new com.kmarket.navigator.backend.translation.domain.GeneratedTranslation(
+			view.sourceHash(), "en", view.translationVersion(), result, "gpt-5-nano", "test-prompt"), now);
+		translationRepository.fail(view.jobId(), 1, "AI_GENERATION_INCOMPLETE", now, java.time.Duration.ZERO);
+		var resumed = translationRepository.request(kind, view.sourceHash(), "원문", context,
+			"en", view.translationVersion(), now.plusSeconds(901));
+		assertThat(resumed.status()).isEqualTo(com.kmarket.navigator.backend.translation.domain.TranslationStatus.PENDING);
+		assertThat(resumed.result()).isEqualTo(result);
+		assertThat(resumed.modelId()).isEqualTo("gpt-5-nano");
+	}
+
+	@Test
 	void isolatesFilingAgentToBoundDocumentVersionAndSelectedSection() throws Exception {
 		OpenDartFiling filing = filing("20260821800677");
 		disclosureRepository.saveFiling(filing);
+		publishDisclosureFixture(filing.receiptNumber());
 		activateCommonStocks("005930");
 		disclosureRepository.completeDocumentJob(
 			filing.receiptNumber(),
@@ -1168,6 +1241,9 @@ class BackendApplicationTests {
 				.header("Authorization", "Bearer " + owner.accessToken()))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$[1].citations[0].sourceType").value("FILING"))
+			.andExpect(jsonPath("$[1].citations[0].titleEn").value("Translated disclosure title"))
+			.andExpect(jsonPath("$[1].citations[0].titleKo").value(filing.reportName()))
+			.andExpect(jsonPath("$[1].citations[0].url").value("/disclosures/" + filing.receiptNumber()))
 			.andExpect(jsonPath("$[1].citations[0].referenceId").value(filing.receiptNumber()))
 			.andExpect(jsonPath("$[1].citations[0].sectionIds[0]").value(sectionId.toString()));
 
@@ -1192,7 +1268,11 @@ class BackendApplicationTests {
 			.header("Authorization", "Bearer " + owner.accessToken()))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.status").value("FAILED"))
-			.andExpect(jsonPath("$.errorCode").value("CHAT_CONTEXT_STALE"));
+			.andExpect(jsonPath("$.errorCode").value("CHAT_CONTEXT_STALE"))
+			.andExpect(jsonPath("$.retryable").value(false));
+		mockMvc.perform(post("/api/v1/me/chats/{roomId}/generations/{generationId}/retry", roomId, staleGenerationId)
+			.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isConflict());
 		assertThat(submitted.get("generation").get("status").stringValue()).isEqualTo("PENDING");
 	}
 
@@ -2108,8 +2188,8 @@ class BackendApplicationTests {
 				);
 			});
 
-		translationWorker.process();
-		translationWorker.process();
+		translationWorker.processNews();
+		translationWorker.processNews();
 
 		mockMvc.perform(get("/api/v1/news/{articleId}", articleId))
 			.andExpect(status().isOk())
