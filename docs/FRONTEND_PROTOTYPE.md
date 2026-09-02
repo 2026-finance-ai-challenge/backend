@@ -1,5 +1,7 @@
 # 프론트 프로토타입 인계 가이드
 
+이 문서는 Backend 저장소 안의 과거 API 검증용 `frontend/`에 관한 문서다. 현재 KART 서비스 화면은 별도 `2026-finance-ai-challenge/frontend` 저장소가 담당하며, 아래 해시 경로·디자인·연동 범위를 현재 배포 화면의 완료 근거로 사용하지 않는다. 현재 인증은 [인증 계약](AUTH_API.md), 화면별 연결 여부는 서비스 Frontend의 `docs/API_INTEGRATION.md`를 따른다.
+
 ## 목적
 
 `frontend`는 최종 브랜드 산출물이 아니라 기능정의서 v2.0과 Backend 계약을 실제로 실행·검증하는 참고 구현이다. 가짜 시세나 고정 AI 응답을 넣지 않으며 외부 데이터가 없으면 빈 상태·지연·unavailable 상태를 표시한다.
@@ -41,7 +43,7 @@ AI Agent는 모든 화면에서 열 수 있으며 `Ask AI` 액션이 현재 Stoc
 ## 인증 계약
 
 - Access JWT는 JavaScript 메모리에만 보관하고 영속 브라우저 저장소에 기록하지 않는다.
-- Refresh JWT는 Backend의 회전 API를 통해 갱신하며 서버의 Redis 세션 상태가 최종 권한을 결정한다.
+- Refresh Token은 JWT가 아닌 난수 토큰이다. 이 과거 프로토타입은 본문 전달형 API를 사용하며, 서비스 프론트는 HttpOnly 쿠키 기반 브라우저 API를 사용한다.
 - 로그아웃·전체 로그아웃·비밀번호 변경·계정 삭제 뒤 기존 세션은 재사용할 수 없다.
 - 401 응답은 로그인 화면으로 이동시키되 기존 화면 경로를 복원할 수 있게 유지한다.
 
