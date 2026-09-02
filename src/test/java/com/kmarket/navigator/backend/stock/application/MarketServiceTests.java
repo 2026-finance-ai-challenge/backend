@@ -22,6 +22,7 @@ import com.kmarket.navigator.backend.stock.domain.ExchangeRateSnapshot;
 import com.kmarket.navigator.backend.stock.domain.ForeignLimitPolicy;
 import com.kmarket.navigator.backend.stock.domain.ForeignLimitPrediction;
 import com.kmarket.navigator.backend.stock.domain.MarketDataStatus;
+import com.kmarket.navigator.backend.stock.domain.MarketForeignNetFlowSummary;
 import com.kmarket.navigator.backend.stock.domain.MarketQuoteSnapshot;
 import com.kmarket.navigator.backend.stock.domain.PriceLimitState;
 import com.kmarket.navigator.backend.stock.domain.StockIdentity;
@@ -55,6 +56,27 @@ class MarketServiceTests {
 		when(repository.findExchangeRate("USD")).thenReturn(Optional.empty());
 
 		assertThat(service.exchangeRate("USD")).isNull();
+	}
+
+	@Test
+	void marksFreshIntradayForeignFlowAsDelayedInsteadOfClosed() {
+		var snapshot = new MarketForeignNetFlowSummary(
+			LocalDate.of(2026, 9, 2),
+			new BigDecimal("-907155000000"),
+			4,
+			MarketDataStatus.CLOSED,
+			Instant.parse("2026-09-02T02:14:00Z"),
+			"KIS_REST_INVESTOR_DAILY_BY_MARKET"
+		);
+		var marketService = new MarketService(
+			repository,
+			mock(ForeignLimitPredictionEngine.class),
+			Clock.fixed(Instant.parse("2026-09-02T02:15:00Z"), ZoneOffset.UTC)
+		);
+		when(repository.findLatestForeignNetFlow()).thenReturn(Optional.of(snapshot));
+
+		assertThat(marketService.foreignNetFlow().dataStatus())
+			.isEqualTo(MarketDataStatus.DELAYED);
 	}
 
 	@Test
