@@ -1070,7 +1070,7 @@ class BackendApplicationTests {
 	}
 
 	@Test
-	void boundsAgentRetriesAndAllowsExplicitRetryAfterFailure() throws Exception {
+	void disablesAutomaticAgentRetriesAndAllowsExplicitRetryAfterFailure() throws Exception {
 		AuthFixture owner = signupAndLogin("agent_retry");
 		JsonNode room = createdResponse(post("/api/v1/me/chats")
 			.header("Authorization", "Bearer " + owner.accessToken())
@@ -1091,13 +1091,6 @@ class BackendApplicationTests {
 
 		for (int attempt = 0; attempt < 3; attempt++) {
 			chatGenerationWorker.process();
-			jdbcClient.sql("""
-				UPDATE chat_generation
-				SET available_at = CURRENT_TIMESTAMP
-				WHERE id = :generationId AND status = 'PENDING'
-				""")
-				.param("generationId", generationId)
-				.update();
 		}
 		mockMvc.perform(get(
 				"/api/v1/me/chats/{roomId}/generations/{generationId}",
@@ -1107,7 +1100,7 @@ class BackendApplicationTests {
 			.header("Authorization", "Bearer " + owner.accessToken()))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.status").value("FAILED"))
-			.andExpect(jsonPath("$.attempts").value(3))
+			.andExpect(jsonPath("$.attempts").value(1))
 			.andExpect(jsonPath("$.errorCode").value("AI_SERVICE_UNAVAILABLE"));
 		mockMvc.perform(post(
 				"/api/v1/me/chats/{roomId}/generations/{generationId}/retry",

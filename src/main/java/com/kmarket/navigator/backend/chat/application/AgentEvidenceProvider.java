@@ -1,6 +1,7 @@
 package com.kmarket.navigator.backend.chat.application;
 
-import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -12,6 +13,10 @@ import com.kmarket.navigator.backend.chat.domain.AgentEvidence;
 import com.kmarket.navigator.backend.chat.domain.ChatContext;
 import com.kmarket.navigator.backend.news.application.NewsService;
 import com.kmarket.navigator.backend.stock.application.MarketService;
+import com.kmarket.navigator.backend.disclosure.application.DisclosureQueryHandler;
+import com.kmarket.navigator.backend.disclosure.domain.DisclosureListQuery;
+import com.kmarket.navigator.backend.news.domain.NewsQuery;
+import com.kmarket.navigator.backend.news.domain.NewsSort;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -22,25 +27,97 @@ public class AgentEvidenceProvider {
 	private final MarketService marketService;
 	private final NewsService newsService;
 	private final ObjectMapper objectMapper;
+	private final DisclosureQueryHandler disclosures;
 
 	public AgentEvidenceProvider(
 		MarketService marketService,
 		NewsService newsService,
-		ObjectMapper objectMapper
+		ObjectMapper objectMapper,
+		DisclosureQueryHandler disclosures
 	) {
 		this.marketService = marketService;
 		this.newsService = newsService;
 		this.objectMapper = objectMapper;
+		this.disclosures = disclosures;
 	}
 
-	public List<AgentEvidence> evidence(ChatContext context) {
-		return switch (context.type()) {
-			case GENERAL -> generalEvidence();
-			case STOCK -> stockEvidence(context.referenceId());
+	public List<AgentEvidence> evidence(ChatContext context, String question) {
+		List<AgentEvidence> retrieved = switch (context.type()) {
+			case GENERAL -> questionEvidence(context, question);
+			case STOCK -> questionEvidence(context, question);
 			case NEWS -> newsEvidence(context.referenceId());
 			case TAX_GUIDE -> List.of();
 			case FILING -> throw new IllegalArgumentException("Filing context uses disclosure RAG");
 		};
+		// AI 계약의 짧은 ID로만 인용하고 실제 문서 식별자는 서버에 보존한다.
+		List<AgentEvidence> numbered = new ArrayList<>();
+		for (var item : retrieved) {
+			numbered.add(new AgentEvidence("E" + (numbered.size() + 1), item.title(), item.content(),
+				item.source() == null || item.source().isBlank() ? "Unspecified publisher" : item.source(),
+				item.asOf(), item.referenceId(), item.url()));
+		}
+		return List.copyOf(numbered);
+	}
+
+	private List<AgentEvidence> questionEvidence(ChatContext context, String question) {
+		var scope = AgentRetrievalScope.parse(question, marketService.searchStocks("", null, 100));
+		List<String> codes = context.type() == com.kmarket.navigator.backend.chat.domain.ChatContextType.STOCK
+			? List.of(context.referenceId()) : scope.stocks().stream().map(stock -> stock.stockCode()).toList();
+		List<AgentEvidence> result = new ArrayList<>();
+		if (!scope.news() && !scope.filings()) {
+			if (codes.isEmpty()) return generalEvidence();
+			for (String code : codes) result.addAll(stockEvidence(code).stream().map(item -> new AgentEvidence(
+				"S" + code, item.title(), item.content(), item.source(), item.asOf(), item.referenceId(), item.url())).toList());
+			return List.copyOf(result);
+		}
+		if (scope.unknownSymbol()) return List.of();
+		// 질문에 나온 지원 종목·기간으로 조회하며, 전체 시장 자료를 특정 종목의 근거로 위장하지 않는다.
+		List<String> targets = codes.isEmpty() ? java.util.Collections.singletonList(null) : codes;
+		Map<String, AgentEvidence> found = new LinkedHashMap<>();
+		for (String code : targets) {
+			if (scope.includeLatest()) addFeedEvidence(found, code, null, null, scope.news(), scope.filings());
+			if (scope.from() != null) addFeedEvidence(found, code, scope.from(), scope.to(), scope.news(), scope.filings());
+		}
+		return found.values().stream().limit(12).toList();
+	}
+
+	private void addFeedEvidence(Map<String, AgentEvidence> found, String stockCode, LocalDate from,
+		LocalDate to, boolean includeNews, boolean includeFilings) {
+		var zone = ZoneId.of("Asia/Seoul");
+		if (includeNews) {
+			var page = newsService.findAll(new NewsQuery(null, stockCode, null, null, null, null, false, null,
+				from == null ? null : from.atStartOfDay(zone).toInstant(),
+				to == null ? null : to.plusDays(1).atStartOfDay(zone).toInstant().minusNanos(1),
+				NewsSort.LATEST, null, 3));
+			for (var article : page.items()) {
+				Map<String, Object> packet = new LinkedHashMap<>();
+				packet.put("kind", "NEWS"); packet.put("stockCode", stockCode);
+				packet.put("title", article.englishTitle()); packet.put("originalTitle", article.originalTitle());
+				packet.put("publishedAt", article.publishedAt()); packet.put("sourceUrl", article.originalUrl());
+				packet.put("sourceExcerpt", excerpt(article.sourceText(), 1800));
+				String key = "N" + article.id();
+				found.putIfAbsent(key, new AgentEvidence(key, article.englishTitle(), objectMapper.writeValueAsString(packet),
+					article.publisher(), article.publishedAt(), article.id().toString(), article.originalUrl()));
+			}
+		}
+		if (includeFilings) {
+			var page = disclosures.findAll(new DisclosureListQuery(stockCode, from, to, java.util.Set.of(), null, 3));
+			for (var filing : page.items()) {
+				Map<String, Object> packet = new LinkedHashMap<>();
+				packet.put("kind", "FILING_METADATA"); packet.put("stockCode", filing.stockCode());
+				packet.put("issuer", filing.issuerNameEn()); packet.put("title", filing.titleEn());
+				packet.put("originalTitle", filing.titleKo()); packet.put("filedDate", filing.filedDate());
+				packet.put("sourceUrl", filing.officialUrl()); packet.put("receiptNumber", filing.receiptNumber());
+				packet.put("evidenceScope", "Filing metadata only; do not infer document contents.");
+				String key = "F" + filing.receiptNumber();
+				found.putIfAbsent(key, new AgentEvidence(key, filing.titleEn(), objectMapper.writeValueAsString(packet),
+					"OpenDART", filing.detectedAt(), filing.receiptNumber(), filing.officialUrl()));
+			}
+		}
+	}
+
+	private static String excerpt(String value, int limit) {
+		return value == null ? "" : value.substring(0, Math.min(value.length(), limit));
 	}
 
 	private List<AgentEvidence> generalEvidence() {

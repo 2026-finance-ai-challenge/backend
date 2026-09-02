@@ -33,7 +33,6 @@ import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 public class ChatGenerationWorker {
 
 	private static final Logger log = LoggerFactory.getLogger(ChatGenerationWorker.class);
-	private static final int MAX_ATTEMPTS = 3;
 	private static final Duration PROCESSING_TIMEOUT = Duration.ofMinutes(5);
 	private final ChatMessageRepository repository;
 	private final AgentGateway agentGateway;
@@ -86,15 +85,15 @@ public class ChatGenerationWorker {
 			repository.complete(task.generationId(), answer, Instant.now(clock));
 		}
 		catch (BusinessException exception) {
-			fail(task, exception.errorCode().code(), retryable(exception.errorCode()));
+			fail(task, exception.errorCode().code());
 		}
 		catch (RuntimeException exception) {
-			fail(task, exception.getClass().getSimpleName(), true);
+			fail(task, exception.getClass().getSimpleName());
 		}
 	}
 
 	private CompletedChatAnswer agentAnswer(ChatGenerationTask task) {
-		List<AgentEvidence> evidence = evidenceProvider.evidence(task.context());
+		List<AgentEvidence> evidence = evidenceProvider.evidence(task.context(), task.question());
 		Map<String, AgentEvidence> allowed = new LinkedHashMap<>();
 		evidence.forEach(item -> allowed.put(item.id(), item));
 		var generated = agentGateway.answer(
@@ -199,15 +198,14 @@ public class ChatGenerationWorker {
 		return new DisclosureQuestion.SelectedContext(section.id(), task.selectedText());
 	}
 
-	private void fail(ChatGenerationTask task, String errorCode, boolean canRetry) {
-		boolean terminal = !canRetry || task.attempts() >= MAX_ATTEMPTS;
-		long delaySeconds = Math.min(60, 5L << Math.max(0, task.attempts() - 1));
+	private void fail(ChatGenerationTask task, String errorCode) {
 		Instant now = Instant.now(clock);
+		// 실패 응답을 자동 재생성해 과금하지 않는다. 재시도는 사용자가 명시적으로 요청한다.
 		repository.fail(
 			task.generationId(),
 			errorCode,
-			terminal,
-			now.plusSeconds(delaySeconds),
+			true,
+			now,
 			now
 		);
 		log.warn(
@@ -216,13 +214,8 @@ public class ChatGenerationWorker {
 			task.context().type(),
 			task.attempts(),
 			errorCode,
-			terminal
+			true
 		);
-	}
-
-	private boolean retryable(ErrorCode errorCode) {
-		return errorCode == ErrorCode.AI_SERVICE_UNAVAILABLE
-			|| errorCode == ErrorCode.DISCLOSURE_INDEX_NOT_READY;
 	}
 
 	private String excerpt(String content) {
