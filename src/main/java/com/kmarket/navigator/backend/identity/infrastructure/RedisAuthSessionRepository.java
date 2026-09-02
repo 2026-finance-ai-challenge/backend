@@ -17,7 +17,6 @@ import com.kmarket.navigator.backend.identity.domain.AuthSession;
 @Repository
 public class RedisAuthSessionRepository implements AuthSessionRepository {
 
-	private static final String ACTIVE = "ACTIVE";
 	private static final DefaultRedisScript<Long> INSERT_SCRIPT = new DefaultRedisScript<>("""
 		if redis.call('EXISTS', KEYS[1]) == 1 or redis.call('EXISTS', KEYS[2]) == 1 then
 		  return 0
@@ -54,6 +53,15 @@ public class RedisAuthSessionRepository implements AuthSessionRepository {
 		end
 		local state = redis.call('HGET', KEYS[1], 'state')
 		if state == 'ROTATED' then
+		  local successorId = redis.call('HGET', KEYS[1], 'replacedBySessionId')
+		  local successorKey = ARGV[13] .. ':session:' .. successorId
+		  if redis.call('HGET', successorKey, 'state') == 'ACTIVE'
+		      and redis.call('HGET', successorKey, 'refreshTokenHash') == ARGV[6]
+		      and redis.call('HGET', successorKey, 'issuedIpHash') == ARGV[7]
+		      and redis.call('HGET', successorKey, 'issuedUserAgentHash') == ARGV[8]
+		      and tonumber(redis.call('HGET', successorKey, 'issuedAt')) >= tonumber(ARGV[1]) - 120000 then
+		    return 4
+		  end
 		  local familySessions = redis.call('SMEMBERS', KEYS[6])
 		  for _, sessionId in ipairs(familySessions) do
 		    local sessionKey = ARGV[13] .. ':session:' .. sessionId
@@ -104,8 +112,16 @@ public class RedisAuthSessionRepository implements AuthSessionRepository {
 		if redis.call('HGET', sessionKey, 'userId') ~= ARGV[1] then
 		  return 0
 		end
-		redis.call('HSET', sessionKey, 'state', 'REVOKED')
-		redis.call('DEL', KEYS[1])
+		local familyId = redis.call('HGET', sessionKey, 'familyId')
+		local familySessions = redis.call('SMEMBERS', ARGV[2] .. ':family:' .. familyId .. ':sessions')
+		for _, familySessionId in ipairs(familySessions) do
+		  local familySessionKey = ARGV[2] .. ':session:' .. familySessionId
+		  local refreshHash = redis.call('HGET', familySessionKey, 'refreshTokenHash')
+		  if refreshHash then
+		    redis.call('HSET', familySessionKey, 'state', 'REVOKED')
+		    redis.call('DEL', ARGV[2] .. ':refresh:' .. refreshHash)
+		  end
+		end
 		return 1
 		""", Long.class);
 
@@ -160,7 +176,7 @@ public class RedisAuthSessionRepository implements AuthSessionRepository {
 
 	@Override
 	public Optional<AuthSession> findActiveById(UUID sessionId) {
-		return findSession(sessionId).filter(session -> ACTIVE.equals(session.state()));
+		return findSession(sessionId).filter(session -> session.accessActiveAt(Instant.now()));
 	}
 
 	@Override
@@ -207,6 +223,7 @@ public class RedisAuthSessionRepository implements AuthSessionRepository {
 		return switch (result == null ? 1 : result.intValue()) {
 			case 0 -> RotationResult.ROTATED;
 			case 2 -> RotationResult.REUSED;
+			case 4 -> RotationResult.REPLAYED;
 			case 3 -> RotationResult.EXPIRED;
 			default -> RotationResult.MISSING;
 		};

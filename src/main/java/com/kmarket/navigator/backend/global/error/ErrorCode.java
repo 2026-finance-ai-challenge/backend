@@ -3,6 +3,7 @@ package com.kmarket.navigator.backend.global.error;
 import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
+	UNTRUSTED_BROWSER_REQUEST(HttpStatus.FORBIDDEN, "UNTRUSTED_BROWSER_REQUEST", "The browser request is not trusted."),
 	INVALID_REQUEST(HttpStatus.BAD_REQUEST, "INVALID_REQUEST", "The request is invalid."),
 	INVALID_CURSOR(HttpStatus.BAD_REQUEST, "INVALID_CURSOR", "The pagination cursor is invalid."),
 	INVALID_DATE_RANGE(HttpStatus.BAD_REQUEST, "INVALID_DATE_RANGE", "The date range is invalid."),

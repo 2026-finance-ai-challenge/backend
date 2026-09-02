@@ -80,6 +80,8 @@ import com.kmarket.navigator.backend.news.domain.TermReference;
 import com.kmarket.navigator.backend.news.domain.NewsRetention;
 import com.kmarket.navigator.backend.news.infrastructure.naver.NaverNewsProperties;
 import com.kmarket.navigator.backend.chat.application.ChatGenerationWorker;
+import com.kmarket.navigator.backend.identity.application.port.AuthSessionRepository;
+import com.kmarket.navigator.backend.identity.domain.AuthSession;
 import com.kmarket.navigator.backend.chat.application.port.AgentGateway;
 import com.kmarket.navigator.backend.chat.domain.AgentAnswer;
 import com.kmarket.navigator.backend.tax.application.TaxDocumentWorker;
@@ -151,6 +153,35 @@ class BackendApplicationTests {
 
 	@Autowired
 	JdbcClient jdbcClient;
+
+	@Autowired
+	AuthSessionRepository authSessions;
+
+	@Test
+	void browserRefreshReplayIsBoundToRequestContextAndShortRecoveryWindow() {
+		for (String scenario : List.of("same", "expired", "different-request", "different-context")) {
+			Instant now = Instant.now();
+			UUID userId = UUID.randomUUID();
+			UUID familyId = UUID.randomUUID();
+			AuthSession original = authSession(userId, familyId, UUID.randomUUID().toString(), "ip", now.minusSeconds(180));
+			authSessions.insert(original);
+			String successorHash = UUID.randomUUID().toString();
+			AuthSession successor = authSession(userId, familyId, successorHash, "ip",
+				scenario.equals("expired") ? now.minusSeconds(121) : now);
+			assertThat(authSessions.rotate(original, successor)).isEqualTo(AuthSessionRepository.RotationResult.ROTATED);
+			AuthSession duplicate = authSession(userId, familyId,
+				scenario.equals("different-request") ? UUID.randomUUID().toString() : successorHash,
+				scenario.equals("different-context") ? "other-ip" : "ip", now);
+			assertThat(authSessions.rotate(original, duplicate)).as(scenario).isEqualTo(scenario.equals("same")
+				? AuthSessionRepository.RotationResult.REPLAYED : AuthSessionRepository.RotationResult.REUSED);
+			assertThat(authSessions.findActiveById(successor.id()).isPresent()).isEqualTo(scenario.equals("same"));
+		}
+	}
+
+	private AuthSession authSession(UUID userId, UUID familyId, String tokenHash, String ip, Instant issuedAt) {
+		return new AuthSession(UUID.randomUUID(), familyId, userId, tokenHash, ip, "agent", issuedAt,
+			issuedAt.plusSeconds(900), issuedAt.plusSeconds(86400), "ACTIVE", null);
+	}
 
 	@Test
 	void databaseEnglishTitleChecksMatchCurrencyAndPersonNamePolicy() {
@@ -627,6 +658,74 @@ class BackendApplicationTests {
 			.andExpect(status().isUnauthorized());
 		mockMvc.perform(get("/api/v1/disclosures/not-a-receipt"))
 			.andExpect(status().isUnauthorized());
+	}
+
+	@Test
+	void browserSessionSurvivesReloadWithoutExposingRefreshToken() throws Exception {
+		AuthFixture fixture = signupAndLogin("browser");
+		String loginId = jdbcClient.sql("SELECT login_id FROM user_account WHERE id=:id")
+			.param("id", fixture.userId()).query(String.class).single();
+		var loginResponse = mockMvc.perform(post("/api/v1/auth/browser/login")
+			.header("Origin", "https://kartkr.cloud").header("X-KART-CSRF", "1")
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("{\"loginId\":\"%s\",\"password\":\"Secure!Pass123\"}".formatted(loginId)))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.refreshToken").doesNotExist())
+			.andExpect(header().string("Cache-Control", "no-store")).andReturn().getResponse();
+		String setCookie = loginResponse.getHeader("Set-Cookie");
+		assertThat(setCookie).contains("HttpOnly", "Secure", "SameSite=Strict", "Path=/api/v1/auth/browser", "Max-Age=")
+			.doesNotContain("Domain=");
+		String refreshToken = loginResponse.getCookie("kart_browser_refresh").getValue();
+		String firstAccess = objectMapper.readTree(loginResponse.getContentAsString()).get("accessToken").stringValue();
+		var restored = mockMvc.perform(post("/api/v1/auth/browser/refresh").contentType(MediaType.APPLICATION_JSON).content("{\"requestId\":\"00000000-0000-4000-8000-000000000001\"}")
+			.header("Origin", "https://kartkr.cloud").header("X-KART-CSRF", "1")
+			.cookie(new jakarta.servlet.http.Cookie("kart_browser_refresh", refreshToken)))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.user.loginId").value(loginId))
+			.andExpect(jsonPath("$.refreshToken").doesNotExist()).andReturn().getResponse();
+		String rotated = restored.getCookie("kart_browser_refresh").getValue();
+		assertThat(rotated).isNotEqualTo(refreshToken);
+		// 첫 응답을 받지 못한 브라우저가 같은 쿠키·요청 ID로 재접속해도 재사용 공격으로 처리하지 않는다.
+		mockMvc.perform(post("/api/v1/auth/browser/refresh").contentType(MediaType.APPLICATION_JSON)
+			.content("{\"requestId\":\"00000000-0000-4000-8000-000000000001\"}")
+			.header("Origin", "https://kartkr.cloud").header("X-KART-CSRF", "1")
+			.cookie(new jakarta.servlet.http.Cookie("kart_browser_refresh", refreshToken)))
+			.andExpect(status().isOk()).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie().value("kart_browser_refresh", rotated));
+		mockMvc.perform(get("/api/v1/me").header("Authorization", "Bearer " + firstAccess))
+			.andExpect(status().isOk());
+		String accessToken = objectMapper.readTree(restored.getContentAsString()).get("accessToken").stringValue();
+		mockMvc.perform(get("/api/v1/me").header("Authorization", "Bearer " + accessToken))
+			.andExpect(status().isOk());
+		mockMvc.perform(post("/api/v1/auth/browser/logout")
+			.header("Origin", "https://kartkr.cloud").header("X-KART-CSRF", "1")
+			.cookie(new jakarta.servlet.http.Cookie("kart_browser_refresh", rotated)))
+			.andExpect(status().isNoContent()).andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.containsString("Max-Age=0")));
+		mockMvc.perform(get("/api/v1/me").header("Authorization", "Bearer " + accessToken))
+			.andExpect(status().isUnauthorized());
+		mockMvc.perform(get("/api/v1/me").header("Authorization", "Bearer " + firstAccess))
+			.andExpect(status().isUnauthorized());
+		mockMvc.perform(post("/api/v1/auth/browser/refresh").contentType(MediaType.APPLICATION_JSON).content("{\"requestId\":\"00000000-0000-4000-8000-000000000001\"}")
+			.header("Origin", "https://kartkr.cloud").header("X-KART-CSRF", "1")
+			.cookie(new jakarta.servlet.http.Cookie("kart_browser_refresh", rotated)))
+			.andExpect(status().isUnauthorized());
+	}
+
+	@Test
+	void browserCookieEndpointsRejectCsrfAndPermitCredentialedTrustedPreflight() throws Exception {
+		for (String action : List.of("refresh", "logout")) {
+			mockMvc.perform(post("/api/v1/auth/browser/" + action).contentType(MediaType.APPLICATION_JSON).content("{\"requestId\":\"00000000-0000-4000-8000-000000000001\"}").header("Origin", "https://kartkr.cloud"))
+				.andExpect(status().isForbidden());
+			mockMvc.perform(post("/api/v1/auth/browser/" + action).contentType(MediaType.APPLICATION_JSON).content("{\"requestId\":\"00000000-0000-4000-8000-000000000001\"}").header("X-KART-CSRF", "1"))
+				.andExpect(status().isForbidden());
+			mockMvc.perform(post("/api/v1/auth/browser/" + action).contentType(MediaType.APPLICATION_JSON).content("{\"requestId\":\"00000000-0000-4000-8000-000000000001\"}")
+				.header("Origin", "https://attacker.example").header("X-KART-CSRF", "1"))
+				.andExpect(status().isForbidden());
+		}
+		mockMvc.perform(post("/api/v1/auth/browser/refresh").contentType(MediaType.APPLICATION_JSON).content("{\"requestId\":\"00000000-0000-4000-8000-000000000001\"}")
+			.header("Origin", "https://kartkr.cloud").header("X-KART-CSRF", "1"))
+			.andExpect(status().isUnauthorized());
+		mockMvc.perform(options("/api/v1/auth/browser/refresh")
+			.header("Origin", "https://kartkr.cloud").header("Access-Control-Request-Method", "POST")
+			.header("Access-Control-Request-Headers", "Content-Type,X-KART-CSRF"))
+			.andExpect(status().isOk()).andExpect(header().string("Access-Control-Allow-Credentials", "true"));
 	}
 
 	@Test

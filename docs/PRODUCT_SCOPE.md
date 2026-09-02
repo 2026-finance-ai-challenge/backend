@@ -10,7 +10,7 @@ KOSPI·KOSDAQ 보통주 75개를 대상으로 한국 시장의 시세·뉴스·�
 
 | 영역 | 구현 내용 |
 | --- | --- |
-| 회원 | Argon2id 비밀번호, 15분 Access JWT, 회전형 Refresh JWT, Redis 세션·폐기·로그인 제한, 전체 로그아웃 |
+| 회원 | Argon2id 비밀번호, 15분 Access JWT, 회전형 난수 Refresh Token·HttpOnly 쿠키, Redis 세션·폐기·로그인 제한, 전체 로그아웃 |
 | 개인화 | 관심종목, 최근 조회, 알림 읽음 상태, 사용자 소유권 검증 |
 | 시장 | 75종목 검색·자동완성·스크리너, 지수·시세·거래 상태, 외국인 한도 4종목, 예측 범위와 데이터 신선도 |
 | 뉴스 | Naver News 원문 수집·사건 중복 제거, Hana·K-FNSPID 분류, 영문 제목 선번역, EN 본문과 EN/KR What/Why/Impact 온디맨드 캐시, 선택 문맥 해설 |

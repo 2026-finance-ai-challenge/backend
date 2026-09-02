@@ -124,20 +124,35 @@ public class IdentityService {
 		return new AuthenticationResult(account, tokens);
 	}
 
-	@Transactional
+	@Transactional(noRollbackFor = BusinessException.class)
 	public AuthenticationResult refresh(String refreshToken, ClientContext context) {
+		return refreshInternal(refreshToken, context, null);
+	}
+
+	@Transactional(noRollbackFor = BusinessException.class)
+	public AuthenticationResult refreshBrowser(String refreshToken, UUID requestId, ClientContext context) {
+		return refreshInternal(refreshToken, context, refreshTokenService.browserSuccessor(refreshToken, requestId));
+	}
+
+	private AuthenticationResult refreshInternal(String refreshToken, ClientContext context, String successorToken) {
 		Instant now = Instant.now();
 		String refreshTokenHash = refreshTokenService.hash(refreshToken);
 		AuthSession oldSession = sessionRepository.findByRefreshTokenHash(refreshTokenHash)
 			.orElseThrow(() -> new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN));
 		UserAccount account = identityRepository.findActiveById(oldSession.userId())
 			.orElseThrow(() -> new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN));
-		PendingSession replacement = createSession(account.id(), oldSession.familyId(), context, now);
+		PendingSession replacement = createSession(account.id(), oldSession.familyId(), context, now, successorToken);
 
 		AuthSessionRepository.RotationResult rotation = sessionRepository.rotate(
 			oldSession,
 			replacement.session()
 		);
+		if (rotation == AuthSessionRepository.RotationResult.REPLAYED && successorToken != null) {
+			AuthSession successor = sessionRepository.findByRefreshTokenHash(replacement.session().refreshTokenHash())
+				.filter(session -> session.familyId().equals(oldSession.familyId()) && session.refreshActiveAt(now))
+				.orElseThrow(() -> new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN));
+			return new AuthenticationResult(account, tokens(account, new PendingSession(successor, successorToken)));
+		}
 		if (rotation == AuthSessionRepository.RotationResult.REUSED) {
 			auditRepository.record(
 				oldSession.userId(),
@@ -183,6 +198,18 @@ public class IdentityService {
 			throw new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN);
 		}
 		auditRepository.record(user.id(), "LOGOUT", "SESSION", null, context, now);
+	}
+
+	@Transactional
+	public void logoutBrowser(String refreshToken, ClientContext context) {
+		if (refreshToken == null || !refreshToken.matches("^kmr_[A-Za-z0-9_-]{64}$")) {
+			return;
+		}
+		String hash = refreshTokenService.hash(refreshToken);
+		sessionRepository.findByRefreshTokenHash(hash).ifPresent(session -> {
+			sessionRepository.revoke(hash, session.userId());
+			auditRepository.record(session.userId(), "LOGOUT", "SESSION", null, context, Instant.now());
+		});
 	}
 
 	@Transactional
@@ -256,7 +283,11 @@ public class IdentityService {
 	}
 
 	private PendingSession createSession(UUID userId, UUID familyId, ClientContext context, Instant now) {
-		String refreshToken = refreshTokenService.issue();
+		return createSession(userId, familyId, context, now, null);
+	}
+
+	private PendingSession createSession(UUID userId, UUID familyId, ClientContext context, Instant now, String successorToken) {
+		String refreshToken = successorToken == null ? refreshTokenService.issue() : successorToken;
 		Instant accessExpiresAt = now.plus(properties.accessTokenTtl());
 		Instant refreshExpiresAt = now.plus(properties.refreshTokenTtl());
 		AuthSession session = new AuthSession(

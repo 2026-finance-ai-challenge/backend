@@ -10,6 +10,7 @@
 - 모든 인증 요청은 JWT 검증 후 Redis의 활성 세션 상태를 추가 확인한다. 로그아웃·비밀번호 변경·계정 삭제 시 기존 JWT가 즉시 무효화된다.
 - Refresh Token은 384비트 난수이며 Redis에는 SHA-256 해시만 저장한다.
 - Refresh Token은 사용할 때마다 회전한다. 이미 회전된 토큰이 다시 제출되면 같은 토큰 계열을 모두 폐기한다.
+- Refresh 회전 전 발급된 Access JWT도 원래 만료까지 유효하다. 다른 탭의 갱신으로 진행 중인 요청을 무효화하지 않는다. 로그아웃은 해당 로그인 계열 전체, 전체 로그아웃·비밀번호 변경·탈퇴는 사용자 전체 세션을 즉시 폐기한다.
 - 로그인 실패 횟수는 로그인 ID와 클라이언트 IP의 비가역 해시를 기준으로 Redis에서 15분 동안 관리한다. 5회 실패 후 `429`와 `Retry-After`를 반환한다.
 - IP와 User-Agent는 서버 비밀 pepper를 적용한 SHA-256 해시만 감사 로그에 저장한다.
 
@@ -21,7 +22,10 @@
 | `POST` | `/api/v1/auth/signup` | 공개 | 계정 생성 |
 | `POST` | `/api/v1/auth/login` | 공개 | Access JWT와 Refresh Token 발급 |
 | `POST` | `/api/v1/auth/refresh` | 공개 | Refresh Token 회전과 새 토큰 발급 |
-| `POST` | `/api/v1/auth/logout` | Bearer JWT | 현재 Refresh 세션 폐기 |
+| `POST` | `/api/v1/auth/logout` | Bearer JWT | 현재 로그인 계열 폐기 |
+| `POST` | `/api/v1/auth/browser/login` | 신뢰 Origin·CSRF 헤더 | Access JWT와 HttpOnly refresh 쿠키 발급 |
+| `POST` | `/api/v1/auth/browser/refresh` | refresh 쿠키·Origin·CSRF 헤더 | 세션 복원 및 쿠키 회전 |
+| `POST` | `/api/v1/auth/browser/logout` | refresh 쿠키·Origin·CSRF 헤더 | 로그인 계열 폐기 및 쿠키 삭제 |
 | `POST` | `/api/v1/auth/logout-all` | Bearer JWT | 사용자의 전체 세션 폐기 |
 | `GET` | `/api/v1/me` | Bearer JWT | 프로필 조회 |
 | `PUT` | `/api/v1/me/password` | Bearer JWT | 비밀번호 변경 후 전체 세션 폐기 |
@@ -33,7 +37,7 @@
 Authorization: Bearer <access-jwt>
 ```
 
-Refresh 요청 본문은 다음 형식이다.
+네이티브 `/auth/refresh` 요청 본문은 다음 형식이다.
 
 ```json
 {
@@ -41,7 +45,16 @@ Refresh 요청 본문은 다음 형식이다.
 }
 ```
 
-브라우저 프로토타입은 Access JWT를 메모리에만 유지한다. Refresh Token을 `localStorage`에 저장하지 않으며, 운영 프론트의 BFF 또는 동일 출처 배포에서는 `HttpOnly`, `Secure`, `SameSite=Strict` 쿠키 전달 방식으로 전환한다. 네이티브 앱은 운영체제 보안 저장소를 사용한다.
+## 브라우저 세션
+
+- 브라우저는 `/auth/browser/*`를 사용한다. refresh 토큰은 JSON 응답에 포함하지 않는다.
+- `kart_browser_refresh`는 호스트 전용 `HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth/browser` 쿠키다. Access JWT는 메모리에만 보관한다.
+- 브라우저 요청은 `credentials: include`, `X-KART-CSRF: 1`을 사용한다. 서버는 설정된 정확한 Origin과 전용 헤더를 함께 확인한다. credential CORS는 브라우저 인증 경로에만 허용한다.
+- 새로고침 시 보호 화면을 표시하기 전에 한 번 세션을 복원한다. 탭 안에서는 single-flight, 탭 간에는 Web Locks로 쿠키 회전을 직렬화한다. 401만 세션 만료로 처리하고 통신·서버 장애에서는 복원 재시도를 제공한다.
+- `/browser/refresh` 본문에는 UUID `requestId`를 전달한다. 브라우저는 응답을 받을 때까지 이 비밀이 아닌 요청 식별자만 보존한다. 같은 이전 토큰·요청 ID·클라이언트 문맥은 120초 이내에 이미 발급된 결과를 복구한다. 후속 세션이 활성 상태여야 하며 다른 ID·문맥·시간 초과는 기존 재사용 탐지대로 계열을 폐기한다. 후속 토큰은 서버 비밀로 파생하고 Redis에는 해시만 저장한다.
+- 운영 UI와 API는 HTTPS의 같은 사이트(`www.kartkr.cloud`, `api.kartkr.cloud`)를 사용한다. 다른 사이트의 임의 미리보기 도메인은 인증 지원 대상이 아니다.
+- 로컬 프론트는 `127.0.0.1:5173`에만 바인딩된 개발 프록시를 통한다. 이 HTTP 루프백 응답에서만 해당 쿠키의 Secure 속성을 제거한다. 운영 서버의 쿠키 보안 설정은 바꾸지 않는다.
+- 네이티브 API 계약은 유지하며 네이티브 클라이언트는 운영체제 보안 저장소를 사용한다.
 
 ## 필수 설정
 
