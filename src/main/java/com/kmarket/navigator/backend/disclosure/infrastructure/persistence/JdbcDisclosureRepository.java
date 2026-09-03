@@ -761,6 +761,12 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			 AND translation.translation_version = :translationVersion
 			WHERE s.active AND s.common_stock
 			  AND translation.status = 'READY'
+			  AND NULLIF(BTRIM(translation.translated_text), '') IS NOT NULL
+			  AND d.document_status = 'READY'
+			  AND d.event_type IS NOT NULL
+			  AND d.sentiment IS NOT NULL
+			  AND d.importance IS NOT NULL
+			  AND d.market_impact IS NOT NULL
 			""");
 		Map<String, Object> parameters = new LinkedHashMap<>();
 		parameters.put("translationVersion", DisclosureTitlePolicy.TRANSLATION_VERSION);
