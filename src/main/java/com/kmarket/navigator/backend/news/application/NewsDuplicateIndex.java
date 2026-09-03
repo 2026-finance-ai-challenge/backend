@@ -17,20 +17,34 @@ final class NewsDuplicateIndex {
 	private static final int MAX_ENTRIES_PER_TOKEN = 500;
 	private final NewsFingerprint fingerprint;
 	private final Map<String, List<Entry>> entriesByToken = new HashMap<>();
+	private final Map<String, List<Entry>> entriesByTitle = new HashMap<>();
+	private final Map<String, List<Entry>> entriesByBody = new HashMap<>();
 
 	NewsDuplicateIndex(NewsFingerprint fingerprint) {
 		this.fingerprint = fingerprint;
 	}
 
 	void add(UUID targetClusterId, NewsFingerprint.Profile profile, Instant publishedAt, String publisher) {
-		Entry entry = new Entry(targetClusterId, profile, publishedAt, normalizedPublisher(publisher));
+		add(targetClusterId, profile, publishedAt, publisher, Set.of());
+	}
+
+	void add(UUID targetClusterId, NewsFingerprint.Profile profile, Instant publishedAt, String publisher, Set<String> stocks) {
+		Entry entry = new Entry(targetClusterId, profile, publishedAt, normalizedPublisher(publisher), Set.copyOf(stocks));
+		entriesByTitle.computeIfAbsent(profile.normalizedTitle(), ignored -> new ArrayList<>()).add(entry);
+		if (!profile.bodyHash().isBlank()) entriesByBody.computeIfAbsent(profile.bodyHash(), ignored -> new ArrayList<>()).add(entry);
 		for (String token : profile.indexTokens()) {
 			entriesByToken.computeIfAbsent(token, ignored -> new ArrayList<>()).add(entry);
 		}
 	}
 
 	Match findBest(NewsFingerprint.Profile profile, Instant publishedAt, String publisher) {
+		return findBest(profile, publishedAt, publisher, Set.of());
+	}
+
+	Match findBest(NewsFingerprint.Profile profile, Instant publishedAt, String publisher, Set<String> stocks) {
 		Set<Entry> possible = Collections.newSetFromMap(new IdentityHashMap<>());
+		possible.addAll(entriesByTitle.getOrDefault(profile.normalizedTitle(), List.of()));
+		possible.addAll(entriesByBody.getOrDefault(profile.bodyHash(), List.of()));
 		for (String token : profile.indexTokens()) {
 			List<Entry> entries = entriesByToken.getOrDefault(token, List.of());
 			if (entries.size() <= MAX_ENTRIES_PER_TOKEN) {
@@ -41,6 +55,8 @@ final class NewsDuplicateIndex {
 		double bestScore = 0;
 		boolean bestCorroborated = false;
 		for (Entry candidate : possible) {
+			if (!stocks.isEmpty() && !candidate.stocks().isEmpty() && Collections.disjoint(stocks, candidate.stocks())) continue;
+			if (fingerprint.conflictingHeadlineNumbers(profile, candidate.profile())) continue;
 			NewsFingerprint.DuplicateMatch match = fingerprint.match(
 				profile,
 				publishedAt,
@@ -55,14 +71,18 @@ final class NewsDuplicateIndex {
 			);
 			boolean samePublisher = !candidate.publisher().isBlank()
 				&& candidate.publisher().equals(normalizedPublisher(publisher));
-			boolean duplicate = corroborated
+			boolean sameBody = match.titleScore() >= 0.55 && fingerprint.sameBody(profile, candidate.profile())
+				&& Duration.between(publishedAt, candidate.publishedAt()).abs().compareTo(Duration.ofHours(36)) <= 0;
+			boolean duplicate = sameBody || corroborated
 				|| (!samePublisher && match.duplicate())
 				|| (samePublisher && strictSamePublisherDuplicate(
 					profile,
 					publishedAt,
 					candidate,
 					match
-				));
+					));
+			// 양쪽 전문이 있으면 검색 요약의 유사성만으로 서로 다른 후속 기사를 버리지 않는다.
+			if (!profile.bodyHash().isBlank() && !candidate.profile().bodyHash().isBlank()) duplicate = sameBody;
 			boolean strongerEvidence = corroborated && !bestCorroborated;
 			if (duplicate && (best == null
 				|| strongerEvidence
@@ -75,7 +95,8 @@ final class NewsDuplicateIndex {
 		return new Match(
 			best == null ? null : best.targetClusterId(),
 			bestScore,
-			possible.size()
+			possible.size(),
+			best == null ? Set.of() : best.stocks()
 		);
 	}
 
@@ -124,14 +145,15 @@ final class NewsDuplicateIndex {
 		return publisher == null ? "" : publisher.toLowerCase(Locale.ROOT).replaceFirst("^www\\.", "");
 	}
 
-	record Match(UUID targetClusterId, double score, int comparisons) {
+	record Match(UUID targetClusterId, double score, int comparisons, Set<String> stocks) {
 	}
 
 	private record Entry(
 		UUID targetClusterId,
 		NewsFingerprint.Profile profile,
 		Instant publishedAt,
-		String publisher
+		String publisher,
+		Set<String> stocks
 	) {
 	}
 }

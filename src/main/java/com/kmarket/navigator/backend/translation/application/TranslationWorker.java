@@ -17,9 +17,12 @@ import org.springframework.stereotype.Service;
 import com.kmarket.navigator.backend.translation.application.port.TranslationAiGateway;
 import com.kmarket.navigator.backend.translation.application.port.TranslationRepository;
 import com.kmarket.navigator.backend.translation.domain.GeneratedTranslation;
+import com.kmarket.navigator.backend.translation.domain.GeneratedTitle;
 import com.kmarket.navigator.backend.translation.domain.TranslationJob;
+import com.kmarket.navigator.backend.translation.domain.TranslationKind;
 import com.kmarket.navigator.backend.translation.domain.TitleTranslationJob;
 import com.kmarket.navigator.backend.global.error.BusinessException;
+import com.kmarket.navigator.backend.global.concurrent.BoundedTasks;
 
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import tools.jackson.databind.JsonNode;
@@ -29,7 +32,7 @@ import tools.jackson.databind.ObjectMapper;
 public class TranslationWorker {
 
 	private static final Logger log = LoggerFactory.getLogger(TranslationWorker.class);
-	private static final int BATCH_SIZE = 1;
+	private static final int BATCH_SIZE = 2;
 	private static final int TITLE_BATCH_SIZE = 5;
 	private static final Duration TRANSIENT_FAILURE_COOLDOWN = Duration.ofSeconds(15);
 	private static final Duration RATE_LIMIT_COOLDOWN = Duration.ofMinutes(1);
@@ -75,16 +78,28 @@ public class TranslationWorker {
 	)
 	@SchedulerLock(name = "on-demand-translation", lockAtMostFor = "PT4M", lockAtLeastFor = "PT0.5S")
 	public void process() {
+		processKind(TranslationKind.DISCLOSURE_SECTION);
+	}
+
+	@Scheduled(
+		fixedDelayString = "${kmarket.translation.generation-interval:2s}",
+		initialDelayString = "${kmarket.translation.generation-initial-delay:30s}"
+	)
+	@SchedulerLock(name = "on-demand-news-translation", lockAtMostFor = "PT4M", lockAtLeastFor = "PT0.5S")
+	public void processNews() {
+		// 긴 공시의 모든 셀이 끝날 때까지 뉴스 요청이 대기하지 않도록 실행 슬롯을 분리한다.
+		processKind(TranslationKind.NEWS_NARRATIVE);
+	}
+
+	private void processKind(TranslationKind kind) {
 		Instant now = Instant.now(clock);
 		if (now.isBefore(nextProviderAttemptAt)) {
 			return;
 		}
-		List<TranslationJob> jobs = repository.claim(
-			BATCH_SIZE, workerId, now, now.minus(Duration.ofMinutes(5))
+		List<TranslationJob> jobs = repository.claimForKind(
+			kind, BATCH_SIZE, workerId, now, now.minus(Duration.ofMinutes(5))
 		);
-		for (TranslationJob job : jobs) {
-			process(job);
-		}
+		BoundedTasks.forEach(jobs, BATCH_SIZE, this::process);
 	}
 
 	@Scheduled(
@@ -110,13 +125,13 @@ public class TranslationWorker {
 	}
 
 	private void processTitleSubset(List<TitleTranslationJob> jobs, Instant now) {
+		List<GeneratedTitle> generated;
 		try {
-			var generated = aiGateway.translateTitles(jobs);
-			generated.forEach(title -> repository.completeNewsTitle(title, Instant.now(clock)));
+			generated = aiGateway.translateTitles(jobs);
 		}
 		catch (RuntimeException exception) {
 			Duration cooldown = cooldown(exception);
-			nextProviderAttemptAt = now.plus(cooldown);
+			deferProvider(now.plus(cooldown));
 			String errorCode = errorCode(exception);
 			for (TitleTranslationJob job : jobs) {
 				repository.fail(job.id(), job.attempts(), errorCode,
@@ -124,13 +139,26 @@ public class TranslationWorker {
 			}
 			log.warn("News title translation batch failed size={} error={} cooldownSeconds={}",
 				jobs.size(), errorCode, cooldown.toSeconds());
+			return;
+		}
+		// 저장 실패를 해당 제목에만 한정해 다른 제목의 결과를 보존한다.
+		for (var title : generated) {
+			try {
+				repository.completeNewsTitle(title, Instant.now(clock));
+			}
+			catch (RuntimeException exception) {
+				var job = jobs.stream().filter(value -> value.id().equals(title.id())).findFirst().orElseThrow();
+				repository.fail(job.id(), job.attempts(), errorCode(exception),
+					Instant.now(clock), providerFailureCooldown);
+				log.warn("News title persistence failed id={} error={}", job.id(), errorCode(exception));
+			}
 		}
 	}
 
 	private Duration cooldown(RuntimeException exception) {
 		if (exception instanceof TranslationProviderException providerException) {
 			return switch (providerException.failure()) {
-				case INVALID_OUTPUT -> TRANSIENT_FAILURE_COOLDOWN;
+				case INVALID_OUTPUT, INCOMPLETE -> Duration.ZERO;
 				case QUOTA_EXHAUSTED -> providerFailureCooldown;
 				case RATE_LIMITED -> RATE_LIMIT_COOLDOWN;
 				case TIMEOUT, UNAVAILABLE -> TRANSIENT_FAILURE_COOLDOWN;
@@ -157,7 +185,7 @@ public class TranslationWorker {
 		}
 		catch (RuntimeException exception) {
 			Duration delay = cooldown(exception);
-			nextProviderAttemptAt = Instant.now(clock).plus(delay);
+			deferProvider(Instant.now(clock).plus(delay));
 			String code = errorCode(exception);
 			repository.fail(job.id(), job.attempts(), code, Instant.now(clock), delay);
 			log.warn("Translation generation failed id={} kind={} error={}",
@@ -165,10 +193,19 @@ public class TranslationWorker {
 		}
 	}
 
+	private synchronized void deferProvider(Instant until) {
+		if (until.isAfter(nextProviderAttemptAt)) nextProviderAttemptAt = until;
+	}
+
 	private GeneratedTranslation generateNews(TranslationJob job) {
 		JsonNode source = objectMapper.readTree(job.canonicalSource());
 		List<String> paragraphs = new ArrayList<>();
 		source.path("paragraphs").forEach(value -> paragraphs.add(value.asString()));
+		if ("news-bilingual-v1".equals(job.translationVersion())) {
+			return aiGateway.streamNews(job.sourceHash(), source.path("title").asString(), paragraphs,
+				source.path("content_availability").asString(), job.translationVersion(),
+				partial -> repository.progress(job.id(), partial, Instant.now(clock)));
+		}
 		return aiGateway.translateNews(
 			job.sourceHash(), source.path("title").asString(), paragraphs,
 			source.path("content_availability").asString(), job.targetLocale(),

@@ -7,6 +7,9 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.kmarket.navigator.backend.disclosure.application.port.DisclosureRagGateway;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureAnswer;
@@ -19,6 +22,7 @@ import tools.jackson.databind.annotation.JsonNaming;
 
 @Component
 class AiDisclosureClient implements DisclosureRagGateway {
+	private static final Logger log = LoggerFactory.getLogger(AiDisclosureClient.class);
 
 	private final RestClient restClient;
 	private final AiServiceProperties properties;
@@ -45,13 +49,21 @@ class AiDisclosureClient implements DisclosureRagGateway {
 			}
 			return response.toDomain();
 		}
+		catch (RestClientResponseException exception) {
+			log.warn("Filing AI request failed receipt={} status={}", receiptNumber, exception.getStatusCode().value());
+			if (exception.getStatusCode().value() == 400 || exception.getStatusCode().value() == 422) {
+				throw new BusinessException(ErrorCode.INVALID_CHAT_MESSAGE);
+			}
+			throw new BusinessException(ErrorCode.AI_SERVICE_UNAVAILABLE);
+		}
 		catch (RestClientException exception) {
+			log.warn("Filing AI transport failed receipt={} type={}", receiptNumber, exception.getClass().getSimpleName());
 			throw new BusinessException(ErrorCode.AI_SERVICE_UNAVAILABLE);
 		}
 	}
 
 	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-	private record Request(String question, SelectedContext selectedContext) {
+	private record Request(String question, SelectedContext selectedContext, String answerLocale) {
 		private static Request from(DisclosureQuestion question) {
 			return new Request(
 				question.question(),
@@ -59,14 +71,16 @@ class AiDisclosureClient implements DisclosureRagGateway {
 					? null
 					: new SelectedContext(
 						question.selectedContext().sectionId(),
-						question.selectedContext().text()
-					)
+						question.selectedContext().text(),
+						question.selectedContext().translationSourceHash()
+					),
+				question.answerLocale()
 			);
 		}
 	}
 
 	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-	private record SelectedContext(UUID sectionId, String text) {
+	private record SelectedContext(UUID sectionId, String text, String translationSourceHash) {
 	}
 
 	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)

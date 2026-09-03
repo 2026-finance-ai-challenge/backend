@@ -13,6 +13,8 @@ class EnglishTextPolicyTests {
 	void acceptsEnglishTitle() {
 		assertThat(EnglishTextPolicy.isValid("Mothers Pharmaceutical Files for KOSDAQ Review"))
 			.isTrue();
+		assertThat(EnglishTextPolicy.isValid("Jo named to the final shortlist; Samjeonnix shares rise")).isTrue();
+		assertThat(EnglishTextPolicy.isValid("Funding reaches 3 jo")).isFalse();
 	}
 
 	@Test

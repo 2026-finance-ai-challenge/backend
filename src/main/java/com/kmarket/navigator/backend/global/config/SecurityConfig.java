@@ -61,7 +61,10 @@ public class SecurityConfig {
 					HttpMethod.POST,
 					"/api/v1/auth/signup",
 					"/api/v1/auth/login",
-					"/api/v1/auth/refresh"
+					"/api/v1/auth/refresh",
+					"/api/v1/auth/browser/login",
+					"/api/v1/auth/browser/refresh",
+					"/api/v1/auth/browser/logout"
 				).permitAll()
 				.requestMatchers(HttpMethod.GET, "/api/v1/tax/countries").permitAll()
 				.requestMatchers(HttpMethod.POST, "/api/v1/tax/eligibility").permitAll()
@@ -89,7 +92,8 @@ public class SecurityConfig {
 				).permitAll()
 				.requestMatchers(
 					HttpMethod.GET,
-					"/api/v1/disclosures/{receiptNumber:[0-9]{14}}/sections/{sectionId}/translation"
+					"/api/v1/disclosures/{receiptNumber:[0-9]{14}}/sections/{sectionId}/translation",
+					"/api/v1/disclosures/{receiptNumber:[0-9]{14}}/translation"
 				).permitAll()
 				.requestMatchers(
 					HttpMethod.POST,
@@ -123,6 +127,10 @@ public class SecurityConfig {
 		configuration.setMaxAge(3600L);
 
 		var source = new UrlBasedCorsConfigurationSource();
+		var browserConfiguration = new CorsConfiguration(configuration);
+		browserConfiguration.addAllowedHeader("X-KART-CSRF");
+		browserConfiguration.setAllowCredentials(true);
+		source.registerCorsConfiguration("/api/v1/auth/browser/**", browserConfiguration);
 		source.registerCorsConfiguration("/api/**", configuration);
 		return source;
 	}

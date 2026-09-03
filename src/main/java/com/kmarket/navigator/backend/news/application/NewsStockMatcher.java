@@ -29,9 +29,9 @@ public class NewsStockMatcher {
 		"listed", "kospi", "kosdaq", "dividend", "earnings", "revenue", "profit"
 	);
 	private static final List<String> SPORTS_CONTEXT = List.of(
-		"야구", "축구", "농구", "배구", "양궁", "배드민턴", "선수", "감독", "투수", "타자",
-		"홈런", "지명할당", "fa 선택", "다승왕", "올림픽", "kbo", "mlb", "soccer",
-		"football", "baseball", "basketball", "badminton", "player", "coach", "pitcher"
+		"야구", "축구", "농구", "배구", "양궁", "배드민턴",
+		"홈런", "지명할당", "fa 선택", "다승왕", "올림픽", "전훈지", "전지훈련", "kbo", "mlb", "soccer",
+		"football", "baseball", "basketball", "badminton"
 	);
 
 	public Map<String, BigDecimal> match(
@@ -58,6 +58,8 @@ public class NewsStockMatcher {
 		}
 		String articleText = ((title == null ? "" : title) + " "
 			+ (excerpt == null ? "" : excerpt)).toLowerCase(Locale.ROOT);
+		String headline = title == null ? "" : title;
+		if (headline.contains("퀴즈") && headline.contains("정답")) return Map.of();
 		if (isNonFinancialSportsArticle(articleText)) {
 			return Map.of();
 		}
@@ -68,6 +70,17 @@ public class NewsStockMatcher {
 			.filter(mapping -> !hasFinancialContext(articleText))
 			.isPresent());
 		return Map.copyOf(matches);
+	}
+
+	public Map<String, BigDecimal> verifiedArticleMatches(String title, String body, Iterable<NewsStockMapping> mappings) {
+		if (body == null || body.isBlank() || body.indexOf('\uFFFD') >= 0 || body.stripLeading().startsWith("Best Click")
+			|| body.contains("슈퍼스타 브랜드 파워") || body.contains("슈퍼스타 브랜드파워")) return Map.of();
+		if (isNonFinancialSportsArticle(((title == null ? "" : title) + " " + body).toLowerCase(Locale.ROOT))) return Map.of();
+		var candidates = new LinkedHashMap<>(matchArticle(title, "", mappings));
+		var bodyEvidence = matchText(body, mappings);
+		// 검색어·관련 링크가 아니라 제목과 추출 원문 양쪽에서 확인한 발행사만 연결한다.
+		candidates.keySet().retainAll(bodyEvidence.keySet());
+		return Map.copyOf(candidates);
 	}
 
 	private Map<String, BigDecimal> matchText(
@@ -116,7 +129,7 @@ public class NewsStockMatcher {
 
 	private boolean isNonFinancialSportsArticle(String text) {
 		return SPORTS_CONTEXT.stream().anyMatch(text::contains)
-			&& STRONG_FINANCIAL_CONTEXT.stream().noneMatch(text::contains);
+			&& FINANCIAL_CONTEXT.stream().noneMatch(text::contains);
 	}
 
 	private void addEvidence(

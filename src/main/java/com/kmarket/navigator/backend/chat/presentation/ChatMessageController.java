@@ -57,7 +57,8 @@ public class ChatMessageController {
 			body.clientMessageId(),
 			body.content(),
 			body.selectedSectionId(),
-			body.selectedText()
+			body.selectedText(),
+			body.answerLocale()
 		);
 		return ResponseEntity.accepted()
 			.cacheControl(CacheControl.noStore())
@@ -88,6 +89,17 @@ public class ChatMessageController {
 		return noStore(GenerationResponse.from(service.generation(user, roomId, generationId)));
 	}
 
+	@GetMapping("/generations/latest")
+	public ResponseEntity<LatestGenerationResponse> latestGeneration(
+		@AuthenticationPrincipal AuthenticatedUser user,
+		@PathVariable UUID roomId
+	) {
+		return noStore(new LatestGenerationResponse(service.latestGeneration(user, roomId)
+			.map(GenerationResponse::from).orElse(null)));
+	}
+
+	public record LatestGenerationResponse(GenerationResponse generation) { }
+
 	@PostMapping("/generations/{generationId}/stop")
 	public ResponseEntity<GenerationResponse> stop(
 		@AuthenticationPrincipal AuthenticatedUser user,
@@ -106,20 +118,6 @@ public class ChatMessageController {
 		return noStore(GenerationResponse.from(service.retry(user, roomId, generationId)));
 	}
 
-	@PostMapping("/messages/{assistantMessageId}/regenerate")
-	public ResponseEntity<GenerationResponse> regenerate(
-		@AuthenticationPrincipal AuthenticatedUser user,
-		@PathVariable UUID roomId,
-		@PathVariable UUID assistantMessageId,
-		@Valid @RequestBody RegenerateRequest body
-	) {
-		return ResponseEntity.accepted()
-			.cacheControl(CacheControl.noStore())
-			.body(GenerationResponse.from(
-				service.regenerate(user, roomId, assistantMessageId, body.requestKey())
-			));
-	}
-
 	private <T> ResponseEntity<T> noStore(T body) {
 		return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(body);
 	}
@@ -128,15 +126,13 @@ public class ChatMessageController {
 		@NotNull UUID clientMessageId,
 		@NotBlank @Size(max = 4_000) String content,
 		UUID selectedSectionId,
-		@Size(max = 6_000) String selectedText
+		@Size(max = 2_000) String selectedText,
+		@jakarta.validation.constraints.Pattern(regexp = "en|ko") String answerLocale
 	) {
-		@AssertTrue(message = "selectedSectionId and selectedText must be supplied together")
+		@AssertTrue(message = "selectedSectionId requires selectedText")
 		public boolean selectionComplete() {
-			return (selectedSectionId == null) == (selectedText == null || selectedText.isBlank());
+			return selectedSectionId == null || selectedText != null && !selectedText.isBlank();
 		}
-	}
-
-	public record RegenerateRequest(@NotNull UUID requestKey) {
 	}
 
 	public record SubmissionResponse(MessageResponse userMessage, GenerationResponse generation) {
@@ -149,6 +145,7 @@ public class ChatMessageController {
 		ChatGenerationStatus status,
 		int attempts,
 		String errorCode,
+		boolean retryable,
 		Instant createdAt,
 		Instant updatedAt,
 		Instant completedAt
@@ -161,6 +158,7 @@ public class ChatMessageController {
 				generation.status(),
 				generation.attempts(),
 				generation.lastErrorCode(),
+				generation.retryable(),
 				generation.createdAt(),
 				generation.updatedAt(),
 				generation.completedAt()
@@ -212,7 +210,9 @@ public class ChatMessageController {
 		String excerpt,
 		String url,
 		Instant asOf,
-		List<UUID> sectionIds
+		List<UUID> sectionIds,
+		String titleEn,
+		String titleKo
 	) {
 		static CitationResponse from(ChatCitation citation) {
 			return new CitationResponse(
@@ -223,7 +223,9 @@ public class ChatMessageController {
 				citation.excerpt(),
 				citation.url(),
 				citation.asOf(),
-				citation.sectionIds()
+				citation.sectionIds(),
+				citation.titleEn(),
+				citation.titleKo()
 			);
 		}
 	}

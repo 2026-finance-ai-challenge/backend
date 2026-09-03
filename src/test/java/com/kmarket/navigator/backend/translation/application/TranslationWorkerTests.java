@@ -3,6 +3,8 @@ package com.kmarket.navigator.backend.translation.application;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -26,6 +28,51 @@ import tools.jackson.databind.json.JsonMapper;
 class TranslationWorkerTests {
 
 	private static final Instant NOW = Instant.parse("2026-08-25T00:00:00Z");
+
+	@Test
+	void newsAndFilingWorkersClaimOnlyTheirReservedQueue() {
+		var repository = Mockito.mock(TranslationRepository.class);
+		var worker = new TranslationWorker(repository, Mockito.mock(TranslationAiGateway.class),
+			Mockito.mock(TranslationGenerationGuard.class), JsonMapper.builder().build(),
+			Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(15));
+		worker.processNews();
+		worker.process();
+		for (var kind : List.of(
+			com.kmarket.navigator.backend.translation.domain.TranslationKind.NEWS_NARRATIVE,
+			com.kmarket.navigator.backend.translation.domain.TranslationKind.DISCLOSURE_SECTION)) {
+			verify(repository).claimForKind(eq(kind), eq(2), anyString(), eq(NOW), eq(NOW.minusSeconds(300)));
+		}
+	}
+
+	@Test
+	void persistsRemainingTitlesWithoutRegeneratingAfterOneDatabaseFailure() {
+		TranslationRepository repository = Mockito.mock(TranslationRepository.class);
+		TranslationAiGateway gateway = Mockito.mock(TranslationAiGateway.class);
+		TranslationGenerationGuard guard = Mockito.mock(TranslationGenerationGuard.class);
+		var jobs = java.util.stream.IntStream.range(0, 3).mapToObj(index -> new TitleTranslationJob(
+			UUID.randomUUID(), "%064d".formatted(index), "기사 제목 " + index, "news-title-v3", 1
+		)).toList();
+		var generated = jobs.stream().map(job -> new GeneratedTitle(
+			job.id(), job.sourceHash(), "Jo discusses the earnings outlook", "en",
+			job.translationVersion(), "gpt-5-nano", "financial-title-translation-v8"
+		)).toList();
+		when(repository.claimNewsTitles(eq(5), anyString(), eq(NOW), eq(NOW.minusSeconds(300))))
+			.thenReturn(jobs);
+		when(gateway.translateTitles(jobs)).thenReturn(generated);
+		doThrow(new org.springframework.dao.DataIntegrityViolationException("constraint"))
+			.when(repository).completeNewsTitle(generated.get(1), NOW);
+
+		new TranslationWorker(repository, gateway, guard, JsonMapper.builder().build(),
+			Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(15)).processTitleBatch();
+
+		for (var title : generated) verify(repository).completeNewsTitle(title, NOW);
+		verify(repository).fail(jobs.get(1).id(), 1, "DataIntegrityViolationException", NOW, Duration.ofMinutes(15));
+		for (int index : new int[]{0, 2}) {
+			verify(repository, never()).fail(eq(jobs.get(index).id()), eq(1), anyString(), eq(NOW),
+				org.mockito.ArgumentMatchers.any(Duration.class));
+		}
+		verify(gateway, times(1)).translateTitles(jobs);
+	}
 
 	@Test
 	void translatesClaimedNewsTitlesAsOneValidatedBatch() {
@@ -157,10 +204,10 @@ class TranslationWorkerTests {
 
 		verify(gateway, times(1)).translateTitles(List.of(valid, invalid));
 		verify(repository).fail(
-			eq(valid.id()), eq(1), eq("AI_INVALID_OUTPUT"), eq(NOW), eq(Duration.ofSeconds(15))
+			eq(valid.id()), eq(1), eq("AI_INVALID_OUTPUT"), eq(NOW), eq(Duration.ZERO)
 		);
 		verify(repository).fail(
-			eq(invalid.id()), eq(1), eq("AI_INVALID_OUTPUT"), eq(NOW), eq(Duration.ofSeconds(15))
+			eq(invalid.id()), eq(1), eq("AI_INVALID_OUTPUT"), eq(NOW), eq(Duration.ZERO)
 		);
 	}
 }

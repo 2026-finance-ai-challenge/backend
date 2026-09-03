@@ -153,6 +153,46 @@ class NewsStockMatcherTests {
 		)).isEmpty();
 	}
 
+	@Test
+	void requiresIssuerEvidenceInBothHeadlineAndActualBody() {
+		var mappings = List.of(mapping("005930", "삼성전자", "Samsung Electronics"),
+			mapping("000660", "SK하이닉스", "SK hynix"));
+		assertThat(matcher.verifiedArticleMatches("삼성전자, 반도체 공급 확대", "SK하이닉스의 신규 생산 계획이다.", mappings)).isEmpty();
+		assertThat(matcher.verifiedArticleMatches("삼성전자, 반도체 공급 확대", "삼성전자가 반도체 공급을 확대한다. 경쟁사 SK하이닉스도 언급했다.", mappings))
+			.containsOnlyKeys("005930");
+		assertThat(matcher.verifiedArticleMatches("삼성전자와 SK하이닉스, 반도체 공급 확대", "삼성전자와 SK하이닉스가 각각 신규 계약을 발표했다.", mappings))
+			.containsOnlyKeys("005930", "000660");
+	}
+
+	@Test
+	void rejectsDailyQuizEvenWhenStockKeywordAppears() {
+		var mappings = List.of(mapping("323410", "카카오뱅크", "KakaoBank"));
+		assertThat(matcher.verifiedArticleMatches("카카오뱅크 주식 퀴즈 정답 9월 2일", "카카오뱅크의 오늘 퀴즈 정답을 공개한다.", mappings)).isEmpty();
+	}
+
+	@Test
+	void rejectsSponsoredTeamArticleWithSportsEvidenceOnlyInBody() {
+		var mappings = List.of(mapping("012330", "현대모비스", "Hyundai Mobis"));
+		assertThat(matcher.verifiedArticleMatches("현대모비스, 새로운 도전", "현대모비스 농구 선수들이 전지훈련을 시작했다.", mappings)).isEmpty();
+	}
+
+	@Test
+	void doesNotConfuseCorporateOversightOrFilmDirectorsWithSports() {
+		var mappings = List.of(mapping("032640", "LG유플러스", "LG Uplus"),
+			mapping("010130", "고려아연", "Korea Zinc"));
+		assertThat(matcher.verifiedArticleMatches("LG유플러스, 프리즈 서울 공식 파트너 참여",
+			"LG유플러스가 영화감독과 함께 미디어아트 전시를 연다.", mappings)).containsOnlyKeys("032640");
+		assertThat(matcher.verifiedArticleMatches("고려아연 경영진 지지 권고",
+			"고려아연의 경영감독 기능과 이사회 독립성을 평가했다.", mappings)).containsOnlyKeys("010130");
+	}
+
+	@Test
+	void rejectsSidebarAndPollBodiesRatherThanUsingSearchSnippet() {
+		var mappings = List.of(mapping("005930", "삼성전자", "Samsung Electronics"));
+		assertThat(matcher.verifiedArticleMatches("삼성전자 실적 발표", "Best Click 삼성전자 실적 발표", mappings)).isEmpty();
+		assertThat(matcher.verifiedArticleMatches("삼성전자 실적 발표", "슈퍼스타 브랜드 파워 투표 삼성전자", mappings)).isEmpty();
+	}
+
 	private NewsStockMapping mapping(String stockCode, String nameKo, String nameEn) {
 		return new NewsStockMapping(stockCode, nameKo, nameEn, "KOSPI", List.of(
 			stockCode,

@@ -147,6 +147,13 @@ class DisclosureController {
 		);
 	}
 
+	@GetMapping("/{receiptNumber}/translation")
+	List<OnDemandTranslationService.DocumentTranslation> findDocumentTranslations(
+		@PathVariable @Pattern(regexp = "^[0-9]{14}$") String receiptNumber
+	) {
+		return translationService.findDisclosureDocuments(receiptNumber);
+	}
+
 	@PostMapping("/{receiptNumber}/translation")
 	ResponseEntity<DisclosureTranslationBatchResponse> requestDisclosureTranslation(
 		@PathVariable @Pattern(regexp = "^[0-9]{14}$") String receiptNumber,

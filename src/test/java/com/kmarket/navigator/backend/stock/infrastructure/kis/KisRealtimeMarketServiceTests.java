@@ -82,7 +82,8 @@ class KisRealtimeMarketServiceTests {
 			RestClient.builder().baseUrl("https://example.test").build(),
 			properties,
 			repository,
-			new ObjectMapper()
+			new ObjectMapper(),
+			java.time.Clock.fixed(java.time.Instant.parse("2026-09-03T01:15:30Z"), java.time.ZoneOffset.UTC)
 		);
 	}
 

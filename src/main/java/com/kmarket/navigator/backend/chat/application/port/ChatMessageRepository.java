@@ -20,20 +20,15 @@ public interface ChatMessageRepository {
 		String content,
 		UUID selectedSectionId,
 		String selectedText,
-		Instant now
-	);
-
-	ChatGeneration regenerate(
-		UUID userId,
-		UUID roomId,
-		UUID assistantMessageId,
-		UUID requestKey,
+		String answerLocale,
 		Instant now
 	);
 
 	List<ChatMessage> findMessages(UUID userId, UUID roomId, long afterSequence, int limit);
 
 	Optional<ChatGeneration> findGeneration(UUID userId, UUID roomId, UUID generationId);
+
+	Optional<ChatGeneration> findLatestGeneration(UUID userId, UUID roomId);
 
 	boolean stop(UUID userId, UUID roomId, UUID generationId, Instant now);
 

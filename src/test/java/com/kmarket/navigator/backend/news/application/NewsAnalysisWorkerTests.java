@@ -41,7 +41,7 @@ class NewsAnalysisWorkerTests {
 			1
 		);
 		NewsAnalysis analysis = analysis();
-		when(repository.claimAnalysisJobs(10, NOW)).thenReturn(List.of(job));
+		when(repository.claimAnalysisJobs(2, NOW)).thenReturn(List.of(job)).thenReturn(List.of());
 		when(gateway.analyze(job.title(), job.paragraphs(), job.candidateCompanies()))
 			.thenReturn(analysis);
 
@@ -62,7 +62,7 @@ class NewsAnalysisWorkerTests {
 			List.of(),
 			2
 		);
-		when(repository.claimAnalysisJobs(10, NOW)).thenReturn(List.of(job));
+		when(repository.claimAnalysisJobs(2, NOW)).thenReturn(List.of(job)).thenReturn(List.of());
 		when(gateway.analyze(any(), any(), any())).thenThrow(new IllegalStateException("temporary"));
 
 		new NewsAnalysisWorker(repository, gateway, Clock.fixed(NOW, ZoneOffset.UTC)).process();

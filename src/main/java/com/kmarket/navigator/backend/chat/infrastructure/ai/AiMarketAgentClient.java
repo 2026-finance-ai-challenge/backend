@@ -8,6 +8,9 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.kmarket.navigator.backend.chat.application.port.AgentGateway;
 import com.kmarket.navigator.backend.chat.domain.AgentAnswer;
@@ -23,6 +26,7 @@ import tools.jackson.databind.annotation.JsonNaming;
 
 @Component
 class AiMarketAgentClient implements AgentGateway {
+	private static final Logger log = LoggerFactory.getLogger(AiMarketAgentClient.class);
 
 	private final RestClient restClient;
 	private final AiServiceProperties properties;
@@ -41,7 +45,8 @@ class AiMarketAgentClient implements AgentGateway {
 		String question,
 		List<AgentHistoryMessage> history,
 		List<AgentEvidence> evidence,
-		String safetyIdentifier
+		String safetyIdentifier,
+		String answerLocale
 	) {
 		if (properties.serviceToken() == null || properties.serviceToken().isBlank()) {
 			throw new BusinessException(ErrorCode.AI_SERVICE_UNAVAILABLE);
@@ -56,7 +61,8 @@ class AiMarketAgentClient implements AgentGateway {
 					question,
 					history.stream().map(History::from).toList(),
 					evidence.stream().map(Evidence::from).toList(),
-					safetyIdentifier
+					safetyIdentifier,
+					answerLocale
 				))
 				.retrieve()
 				.body(Response.class);
@@ -65,10 +71,36 @@ class AiMarketAgentClient implements AgentGateway {
 			}
 			return response.toDomain();
 		}
+		catch (RestClientResponseException exception) {
+			String code = failureCode(exception);
+			String requestId = exception.getResponseHeaders() == null ? null
+				: exception.getResponseHeaders().getFirst("x-request-id");
+			log.warn("시장 Agent 요청 실패 generation={} status={} code={} aiRequestId={}",
+				org.slf4j.MDC.get("chatGenerationId"), exception.getStatusCode().value(), code,
+				requestId != null && requestId.matches("[a-f0-9-]{36}") ? requestId : "unknown");
+			throw new BusinessException("AI_INVALID_OUTPUT".equals(code)
+				? ErrorCode.AI_INVALID_OUTPUT : ErrorCode.AI_SERVICE_UNAVAILABLE);
+		}
 		catch (RestClientException exception) {
+			log.warn("시장 Agent 연결 실패 generation={} type={} cause={}",
+				org.slf4j.MDC.get("chatGenerationId"), exception.getClass().getSimpleName(),
+				exception.getMostSpecificCause().getClass().getSimpleName());
 			throw new BusinessException(ErrorCode.AI_SERVICE_UNAVAILABLE);
 		}
 	}
+
+	private static String failureCode(RestClientResponseException exception) {
+		try {
+			var body = exception.getResponseBodyAs(AiFailure.class);
+			String code = body == null ? null : body.code();
+			return code != null && code.matches("[A-Z_]{1,64}") ? code : "UNKNOWN";
+		} catch (RuntimeException ignored) {
+			return "UNKNOWN";
+		}
+	}
+
+	@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
+	private record AiFailure(String code) { }
 
 	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 	private record Request(
@@ -77,7 +109,8 @@ class AiMarketAgentClient implements AgentGateway {
 		String question,
 		List<History> history,
 		List<Evidence> evidence,
-		String safetyIdentifier
+		String safetyIdentifier,
+		String answerLocale
 	) {
 	}
 

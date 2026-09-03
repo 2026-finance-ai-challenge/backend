@@ -49,6 +49,7 @@ record DisclosureDetailResponse(
 	List<Version> versions
 ) {
 	static DisclosureDetailResponse from(DisclosureDetail detail, ObjectMapper objectMapper) {
+		var receiver = com.kmarket.navigator.backend.disclosure.domain.DisclosureReceiver.from(detail.documents());
 		return new DisclosureDetailResponse(
 			detail.receiptNumber(),
 			detail.corpCode(),
@@ -64,8 +65,8 @@ record DisclosureDetailResponse(
 			detail.importance(),
 			detail.marketImpact(),
 			detail.submitter(),
-			"금융위원회",
-			"Financial Services Commission",
+			receiver.ko(),
+			receiver.en(),
 			detail.filedDate(),
 			detail.detectedAt(),
 			detail.remark(),
@@ -112,7 +113,7 @@ record DisclosureDetailResponse(
 				document.sourceFilename(),
 				document.version(),
 				document.contentHash(),
-				document.originalHtml(),
+				com.kmarket.navigator.backend.translation.application.DisclosureHtmlRenderer.annotateOriginal(document),
 				document.sections().stream().map(section -> Section.from(section, objectMapper)).toList()
 			);
 		}

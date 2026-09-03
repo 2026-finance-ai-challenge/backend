@@ -21,6 +21,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.ResourceAccessException;
@@ -63,17 +64,23 @@ class KisMarketDataGateway implements MarketDataGateway {
 	private final Clock clock;
 	private final Map<String, CachedIntradayPrices> intradayCache = new ConcurrentHashMap<>();
 
+	@Autowired
 	KisMarketDataGateway(
 		@Qualifier("kisMarketRestClient") RestClient restClient,
 		KisMarketProperties properties,
 		KisAccessTokenProvider tokenProvider,
 		KisCircuitBreaker circuitBreaker
 	) {
+		this(restClient, properties, tokenProvider, circuitBreaker, Clock.system(KOREA_ZONE));
+	}
+
+	KisMarketDataGateway(RestClient restClient, KisMarketProperties properties,
+		KisAccessTokenProvider tokenProvider, KisCircuitBreaker circuitBreaker, Clock clock) {
 		this.restClient = restClient;
 		this.properties = properties;
 		this.tokenProvider = tokenProvider;
 		this.circuitBreaker = circuitBreaker;
-		this.clock = Clock.system(KOREA_ZONE);
+		this.clock = clock.withZone(KOREA_ZONE);
 	}
 
 	@Override
@@ -99,14 +106,15 @@ class KisMarketDataGateway implements MarketDataGateway {
 		String changeSign = text(output, "prdy_vrss_sign");
 		BigDecimal changeAmount = signed(decimal(output, "prdy_vrss"), changeSign);
 		BigDecimal changeRate = signed(decimal(output, "prdy_ctrt"), changeSign);
+		if (current.signum() <= 0 || changeAmount == null || changeRate == null) return Optional.empty();
 		BigDecimal upperLimit = decimal(output, "stck_mxpr");
 		BigDecimal lowerLimit = decimal(output, "stck_llam");
 		Boolean halted = yesNo(output, "temp_stop_yn");
 		Instant now = clock.instant();
 		return Optional.of(new MarketQuoteSnapshot(
 			current,
-			zeroIfNull(changeAmount),
-			zeroIfNull(changeRate),
+			changeAmount,
+			changeRate,
 			decimal(output, "stck_oprc"),
 			decimal(output, "stck_hgpr"),
 			decimal(output, "stck_lwpr"),
@@ -178,12 +186,15 @@ class KisMarketDataGateway implements MarketDataGateway {
 			return Optional.empty();
 		}
 		String changeSign = firstText(output, "prdy_vrss_sign", "prdy_vrss_sign_name");
+		BigDecimal change = signed(firstDecimal(output, "bstp_nmix_prdy_vrss", "prdy_vrss"), changeSign);
+		BigDecimal rate = signed(firstDecimal(output, "bstp_nmix_prdy_ctrt", "prdy_ctrt"), changeSign);
+		if (current.signum() <= 0 || change == null || rate == null) return Optional.empty();
 		return Optional.of(new MarketIndexSnapshot(
 			indexCode,
 			INDEX_NAMES.get(indexCode),
 			current,
-			zeroIfNull(signed(firstDecimal(output, "bstp_nmix_prdy_vrss", "prdy_vrss"), changeSign)),
-			zeroIfNull(signed(firstDecimal(output, "bstp_nmix_prdy_ctrt", "prdy_ctrt"), changeSign)),
+			change,
+			rate,
 			longValue(output, "acml_vol", 0L),
 			marketDataStatus(),
 			clock.instant(),
@@ -293,7 +304,7 @@ class KisMarketDataGateway implements MarketDataGateway {
 			for (JsonNode row : output) {
 				LocalDate rowDate = date(row, "stck_bsop_date");
 				BigDecimal amountMillions = decimal(row, "frgn_ntby_tr_pbmn");
-				if (rowDate == null || amountMillions == null) {
+				if (rowDate == null || rowDate.isAfter(tradingDate) || amountMillions == null) {
 					continue;
 				}
 				flows.add(new MarketForeignNetFlow(
@@ -569,10 +580,6 @@ class KisMarketDataGateway implements MarketDataGateway {
 			case "4", "5" -> absolute.negate();
 			default -> value;
 		};
-	}
-
-	private static BigDecimal zeroIfNull(BigDecimal value) {
-		return value == null ? BigDecimal.ZERO : value;
 	}
 
 	private static BigDecimal firstDecimal(JsonNode output, String... fields) {

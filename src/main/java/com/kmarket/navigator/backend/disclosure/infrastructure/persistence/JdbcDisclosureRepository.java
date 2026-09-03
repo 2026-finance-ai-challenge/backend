@@ -50,7 +50,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 	private static final String EMBEDDING_JOB = "DISCLOSURE_EMBEDDING";
 	private static final String METADATA_EMBEDDING_JOB = "DISCLOSURE_METADATA_EMBEDDING";
 	private static final String SIGNAL_JOB = "DISCLOSURE_SIGNAL";
-	private static final String DOCUMENT_PARSER_VERSION = "opendart-html-v4";
+	private static final String DOCUMENT_PARSER_VERSION = "opendart-html-v6";
 	private static final String OPEN_DART_DOCUMENT_PROVIDER = "OPEN_DART_DOCUMENT";
 
 	private final JdbcClient jdbcClient;
@@ -387,6 +387,8 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			throw new IllegalArgumentException("Disclosure documents must not be empty");
 		}
 		UUID disclosureId = disclosureId(receiptNumber);
+		jdbcClient.sql("SELECT id FROM disclosure WHERE id = :id FOR UPDATE")
+			.param("id", disclosureId).query(UUID.class).single();
 		jdbcClient.sql("""
 			UPDATE disclosure_document
 			SET is_current = FALSE
@@ -409,13 +411,8 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 				       :compressedBytes, :parserVersion, :createdAt
 				FROM disclosure_document
 				WHERE disclosure_id = :disclosureId AND source_filename = :sourceFilename
-				ON CONFLICT (disclosure_id, source_filename, content_hash)
-				DO UPDATE SET body_text = NULL,
-				              payload_zstd = EXCLUDED.payload_zstd,
-				              original_bytes = EXCLUDED.original_bytes,
-				              compressed_bytes = EXCLUDED.compressed_bytes,
-				              parser_version = EXCLUDED.parser_version,
-				              is_current = TRUE
+				ON CONFLICT (disclosure_id, source_filename, content_hash, parser_version)
+				DO UPDATE SET is_current = TRUE
 				RETURNING id
 				""")
 				.param("id", UUID.randomUUID())
@@ -644,7 +641,6 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			WITH candidate AS (
 			    SELECT job.id
 			    FROM ingestion_job job
-			    JOIN disclosure disclosure ON disclosure.receipt_number = job.business_key
 			    WHERE job.job_type = :jobType
 			      AND job.available_at <= CURRENT_TIMESTAMP
 			      AND (
@@ -652,7 +648,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			          OR (job.status = 'PROCESSING'
 			              AND job.locked_at < CURRENT_TIMESTAMP - INTERVAL '15 minutes')
 			      )
-			    ORDER BY disclosure.filed_date DESC, disclosure.receipt_number DESC
+			    ORDER BY job.business_key DESC
 			    FOR UPDATE OF job SKIP LOCKED
 			    LIMIT 1
 			)
@@ -820,7 +816,8 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			       insight.what_summary, insight.why_summary, insight.impact_summary,
 			       insight.source_section_ids, insight.sufficient_evidence,
 			       insight.refusal_reason, insight.model_id, insight.prompt_version,
-			       insight.generated_at
+			       insight.generated_at, insight.what_summary_ko, insight.why_summary_ko,
+			       insight.impact_summary_ko
 			FROM disclosure_ai_summary insight
 			JOIN disclosure ON disclosure.id = insight.disclosure_id
 			WHERE disclosure.receipt_number = :receiptNumber
@@ -839,7 +836,10 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 				resultSet.getString("refusal_reason"),
 				resultSet.getString("model_id"),
 				resultSet.getString("prompt_version"),
-				resultSet.getObject("generated_at", OffsetDateTime.class).toInstant()
+				resultSet.getObject("generated_at", OffsetDateTime.class).toInstant(),
+				resultSet.getString("what_summary_ko"),
+				resultSet.getString("why_summary_ko"),
+				resultSet.getString("impact_summary_ko")
 			))
 			.optional();
 	}
@@ -850,6 +850,13 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			EnglishTextPolicy.requireValid(insight.what());
 			EnglishTextPolicy.requireValid(insight.why());
 			EnglishTextPolicy.requireValid(insight.impact());
+			for (String korean : java.util.Arrays.asList(
+				insight.whatKo(), insight.whyKo(), insight.impactKo()
+			)) {
+				if (korean == null || !korean.matches("(?s).*[가-힣].*")) {
+					throw new IllegalArgumentException("Korean summary is incomplete");
+				}
+			}
 		}
 		else if (insight.refusalReason() != null) {
 			EnglishTextPolicy.requireValid(insight.refusalReason());
@@ -861,14 +868,15 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			INSERT INTO disclosure_ai_summary (
 			    disclosure_id, content_version_hash, what_summary, why_summary,
 			    impact_summary, source_section_ids, sufficient_evidence,
-			    refusal_reason, model_id, prompt_version, generated_at
+			    refusal_reason, model_id, prompt_version, generated_at,
+			    what_summary_ko, why_summary_ko, impact_summary_ko
 			)
 			SELECT disclosure.id, :contentVersionHash, :whatSummary, :whySummary,
 			       :impactSummary,
 			       CASE WHEN CAST(:sourceIds AS varchar) = '' THEN ARRAY[]::uuid[]
 			            ELSE string_to_array(:sourceIds, ',')::uuid[] END,
 			       :sufficientEvidence, :refusalReason, :modelId, :promptVersion,
-			       :generatedAt
+			       :generatedAt, :whatKo, :whyKo, :impactKo
 			FROM disclosure
 			WHERE disclosure.receipt_number = :receiptNumber
 			ON CONFLICT (disclosure_id) DO UPDATE
@@ -881,7 +889,10 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			    refusal_reason = EXCLUDED.refusal_reason,
 			    model_id = EXCLUDED.model_id,
 			    prompt_version = EXCLUDED.prompt_version,
-			    generated_at = EXCLUDED.generated_at
+			    generated_at = EXCLUDED.generated_at,
+			    what_summary_ko = EXCLUDED.what_summary_ko,
+			    why_summary_ko = EXCLUDED.why_summary_ko,
+			    impact_summary_ko = EXCLUDED.impact_summary_ko
 			""")
 			.param("receiptNumber", insight.receiptNumber())
 			.param("contentVersionHash", insight.contentVersionHash())
@@ -893,6 +904,9 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			.param("whatSummary", insight.what(), java.sql.Types.VARCHAR)
 			.param("whySummary", insight.why(), java.sql.Types.VARCHAR)
 			.param("impactSummary", insight.impact(), java.sql.Types.VARCHAR)
+			.param("whatKo", insight.whatKo(), java.sql.Types.VARCHAR)
+			.param("whyKo", insight.whyKo(), java.sql.Types.VARCHAR)
+			.param("impactKo", insight.impactKo(), java.sql.Types.VARCHAR)
 			.param("refusalReason", insight.refusalReason(), java.sql.Types.VARCHAR);
 		statement.update();
 	}

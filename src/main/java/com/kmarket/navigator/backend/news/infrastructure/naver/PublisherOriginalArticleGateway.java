@@ -1,7 +1,7 @@
 package com.kmarket.navigator.backend.news.infrastructure.naver;
 
 import java.io.IOException;
-import java.io.InputStream;
+import java.io.ByteArrayInputStream;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -34,7 +34,7 @@ import com.kmarket.navigator.backend.news.domain.OriginalNewsArticle;
 class PublisherOriginalArticleGateway implements NewsOriginalArticleGateway {
 
 	private static final Logger log = LoggerFactory.getLogger(PublisherOriginalArticleGateway.class);
-	private static final String SOURCE_POLICY = "publisher_public_article_v1";
+	private static final String SOURCE_POLICY = "publisher_public_article_v2";
 	private static final int MAX_REDIRECTS = 5;
 	private static final int MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 	private static final int MAX_CONTENT_CHARS = 120_000;
@@ -44,11 +44,11 @@ class PublisherOriginalArticleGateway implements NewsOriginalArticleGateway {
 		Pattern.CASE_INSENSITIVE
 	);
 	private static final List<String> BODY_SELECTORS = List.of(
-		"#divNewsContent", "#textBody", "[itemprop=articleBody]", "#article-view-content-div",
+		"#DivArticleContent", "#articleText", "#jose_news_view", "#divNewsContent", "#textBody", "#article-view-content-div", "[itemprop=articleBody]",
 		".article-body-only", "#articleBody", "#article_body", "#CmAdContent", ".acem_text",
 		"#article", "#article_main", "#cont_newstext", ".detail-body", ".news_body",
 		".news-content", ".article_body", ".article-body", "#news_body", ".article_content",
-		".article-content", ".article_txt", ".view_content", ".newsct_article", "#dic_area",
+		".article-content", ".article_txt", ".view_content", ".news_content", ".newsct_article", "#dic_area",
 		".go_trans._article_content", "main article", "article", "main"
 	);
 	private static final String NON_CONTENT_SELECTOR = String.join(",",
@@ -59,7 +59,8 @@ class PublisherOriginalArticleGateway implements NewsOriginalArticleGateway {
 		"[class*=recommend]", "[id*=recommend]", "[class*=related]", "[id*=related]",
 		"[class*=ranking]", "[id*=ranking]", "[class*=popular]", "[id*=popular]",
 		"[class*=subscribe]", "[id*=subscribe]", "[class*=promotion]", "[id*=promotion]",
-		"[class*=copyright]", "[id*=copyright]", "[class*=reporter]", "[id*=reporter]"
+		"[class*=copyright]", "[id*=copyright]", "[class*=reporter]", "[id*=reporter]",
+		"[class*=vote]", "[id*=vote]", "[class*=poll]", "[id*=poll]", ".teditor", ".list_news"
 	);
 
 	private final HttpClient httpClient;
@@ -88,13 +89,14 @@ class PublisherOriginalArticleGateway implements NewsOriginalArticleGateway {
 			return Optional.empty();
 		}
 		try {
-			FetchedHtml fetched = fetchHtml(uri, 0);
+			long deadline = System.nanoTime() + Duration.ofSeconds(45).toNanos();
+			FetchedHtml fetched = fetchHtml(uri, 0, deadline);
 			Optional<OriginalNewsArticle> parsed = parse(fetched);
 			if (parsed.isPresent()) {
 				return parsed;
 			}
 			for (URI alternate : alternateUris(fetched)) {
-				Optional<OriginalNewsArticle> alternateArticle = parse(fetchHtml(alternate, 0));
+				Optional<OriginalNewsArticle> alternateArticle = parse(fetchHtml(alternate, 0, deadline));
 				if (alternateArticle.isPresent()) {
 					return alternateArticle;
 				}
@@ -110,19 +112,33 @@ class PublisherOriginalArticleGateway implements NewsOriginalArticleGateway {
 		return Optional.empty();
 	}
 
-	private FetchedHtml fetchHtml(URI uri, int redirectCount) throws IOException, InterruptedException {
+	private FetchedHtml fetchHtml(URI uri, int redirectCount, long deadline) throws IOException, InterruptedException {
 		if (safeHttpUri(uri.toString()) == null) {
 			throw new IllegalArgumentException("unsafe news URL");
 		}
+		long remaining = Math.min(readTimeout.toNanos(), deadline - System.nanoTime());
+		if (remaining <= 0) throw new java.net.http.HttpTimeoutException("Article fetch deadline exceeded");
 		HttpRequest request = HttpRequest.newBuilder(uri)
-			.timeout(readTimeout)
+			.timeout(Duration.ofNanos(remaining))
 			.header("User-Agent", "K-Market-Navigator/1.0")
 			.header("Accept", "text/html,application/xhtml+xml;q=0.9")
 			.header("Accept-Language", "ko-KR,ko;q=0.9,en-US;q=0.8")
 			.GET()
 			.build();
-		HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
-		try (InputStream body = response.body()) {
+		// 헤더뿐 아니라 본문 수신 시간·크기도 제한해 느린 언론사가 수집 슬롯을 점유하지 않게 한다.
+		var pending = httpClient.sendAsync(request,
+			HttpResponse.BodyHandlers.limiting(HttpResponse.BodyHandlers.ofByteArray(), MAX_RESPONSE_BYTES));
+		HttpResponse<byte[]> response;
+		try { response = pending.get(remaining, java.util.concurrent.TimeUnit.NANOSECONDS); }
+		catch (java.util.concurrent.TimeoutException exception) {
+			pending.cancel(true);
+			throw new java.net.http.HttpTimeoutException("Article body deadline exceeded");
+		} catch (java.util.concurrent.ExecutionException exception) {
+			throw new IOException("Article response failed", exception.getCause());
+		} catch (InterruptedException exception) {
+			pending.cancel(true);
+			throw exception;
+		}
 			if (response.statusCode() >= 300 && response.statusCode() < 400) {
 				if (redirectCount >= MAX_REDIRECTS) {
 					throw new IllegalStateException("too many redirects");
@@ -132,7 +148,7 @@ class PublisherOriginalArticleGateway implements NewsOriginalArticleGateway {
 				if (redirected == null) {
 					throw new IllegalArgumentException("unsafe redirect URL");
 				}
-				return fetchHtml(redirected, redirectCount + 1);
+				return fetchHtml(redirected, redirectCount + 1, deadline);
 			}
 			if (response.statusCode() < 200 || response.statusCode() >= 300) {
 				throw new IllegalStateException("publisher rejected request");
@@ -142,12 +158,20 @@ class PublisherOriginalArticleGateway implements NewsOriginalArticleGateway {
 				&& !contentType.contains("application/xhtml+xml")) {
 				throw new IllegalStateException("publisher response is not HTML");
 			}
-			byte[] bytes = body.readNBytes(MAX_RESPONSE_BYTES + 1);
+			byte[] bytes = response.body();
 			if (bytes.length > MAX_RESPONSE_BYTES) {
 				throw new IllegalStateException("publisher response exceeds size limit");
 			}
-			return new FetchedHtml(new String(bytes, java.nio.charset.StandardCharsets.UTF_8), uri);
-		}
+			return new FetchedHtml(decodeHtml(bytes, contentType, uri), uri);
+	}
+
+	String decodeHtml(byte[] bytes, String contentType, URI uri) throws IOException {
+		var charset = Pattern.compile("charset\\s*=\\s*[\"']?([a-zA-Z0-9_-]+)", Pattern.CASE_INSENSITIVE)
+			.matcher(contentType);
+		String declared = charset.find() ? charset.group(1) : null;
+		if (declared != null && declared.equalsIgnoreCase("euc-kr")) declared = "MS949";
+		// HTTP·HTML의 문자 인코딩을 읽어 한글 원문이 대체 문자로 손상되지 않게 한다.
+		return Jsoup.parse(new ByteArrayInputStream(bytes), declared, uri.toString()).outerHtml();
 	}
 
 	private Optional<OriginalNewsArticle> parse(FetchedHtml fetched) {
@@ -168,7 +192,8 @@ class PublisherOriginalArticleGateway implements NewsOriginalArticleGateway {
 	String findArticleBody(Document document) {
 		for (String selector : BODY_SELECTORS) {
 			String selected = "";
-			for (Element element : document.select(selector)) {
+			var elements = document.select(selector);
+			for (Element element : elements) {
 				String candidate = cleanArticleText(element);
 				if (isLikelyBody(candidate) && candidate.length() > selected.length()) {
 					selected = candidate;
@@ -178,6 +203,8 @@ class PublisherOriginalArticleGateway implements NewsOriginalArticleGateway {
 			if (!selected.isBlank()) {
 				return selected;
 			}
+			// 본문이 비었거나 접근 안내인 경우 페이지 전체를 원문으로 대체하지 않는다.
+			if (!elements.isEmpty() && !Set.of("main article", "article", "main").contains(selector)) return "";
 		}
 		return "";
 	}
@@ -211,22 +238,24 @@ class PublisherOriginalArticleGateway implements NewsOriginalArticleGateway {
 	private String cleanArticleText(Element element) {
 		Element copy = element.clone();
 		copy.select(NON_CONTENT_SELECTOR).remove();
-		List<String> paragraphs = copy.select("p,li,blockquote,h1,h2,h3,h4").stream()
-			.map(Element::text)
-			.map(this::removeBoilerplate)
-			.filter(value -> !value.isBlank())
-			.distinct()
-			.toList();
-		String text = paragraphs.size() >= 2 ? String.join("\n\n", paragraphs) : copy.wholeText();
+		// p 태그 밖의 본문과 br 문단도 보존한다. 부가 목록만 추출하는 경로를 없앤다.
+		copy.select("p,div,li,blockquote,h1,h2,h3,h4").forEach(block -> {
+			block.before("\n\n");
+			block.appendText("\n\n");
+		});
+		String text = copy.wholeText();
 		return normalizeArticleText(removeBoilerplate(text));
 	}
 
 	private boolean isLikelyBody(String value) {
-		if (value.length() < MIN_BODY_CHARS) {
+		if (value.length() < MIN_BODY_CHARS || value.indexOf('\uFFFD') >= 0) {
 			return false;
 		}
 		String lower = value.toLowerCase(Locale.ROOT);
 		return !lower.startsWith("share this article")
+			&& !lower.startsWith("best click")
+			&& !lower.contains("슈퍼스타 브랜드 파워")
+			&& !lower.contains("슈퍼스타 브랜드파워")
 			&& !lower.contains("facebook twitter kakao")
 			&& !lower.contains("internet explorer 8");
 	}

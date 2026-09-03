@@ -73,9 +73,11 @@ public class IdentityService {
 		InvestorType investorType,
 		boolean termsAccepted,
 		boolean privacyAccepted,
+		Boolean fscDisclaimerAccepted,
 		ClientContext context
 	) {
-		if (!password.equals(passwordConfirm) || !termsAccepted || !privacyAccepted) {
+		if (!com.kmarket.navigator.backend.identity.domain.PasswordPolicy.isValid(password)
+			|| !password.equals(passwordConfirm) || !termsAccepted || !privacyAccepted) {
 			throw new BusinessException(ErrorCode.INVALID_REQUEST);
 		}
 		String normalizedLoginId = normalizeLoginId(loginId);
@@ -94,6 +96,10 @@ public class IdentityService {
 		);
 		identityRepository.insert(account, now, now);
 		auditRepository.record(account.id(), "ACCOUNT_CREATED", "USER", account.id().toString(), context, now);
+		// 구버전 가입 요청에는 동의 사실을 소급 생성하지 않는다.
+		if (Boolean.TRUE.equals(fscDisclaimerAccepted)) {
+			auditRepository.record(account.id(), "FSC_DISCLAIMER_ACCEPTED", "LEGAL_DOCUMENT", "fsc-disclaimer-v1", context, now);
+		}
 		return account;
 	}
 
@@ -123,20 +129,35 @@ public class IdentityService {
 		return new AuthenticationResult(account, tokens);
 	}
 
-	@Transactional
+	@Transactional(noRollbackFor = BusinessException.class)
 	public AuthenticationResult refresh(String refreshToken, ClientContext context) {
+		return refreshInternal(refreshToken, context, null);
+	}
+
+	@Transactional(noRollbackFor = BusinessException.class)
+	public AuthenticationResult refreshBrowser(String refreshToken, UUID requestId, ClientContext context) {
+		return refreshInternal(refreshToken, context, refreshTokenService.browserSuccessor(refreshToken, requestId));
+	}
+
+	private AuthenticationResult refreshInternal(String refreshToken, ClientContext context, String successorToken) {
 		Instant now = Instant.now();
 		String refreshTokenHash = refreshTokenService.hash(refreshToken);
 		AuthSession oldSession = sessionRepository.findByRefreshTokenHash(refreshTokenHash)
 			.orElseThrow(() -> new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN));
 		UserAccount account = identityRepository.findActiveById(oldSession.userId())
 			.orElseThrow(() -> new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN));
-		PendingSession replacement = createSession(account.id(), oldSession.familyId(), context, now);
+		PendingSession replacement = createSession(account.id(), oldSession.familyId(), context, now, successorToken);
 
 		AuthSessionRepository.RotationResult rotation = sessionRepository.rotate(
 			oldSession,
 			replacement.session()
 		);
+		if (rotation == AuthSessionRepository.RotationResult.REPLAYED && successorToken != null) {
+			AuthSession successor = sessionRepository.findByRefreshTokenHash(replacement.session().refreshTokenHash())
+				.filter(session -> session.familyId().equals(oldSession.familyId()) && session.refreshActiveAt(now))
+				.orElseThrow(() -> new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN));
+			return new AuthenticationResult(account, tokens(account, new PendingSession(successor, successorToken)));
+		}
 		if (rotation == AuthSessionRepository.RotationResult.REUSED) {
 			auditRepository.record(
 				oldSession.userId(),
@@ -185,6 +206,18 @@ public class IdentityService {
 	}
 
 	@Transactional
+	public void logoutBrowser(String refreshToken, ClientContext context) {
+		if (refreshToken == null || !refreshToken.matches("^kmr_[A-Za-z0-9_-]{64}$")) {
+			return;
+		}
+		String hash = refreshTokenService.hash(refreshToken);
+		sessionRepository.findByRefreshTokenHash(hash).ifPresent(session -> {
+			sessionRepository.revoke(hash, session.userId());
+			auditRepository.record(session.userId(), "LOGOUT", "SESSION", null, context, Instant.now());
+		});
+	}
+
+	@Transactional
 	public void logoutAll(AuthenticatedUser user, ClientContext context) {
 		Instant now = Instant.now();
 		sessionRepository.revokeAll(user.id());
@@ -210,7 +243,8 @@ public class IdentityService {
 		String newPasswordConfirm,
 		ClientContext context
 	) {
-		if (!newPassword.equals(newPasswordConfirm)) {
+		if (!com.kmarket.navigator.backend.identity.domain.PasswordPolicy.isValid(newPassword)
+			|| !newPassword.equals(newPasswordConfirm)) {
 			throw new BusinessException(ErrorCode.INVALID_REQUEST);
 		}
 		UserAccount account = profile(user);
@@ -254,7 +288,11 @@ public class IdentityService {
 	}
 
 	private PendingSession createSession(UUID userId, UUID familyId, ClientContext context, Instant now) {
-		String refreshToken = refreshTokenService.issue();
+		return createSession(userId, familyId, context, now, null);
+	}
+
+	private PendingSession createSession(UUID userId, UUID familyId, ClientContext context, Instant now, String successorToken) {
+		String refreshToken = successorToken == null ? refreshTokenService.issue() : successorToken;
 		Instant accessExpiresAt = now.plus(properties.accessTokenTtl());
 		Instant refreshExpiresAt = now.plus(properties.refreshTokenTtl());
 		AuthSession session = new AuthSession(

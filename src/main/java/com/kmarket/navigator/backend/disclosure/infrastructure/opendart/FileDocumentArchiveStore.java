@@ -47,7 +47,7 @@ class FileDocumentArchiveStore implements DocumentArchiveStore {
 		List<StoredDocumentArchive> stored = new ArrayList<>();
 		for (OpenDartSource source : fetch.sources()) {
 			byte[] archive = source.kind() == DocumentArchiveKind.DART_VIEWER_HTML
-				? wrapViewerHtml(job.receiptNumber(), source.content())
+				? wrapViewerHtml(job.receiptNumber(), source.content(), source.provenance())
 				: source.content();
 			String filename = archiveFilename(job.receiptNumber(), source.kind());
 			Path folder = root.resolve(stockFolder(job)).normalize();
@@ -70,6 +70,36 @@ class FileDocumentArchiveStore implements DocumentArchiveStore {
 
 	private static String stockFolder(DocumentJob job) {
 		return sanitize(job.stockCode() + "_" + job.stockNameKo(), MAX_FOLDER_NAME_LENGTH);
+	}
+
+	List<StoredDocumentArchive> storeRecovered(String receipt, OpenDartDocumentFetch fetch) {
+		if (!receipt.matches("[0-9]{14}")) throw new IllegalArgumentException("Invalid receipt number");
+		Path root = properties.archiveRoot().toAbsolutePath().normalize();
+		var stored = new ArrayList<StoredDocumentArchive>();
+		for (var source : fetch.sources()) {
+			byte[] content = source.kind() == DocumentArchiveKind.DART_VIEWER_HTML
+				? wrapViewerHtml(receipt, source.content(), source.provenance()) : source.content();
+			String hash = sha256(content);
+			Path folder = root.resolve("html-repair").resolve(receipt);
+			Path target = folder.resolve(hash + "." + source.kind().fileSuffix() + ".zip");
+			try {
+				Files.createDirectories(folder);
+				if (!folder.toRealPath().startsWith(root.toRealPath())) throw new IllegalStateException("Archive path escaped configured root");
+				// 복구 원본은 내용 해시 경로에 추가하며 기존 ZIP을 덮어쓰지 않는다.
+				try (var channel = java.nio.channels.FileChannel.open(target,
+					java.util.Set.of(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE),
+					java.nio.file.attribute.PosixFilePermissions.asFileAttribute(java.nio.file.attribute.PosixFilePermissions.fromString("rw-------")))) {
+					var buffer = java.nio.ByteBuffer.wrap(content);
+					while (buffer.hasRemaining()) channel.write(buffer);
+					channel.force(true);
+				} catch (java.nio.file.FileAlreadyExistsException exists) {
+					if (!target.toRealPath().startsWith(root.toRealPath()) || Files.size(target) != content.length
+						|| !sha256(Files.readAllBytes(target)).equals(hash)) throw new IllegalStateException("Recovered archive checksum mismatch");
+				}
+			} catch (IOException error) { throw new IllegalStateException("Failed to persist recovered archive", error); }
+			stored.add(new StoredDocumentArchive(source.kind(), source.status(), root.relativize(target).toString(), hash, content.length, source.errorCode()));
+		}
+		return List.copyOf(stored);
 	}
 
 	private static String archiveFilename(String receiptNumber, DocumentArchiveKind kind) {
@@ -121,13 +151,22 @@ class FileDocumentArchiveStore implements DocumentArchiveStore {
 		}
 	}
 
-	private static byte[] wrapViewerHtml(String receiptNumber, byte[] html) {
+	private static byte[] wrapViewerHtml(String receiptNumber, byte[] html, java.util.Map<String, byte[]> provenance) {
 		try {
 			ByteArrayOutputStream output = new ByteArrayOutputStream();
 			try (ZipOutputStream zip = new ZipOutputStream(output)) {
-				zip.putNextEntry(new ZipEntry(receiptNumber + ".viewer.html"));
+				var entry = new ZipEntry(receiptNumber + ".viewer.html");
+				entry.setTime(0);
+				zip.putNextEntry(entry);
 				zip.write(html);
 				zip.closeEntry();
+				for (var source : new java.util.TreeMap<>(provenance).entrySet()) {
+					var raw = new ZipEntry(source.getKey());
+					raw.setTime(0);
+					zip.putNextEntry(raw);
+					zip.write(source.getValue());
+					zip.closeEntry();
+				}
 			}
 			return output.toByteArray();
 		}

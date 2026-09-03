@@ -3,6 +3,7 @@ package com.kmarket.navigator.backend.global.error;
 import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
+	UNTRUSTED_BROWSER_REQUEST(HttpStatus.FORBIDDEN, "UNTRUSTED_BROWSER_REQUEST", "The browser request is not trusted."),
 	INVALID_REQUEST(HttpStatus.BAD_REQUEST, "INVALID_REQUEST", "The request is invalid."),
 	INVALID_CURSOR(HttpStatus.BAD_REQUEST, "INVALID_CURSOR", "The pagination cursor is invalid."),
 	INVALID_DATE_RANGE(HttpStatus.BAD_REQUEST, "INVALID_DATE_RANGE", "The date range is invalid."),
@@ -189,6 +190,11 @@ public enum ErrorCode {
 		HttpStatus.SERVICE_UNAVAILABLE,
 		"AI_SERVICE_UNAVAILABLE",
 		"The AI service is temporarily unavailable."
+	),
+	AI_INVALID_OUTPUT(
+		HttpStatus.BAD_GATEWAY,
+		"AI_INVALID_OUTPUT",
+		"The AI answer did not pass validation."
 	),
 	INTERNAL_SERVER_ERROR(
 		HttpStatus.INTERNAL_SERVER_ERROR,

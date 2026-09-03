@@ -33,7 +33,6 @@ import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 public class ChatGenerationWorker {
 
 	private static final Logger log = LoggerFactory.getLogger(ChatGenerationWorker.class);
-	private static final int MAX_ATTEMPTS = 3;
 	private static final Duration PROCESSING_TIMEOUT = Duration.ofMinutes(5);
 	private final ChatMessageRepository repository;
 	private final AgentGateway agentGateway;
@@ -41,6 +40,7 @@ public class ChatGenerationWorker {
 	private final AgentSafetyIdentifier safetyIdentifier;
 	private final DisclosureQuestionHandler disclosureQuestionHandler;
 	private final DisclosureRepository disclosureRepository;
+	private final com.kmarket.navigator.backend.translation.application.DisclosureSelectionValidator selectionValidator;
 	private final Clock clock;
 	private final String workerId = "chat-" + UUID.randomUUID();
 
@@ -50,7 +50,8 @@ public class ChatGenerationWorker {
 		AgentEvidenceProvider evidenceProvider,
 		AgentSafetyIdentifier safetyIdentifier,
 		DisclosureQuestionHandler disclosureQuestionHandler,
-		DisclosureRepository disclosureRepository
+		DisclosureRepository disclosureRepository,
+		com.kmarket.navigator.backend.translation.application.DisclosureSelectionValidator selectionValidator
 	) {
 		this.repository = repository;
 		this.agentGateway = agentGateway;
@@ -58,6 +59,7 @@ public class ChatGenerationWorker {
 		this.safetyIdentifier = safetyIdentifier;
 		this.disclosureQuestionHandler = disclosureQuestionHandler;
 		this.disclosureRepository = disclosureRepository;
+		this.selectionValidator = selectionValidator;
 		this.clock = Clock.systemUTC();
 	}
 
@@ -79,6 +81,7 @@ public class ChatGenerationWorker {
 	}
 
 	private void process(ChatGenerationTask task) {
+		var generationContext = org.slf4j.MDC.putCloseable("chatGenerationId", task.generationId().toString());
 		try {
 			CompletedChatAnswer answer = task.context().type() == ChatContextType.FILING
 				? filingAnswer(task)
@@ -86,15 +89,20 @@ public class ChatGenerationWorker {
 			repository.complete(task.generationId(), answer, Instant.now(clock));
 		}
 		catch (BusinessException exception) {
-			fail(task, exception.errorCode().code(), retryable(exception.errorCode()));
+			fail(task, exception.errorCode().code());
 		}
 		catch (RuntimeException exception) {
-			fail(task, exception.getClass().getSimpleName(), true);
+			fail(task, exception.getClass().getSimpleName());
+		}
+		finally {
+			generationContext.close();
 		}
 	}
 
 	private CompletedChatAnswer agentAnswer(ChatGenerationTask task) {
-		List<AgentEvidence> evidence = evidenceProvider.evidence(task.context());
+		List<AgentEvidence> evidence = task.context().type() == ChatContextType.NEWS
+			? evidenceProvider.evidence(task.context(), task.question(), task.selectedText())
+			: evidenceProvider.evidence(task.context(), task.question());
 		Map<String, AgentEvidence> allowed = new LinkedHashMap<>();
 		evidence.forEach(item -> allowed.put(item.id(), item));
 		var generated = agentGateway.answer(
@@ -102,7 +110,8 @@ public class ChatGenerationWorker {
 			task.question(),
 			task.history(),
 			evidence,
-			safetyIdentifier.from(task.userId())
+			safetyIdentifier.from(task.userId()),
+			task.answerLocale()
 		);
 		List<ChatCitation> citations = generated.evidenceIds().stream()
 			.distinct()
@@ -110,7 +119,8 @@ public class ChatGenerationWorker {
 			.filter(java.util.Objects::nonNull)
 			.map(item -> new ChatCitation(
 				item.id(),
-				task.context().type().name(),
+				item.url() != null && item.url().matches("/disclosures/[0-9]{14}")
+					? "FILING" : task.context().type().name(),
 				item.referenceId(),
 				item.title(),
 				excerpt(item.content()),
@@ -125,12 +135,12 @@ public class ChatGenerationWorker {
 			&& citations.isEmpty();
 		return new CompletedChatAnswer(
 			invalidEvidence
-				? "I could not verify this answer against the available server evidence."
+				? localized(task, generated.answer(), "I could not verify this answer against the available server evidence.", "서버 근거로 답변 내용을 검증하지 못했습니다.")
 				: generated.answer(),
 			citations,
 			generated.insufficientEvidence() || invalidEvidence,
 			invalidEvidence
-				? "The generated answer did not contain a verifiable source."
+				? localized(task, generated.answer(), "The generated answer did not contain a verifiable source.", "생성된 답변에 검증 가능한 출처가 없습니다.")
 				: generated.refusalReason(),
 			generated.disclaimer(),
 			generated.confidence(),
@@ -147,19 +157,19 @@ public class ChatGenerationWorker {
 		if (!DisclosureContentVersion.calculate(detail).equals(task.context().version())) {
 			throw new BusinessException(ErrorCode.CHAT_CONTEXT_STALE);
 		}
-		DisclosureQuestion.SelectedContext selected = selectedContext(task, detail);
+		DisclosureQuestion.SelectedContext selected = selectionValidator.validate(detail, task.selectedSectionId(), task.selectedText());
 		var answer = disclosureQuestionHandler.ask(
 			task.context().referenceId(),
-			new DisclosureQuestion(task.question(), selected)
+			new DisclosureQuestion(task.question(), selected, task.answerLocale())
 		);
 		List<ChatCitation> citations = answer.citations().stream()
 			.map(citation -> new ChatCitation(
 				citation.id(),
 				"FILING",
 				task.context().referenceId(),
-				citation.heading(),
+				detail.titleEn() == null || detail.titleEn().isBlank() ? citation.heading() : detail.titleEn(),
 				citation.excerpt(),
-				detail.officialUrl(),
+				"/disclosures/" + task.context().referenceId(),
 				detail.detectedAt(),
 				citation.sectionIds()
 			))
@@ -169,7 +179,7 @@ public class ChatGenerationWorker {
 			citations,
 			answer.refused(),
 			answer.refusalReason(),
-			"For information only. The answer is limited to this filing version.",
+			localized(task, answer.answer(), "For information only. The answer is limited to this filing version.", "정보 제공용이며, 답변은 현재 공시 버전의 근거로 한정됩니다."),
 			answer.refused() ? BigDecimal.ZERO : null,
 			answer.model(),
 			answer.promptVersion(),
@@ -178,36 +188,14 @@ public class ChatGenerationWorker {
 		);
 	}
 
-	private DisclosureQuestion.SelectedContext selectedContext(
-		ChatGenerationTask task,
-		DisclosureDetail detail
-	) {
-		if (task.selectedSectionId() == null) {
-			return null;
-		}
-		var section = detail.documents().stream()
-			.flatMap(document -> document.sections().stream())
-			.filter(candidate -> candidate.id().equals(task.selectedSectionId()))
-			.findFirst()
-			.orElseThrow(() -> new BusinessException(ErrorCode.INVALID_CHAT_SELECTION));
-		String source = section.text() == null || section.text().isBlank()
-			? section.tableData()
-			: section.text();
-		if (source == null || !source.contains(task.selectedText())) {
-			throw new BusinessException(ErrorCode.INVALID_CHAT_SELECTION);
-		}
-		return new DisclosureQuestion.SelectedContext(section.id(), task.selectedText());
-	}
-
-	private void fail(ChatGenerationTask task, String errorCode, boolean canRetry) {
-		boolean terminal = !canRetry || task.attempts() >= MAX_ATTEMPTS;
-		long delaySeconds = Math.min(60, 5L << Math.max(0, task.attempts() - 1));
+	private void fail(ChatGenerationTask task, String errorCode) {
 		Instant now = Instant.now(clock);
+		// 실패 응답을 자동 재생성해 과금하지 않는다. 재시도는 사용자가 명시적으로 요청한다.
 		repository.fail(
 			task.generationId(),
 			errorCode,
-			terminal,
-			now.plusSeconds(delaySeconds),
+			true,
+			now,
 			now
 		);
 		log.warn(
@@ -216,17 +204,18 @@ public class ChatGenerationWorker {
 			task.context().type(),
 			task.attempts(),
 			errorCode,
-			terminal
+			true
 		);
-	}
-
-	private boolean retryable(ErrorCode errorCode) {
-		return errorCode == ErrorCode.AI_SERVICE_UNAVAILABLE
-			|| errorCode == ErrorCode.DISCLOSURE_INDEX_NOT_READY;
 	}
 
 	private String excerpt(String content) {
 		return content.substring(0, Math.min(content.length(), 1_000));
+	}
+
+	private static String localized(ChatGenerationTask task, String validatedAnswer, String en, String ko) {
+		boolean korean = "ko".equals(task.answerLocale()) || "auto".equals(task.answerLocale())
+			&& validatedAnswer.codePoints().anyMatch(value -> value >= 0xAC00 && value <= 0xD7A3);
+		return korean ? ko : en;
 	}
 
 	private String title(String suggested, String question) {

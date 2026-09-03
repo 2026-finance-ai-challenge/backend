@@ -15,4 +15,8 @@ public record ChatGeneration(
 	Instant updatedAt,
 	Instant completedAt
 ) {
+	public boolean retryable() {
+		return status == ChatGenerationStatus.FAILED
+			&& "AI_SERVICE_UNAVAILABLE".equals(lastErrorCode);
+	}
 }

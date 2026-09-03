@@ -11,14 +11,16 @@ import com.kmarket.navigator.backend.disclosure.domain.DisclosureQuestion;
 
 record DisclosureQuestionRequest(
 	@NotBlank @Size(max = 2_000) String question,
-	@Valid SelectedContext selectedContext
+	@Valid SelectedContext selectedContext,
+	@jakarta.validation.constraints.Pattern(regexp = "en|ko") String answerLocale
 ) {
 	DisclosureQuestion toDomain() {
 		return new DisclosureQuestion(
 			question,
 			selectedContext == null
 				? null
-				: new DisclosureQuestion.SelectedContext(selectedContext.sectionId(), selectedContext.text())
+				: new DisclosureQuestion.SelectedContext(selectedContext.sectionId(), selectedContext.text()),
+			"auto"
 		);
 	}
 
