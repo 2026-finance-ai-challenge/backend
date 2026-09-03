@@ -71,3 +71,10 @@
 ```shell
 openssl rand -base64 32
 ```
+# 사전 점검 상태와 완료 문서
+
+- `/api/v1/me`의 `taxVerificationStatus`는 현재 문서와 대화 상태에서 계산한다. `NOT_STARTED`는 시작 전, `IN_PROGRESS`는 진행 중(검증 실패·재업로드 포함), `VERIFIED`는 3종 문서와 비교 검증 완료다. 계정 생성 시 저장된 과거 상태를 기준으로 사용하지 않는다.
+- 초기화는 기존 문서와 방을 제거하고 새 방을 만들므로 `IN_PROGRESS`가 된다. 완료 문서 접근 권한도 즉시 사라진다.
+- `GET /api/v1/me/tax-review-package`는 본인의 검증 완료 문서 3종을 반환한다.
+- `GET /api/v1/me/tax-review-package/correction.pdf`는 하나금융 원본 양식에 검증된 성명·납세자번호·거주국을 합성한 정적 PDF다. 접수번호·신청일·서명·금액·금융사 정보는 추정하지 않는다. 각 페이지에 예상 초안/미제출임을 표시한다.
+- PDF는 요청 시 생성하고 영구 저장하지 않는다. 모든 응답은 본인 인증과 완료 상태를 검사하며 `no-store, private`을 사용한다. 국세청 제출·금융사 승인 API는 제공하지 않는다.
