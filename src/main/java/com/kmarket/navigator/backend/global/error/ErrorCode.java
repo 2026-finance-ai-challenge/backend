@@ -155,6 +155,11 @@ public enum ErrorCode {
 		"TAX_DOCUMENT_NOT_RETRYABLE",
 		"Only a failed tax document verification can be retried."
 	),
+	TAX_DOCUMENT_STEP_BLOCKED(
+		HttpStatus.CONFLICT,
+		"TAX_DOCUMENT_STEP_BLOCKED",
+		"Complete the current tax document verification step before continuing."
+	),
 	TAX_DOCUMENT_RATE_LIMITED(
 		HttpStatus.TOO_MANY_REQUESTS,
 		"TAX_DOCUMENT_RATE_LIMITED",

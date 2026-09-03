@@ -11,6 +11,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import com.kmarket.navigator.backend.chat.application.AgentSafetyIdentifier;
+import com.kmarket.navigator.backend.global.error.BusinessException;
 import com.kmarket.navigator.backend.tax.application.port.TaxDocumentGateway;
 import com.kmarket.navigator.backend.tax.application.port.TaxDocumentRepository;
 import com.kmarket.navigator.backend.tax.application.port.TaxDocumentStorage;
@@ -97,18 +98,21 @@ public class TaxDocumentWorker {
 			repository.complete(document.id(), verified, "tax-" + UUID.randomUUID(), now);
 			repository.audit(document.id(), document.userId(), "VERIFICATION_COMPLETED", now);
 		}
+		catch (BusinessException exception) {
+			fail(document, exception.errorCode().code());
+		}
 		catch (RuntimeException exception) {
-			fail(document, exception);
+			fail(document, exception.getClass().getSimpleName());
 		}
 	}
 
-	private void fail(TaxDocument document, RuntimeException exception) {
+	private void fail(TaxDocument document, String errorCode) {
 		boolean terminal = document.attempts() >= MAX_ATTEMPTS;
 		long delay = Math.min(60, 5L << Math.max(0, document.attempts() - 1));
 		Instant now = Instant.now(clock);
 		repository.fail(
 			document.id(),
-			exception.getClass().getSimpleName(),
+			errorCode,
 			terminal,
 			now.plusSeconds(delay),
 			now

@@ -98,6 +98,7 @@ public class OpenApiConfig {
 		entry("TaxDocumentController#list", operation("내 세무 문서 목록 조회", "Tax", Access.AUTHENTICATED)),
 		entry("TaxDocumentController#compare", operation("세무 문서 3종 교차 검증", "Tax", Access.AUTHENTICATED)),
 		entry("TaxDocumentController#get", operation("내 세무 문서 상세 조회", "Tax", Access.AUTHENTICATED)),
+		entry("TaxDocumentController#original", operation("내 세무 원본 문서 열기", "Tax", Access.AUTHENTICATED)),
 		entry("TaxDocumentController#retry", operation("세무 문서 검증 재시도", "Tax", Access.AUTHENTICATED)),
 		entry("TaxDocumentController#delete", operation("세무 문서 삭제", "Tax", Access.AUTHENTICATED, "204"))
 	);

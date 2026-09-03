@@ -2,6 +2,7 @@ package com.kmarket.navigator.backend.tax.presentation;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.UUID;
 
@@ -11,6 +12,8 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.validation.annotation.Validated;
@@ -81,6 +84,30 @@ public class TaxDocumentController {
 		@PathVariable UUID documentId
 	) {
 		return ResponseEntity.ok(TaxDocumentResponse.from(service.get(user.id(), documentId)));
+	}
+
+	@GetMapping("/{documentId}/original")
+	public ResponseEntity<byte[]> original(
+		@AuthenticationPrincipal AuthenticatedUser user,
+		@PathVariable UUID documentId
+	) {
+		var original = service.original(user.id(), documentId);
+		MediaType mediaType;
+		try {
+			mediaType = MediaType.parseMediaType(original.mediaType());
+		}
+		catch (IllegalArgumentException exception) {
+			mediaType = MediaType.APPLICATION_OCTET_STREAM;
+		}
+		return ResponseEntity.ok()
+			.contentType(mediaType)
+			.header(HttpHeaders.CONTENT_DISPOSITION, org.springframework.http.ContentDisposition.inline()
+				.filename(original.originalFileName(), StandardCharsets.UTF_8)
+				.build().toString())
+			.header(HttpHeaders.CACHE_CONTROL, "no-store, private")
+			.header("X-Content-Type-Options", "nosniff")
+			.header("Content-Security-Policy", "sandbox")
+			.body(original.content());
 	}
 
 	@PostMapping("/{documentId}/retry")
