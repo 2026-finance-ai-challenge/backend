@@ -39,6 +39,12 @@ public class ChatRoomService {
 	@Transactional
 	public ChatRoom create(AuthenticatedUser user, ChatContextType type, String referenceId) {
 		var context = contextResolver.resolve(type, referenceId);
+		if (type == ChatContextType.TAX_GUIDE) {
+			return repository.findAll(user.id(), null, 100).stream()
+				.filter(room -> room.context().type() == ChatContextType.TAX_GUIDE)
+				.findFirst()
+				.orElseGet(() -> repository.create(user.id(), "Tax assessment", context, Instant.now(clock)));
+		}
 		return repository.create(user.id(), "New chat", context, Instant.now(clock));
 	}
 

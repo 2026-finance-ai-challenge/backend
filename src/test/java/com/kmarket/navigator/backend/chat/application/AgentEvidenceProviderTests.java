@@ -65,7 +65,7 @@ class AgentEvidenceProviderTests {
 		assertThat(evidence).hasSize(1);
 		assertThat(evidence.getFirst().id()).isEqualTo("E1");
 		assertThat(evidence.getFirst().source()).isNotBlank();
-		assertThat(evidence.getFirst().url()).isEqualTo("https://news.example.com/123");
+		assertThat(evidence.getFirst().url()).isEqualTo("/news/" + article.id());
 		assertThat(evidence.getFirst().content()).contains("2026-09-02T01:00:00Z", "005930").endsWith("}");
 		verifyNoInteractions(filings);
 	}
