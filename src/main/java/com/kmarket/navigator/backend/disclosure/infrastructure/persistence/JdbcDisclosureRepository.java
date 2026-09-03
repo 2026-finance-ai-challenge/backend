@@ -763,7 +763,6 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			  AND translation.status = 'READY'
 			  AND NULLIF(BTRIM(translation.translated_text), '') IS NOT NULL
 			  AND d.document_status = 'READY'
-			  AND d.index_status = 'READY'
 			  AND d.event_type IS NOT NULL
 			  AND d.sentiment IS NOT NULL
 			  AND d.importance IS NOT NULL

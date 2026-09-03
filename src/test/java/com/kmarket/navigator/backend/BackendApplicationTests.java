@@ -640,7 +640,7 @@ class BackendApplicationTests {
 	}
 
 	@Test
-	void disclosureListDoesNotExposeARecordBeforeItsDetailIsPublished() throws Exception {
+	void disclosureListKeepsAReadyDetailVisibleWhileRagIndexingIsPending() throws Exception {
 		String receiptNumber = "20990102000001";
 		disclosureRepository.saveFiling(filingAt(receiptNumber, LocalDate.of(2099, 1, 2)));
 		publishDisclosureFixture(receiptNumber);
@@ -653,7 +653,10 @@ class BackendApplicationTests {
 				.param("from", "2099-01-02")
 				.param("to", "2099-01-02"))
 			.andExpect(status().isOk())
-			.andExpect(jsonPath("$.items").isEmpty());
+			.andExpect(jsonPath("$.items.length()").value(1))
+			.andExpect(jsonPath("$.items[0].receiptNumber").value(receiptNumber));
+		mockMvc.perform(get("/api/v1/disclosures/{receiptNumber}", receiptNumber))
+			.andExpect(status().isOk());
 	}
 
 	@Test
