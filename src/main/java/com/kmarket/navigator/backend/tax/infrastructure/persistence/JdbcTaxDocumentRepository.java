@@ -108,6 +108,29 @@ public class JdbcTaxDocumentRepository implements TaxDocumentRepository {
 	}
 
 	@Override
+	public Optional<TaxDocument> findPreviewBackfillCandidate(Instant now) {
+		return jdbcClient.sql("SELECT " + COLUMNS + " FROM tax_document WHERE document_type = 'REDUCED_TAX_APPLICATION' "
+			+ "AND status = 'VERIFIED' AND deleted_at IS NULL AND storage_key NOT LIKE 'purged/%' "
+			+ "AND COALESCE(extracted_fields->>'previewVersion', '0') = '0' AND preview_attempts < 3 "
+			+ "AND preview_retry_at <= :now ORDER BY created_at DESC LIMIT 1")
+			.param("now", timestamp(now)).query(this::map).optional();
+	}
+
+	@Override
+	public void updatePreviewFields(UUID documentId, TaxDocumentFields fields, Instant now) {
+		jdbcClient.sql("UPDATE tax_document SET extracted_fields = CAST(:fields AS jsonb), updated_at = :now "
+			+ "WHERE id = :id AND status = 'VERIFIED' AND deleted_at IS NULL AND storage_key NOT LIKE 'purged/%'")
+			.param("fields", json(fields)).param("now", timestamp(now)).param("id", documentId).update();
+	}
+
+	@Override
+	public void failPreviewBackfill(UUID documentId, Instant retryAt) {
+		jdbcClient.sql("UPDATE tax_document SET preview_attempts = preview_attempts + 1, preview_retry_at = :retryAt, "
+			+ "extracted_fields = CASE WHEN preview_attempts >= 2 THEN jsonb_set(extracted_fields, '{previewVersion}', '-1'::jsonb) ELSE extracted_fields END WHERE id = :id")
+			.param("id", documentId).param("retryAt", timestamp(retryAt)).update();
+	}
+
+	@Override
 	public Optional<TaxDocument> findOwned(UUID userId, UUID documentId) {
 		return jdbcClient.sql("SELECT " + COLUMNS + " FROM tax_document "
 			+ "WHERE id = :documentId AND user_id = :userId AND deleted_at IS NULL")
