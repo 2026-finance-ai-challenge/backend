@@ -39,6 +39,21 @@ public class ChatRoomService {
 	@Transactional
 	public ChatRoom create(AuthenticatedUser user, ChatContextType type, String referenceId) {
 		var context = contextResolver.resolve(type, referenceId);
+		if (type == ChatContextType.TAX_GUIDE) {
+			var existing = repository.findAll(user.id(), null, 100).stream()
+				.filter(room -> room.context().type() == ChatContextType.TAX_GUIDE)
+				.findFirst();
+			if (existing.isPresent()) {
+				var room = existing.get();
+				// 과거에 생성된 일반 제목을 세무 대화방 제목으로 한 번만 바로잡는다.
+				if ("New chat".equals(room.name())) {
+					return repository.rename(user.id(), room.id(), "Tax assessment", room.version(), Instant.now(clock))
+						.orElse(room);
+				}
+				return room;
+			}
+			return repository.create(user.id(), "Tax assessment", context, Instant.now(clock));
+		}
 		return repository.create(user.id(), "New chat", context, Instant.now(clock));
 	}
 
