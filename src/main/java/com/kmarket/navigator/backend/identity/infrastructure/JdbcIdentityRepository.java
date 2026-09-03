@@ -71,7 +71,7 @@ class JdbcIdentityRepository implements IdentityRepository {
 	public Optional<UserAccount> findActiveByLoginId(String loginId) {
 		return jdbcClient.sql("""
 			SELECT id, login_id, password_hash, nationality, investor_type,
-			       tax_verification_status, created_at
+			       (SELECT status FROM user_tax_progress WHERE user_id = user_account.id) AS tax_verification_status, created_at
 			FROM user_account
 			WHERE login_id = :loginId AND deleted_at IS NULL
 			""")
@@ -84,7 +84,7 @@ class JdbcIdentityRepository implements IdentityRepository {
 	public Optional<UserAccount> findActiveById(UUID userId) {
 		return jdbcClient.sql("""
 			SELECT id, login_id, password_hash, nationality, investor_type,
-			       tax_verification_status, created_at
+			       (SELECT status FROM user_tax_progress WHERE user_id = user_account.id) AS tax_verification_status, created_at
 			FROM user_account
 			WHERE id = :userId AND deleted_at IS NULL
 			""")

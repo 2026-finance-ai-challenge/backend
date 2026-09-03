@@ -42,6 +42,7 @@ dependencies {
 	implementation("net.javacrumbs.shedlock:shedlock-provider-jdbc-template:7.1.0")
 	implementation("net.javacrumbs.shedlock:shedlock-spring:7.1.0")
 	implementation("org.jsoup:jsoup:1.23.1")
+	implementation("org.apache.pdfbox:pdfbox:3.0.8")
 	implementation("com.github.luben:zstd-jni:1.5.7-12")
 	implementation("org.bouncycastle:bcprov-jdk18on:1.84")
 	implementation("org.springframework.security:spring-security-oauth2-jose")
