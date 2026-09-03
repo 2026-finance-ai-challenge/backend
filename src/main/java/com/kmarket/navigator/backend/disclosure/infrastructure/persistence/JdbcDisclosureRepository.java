@@ -50,7 +50,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 	private static final String EMBEDDING_JOB = "DISCLOSURE_EMBEDDING";
 	private static final String METADATA_EMBEDDING_JOB = "DISCLOSURE_METADATA_EMBEDDING";
 	private static final String SIGNAL_JOB = "DISCLOSURE_SIGNAL";
-	private static final String DOCUMENT_PARSER_VERSION = "opendart-html-v5";
+	private static final String DOCUMENT_PARSER_VERSION = "opendart-html-v6";
 	private static final String OPEN_DART_DOCUMENT_PROVIDER = "OPEN_DART_DOCUMENT";
 
 	private final JdbcClient jdbcClient;

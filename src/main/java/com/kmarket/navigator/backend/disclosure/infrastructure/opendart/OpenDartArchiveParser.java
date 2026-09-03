@@ -225,15 +225,24 @@ class OpenDartArchiveParser {
 		// HTML 파싱 전에 DART 전용 셀을 변환해야 값이 표 밖으로 이동하지 않는다.
 		String markup = decodeDocument(entry.content()).replaceAll("(?i)<(/?)(?:TU|TE)(?=[\\s>])", "<$1td");
 		Document document = Jsoup.parse(markup);
-		List<OpenDartSection> sections = extractSections(document);
+		String bodyText = document.body() == null ? visibleText(document) : visibleText(document.body());
+		if (bodyText.isBlank()) throw new OpenDartException("EMPTY_DOCUMENT_CONTENT");
+		// 정리 전 XML 트리가 아닌 브라우저가 읽는 최종 HTML 트리에서 섹션을 만든다.
+		String sanitizedHtml = sanitizeHtml(document);
+		Document display = Jsoup.parseBodyFragment(sanitizedHtml);
+		if (!bodyText.replace(" ", "").equals(visibleText(display.body()).replace(" ", ""))) {
+			throw new OpenDartException("SOURCE_STRUCTURE_CHANGED");
+		}
+		display.title(document.title());
+		List<OpenDartSection> sections = extractSections(display);
 		if (sections.stream().anyMatch(section -> section.text().contains("\uFFFD"))) {
 			throw new OpenDartException("SOURCE_TEXT_CORRUPTED");
 		}
 		return new OpenDartDocument(
 			entry.filename(),
 			sha256(entry.content()),
-			document.body() == null ? visibleText(document) : visibleText(document.body()),
-			sanitizeHtml(document),
+			bodyText,
+			sanitizedHtml,
 			sections
 		);
 	}

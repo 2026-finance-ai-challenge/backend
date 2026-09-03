@@ -28,7 +28,7 @@ class DisclosureHtmlArchiveAuditTests {
 			for (var archive : archives) {
 				java.util.List<com.kmarket.navigator.backend.disclosure.application.port.OpenDartDocument> documents;
 				try { documents = parser.parseDocuments(Files.readAllBytes(archive)); }
-				catch (OpenDartException error) { invalidSources.add(archive.getFileName().toString()); continue; }
+				catch (OpenDartException error) { invalidSources.add(archive.getFileName() + ":" + error.errorCode()); continue; }
 				for (var parsed : documents) {
 					var source = new DisclosureDocument(UUID.randomUUID(), parsed.filename(), 1,
 						parsed.contentHash(), parsed.sanitizedHtml(), parsed.sections().stream().map(section ->

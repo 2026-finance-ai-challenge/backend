@@ -50,6 +50,9 @@ public class DisclosureHtmlBackfillRunner implements ApplicationRunner {
 	private java.nio.channels.FileChannel backup;
 	private final boolean reparse;
 	private final com.kmarket.navigator.backend.disclosure.infrastructure.persistence.DisclosureDocumentRepairService repair;
+	private final FileDocumentArchiveStore archiveStore;
+	private final java.util.List<String> receipts;
+	private final boolean forceFetch;
 
 	@Bean
 	static java.time.Clock backfillClock() { return java.time.Clock.systemUTC(); }
@@ -64,13 +67,22 @@ public class DisclosureHtmlBackfillRunner implements ApplicationRunner {
 		@Value("${kmarket.html-backfill.fetch-limit:0}") int fetchLimit,
 		@Value("${kmarket.html-backfill.backup:}") String backupPath,
 		@Value("${kmarket.html-backfill.reparse:false}") boolean reparse,
-		com.kmarket.navigator.backend.disclosure.infrastructure.persistence.DisclosureDocumentRepairService repair) {
+		com.kmarket.navigator.backend.disclosure.infrastructure.persistence.DisclosureDocumentRepairService repair,
+		FileDocumentArchiveStore archiveStore,
+		@Value("${kmarket.html-backfill.receipts:}") String receipts,
+		@Value("${kmarket.html-backfill.force-fetch:false}") boolean forceFetch) {
 		this.jdbc = jdbc; this.mapper = mapper; this.parser = parser; this.properties = properties;
 		this.apply = apply; this.limit = Math.clamp(limit, 1, 2_000); this.applicationContext = applicationContext;
 		this.gateway = gateway; this.afterId = afterId; this.beforeId = beforeId; this.fetchLimit = Math.clamp(fetchLimit, 0, 20);
 		this.sinceDate = sinceDate;
 		this.backupPath = backupPath.isBlank() ? null : Path.of(backupPath);
-		this.reparse = reparse; this.repair = repair;
+		this.reparse = reparse; this.repair = repair; this.archiveStore = archiveStore;
+		this.receipts = receipts.isBlank() ? java.util.List.of() : java.util.Arrays.stream(receipts.split(",")).map(String::trim).distinct().toList();
+		this.forceFetch = forceFetch;
+		if (this.receipts.size() > 20 || this.receipts.stream().anyMatch(receipt -> !receipt.matches("[0-9]{14}"))
+			|| (forceFetch && (!reparse || this.receipts.isEmpty() || fetchLimit < this.receipts.size()))) {
+			throw new IllegalArgumentException("Forced source repair requires up to 20 explicit receipts, reparse and sufficient fetch limit");
+		}
 	}
 
 	@Override
@@ -95,12 +107,16 @@ public class DisclosureHtmlBackfillRunner implements ApplicationRunner {
 			SELECT document.id, document.disclosure_id, document.content_hash, disclosure.receipt_number,
 			    document.parser_version, document.original_bytes, document.compressed_bytes, document.source_filename
 			FROM disclosure_document document JOIN disclosure ON disclosure.id = document.disclosure_id
-			WHERE document.is_current AND document.parser_version NOT IN ('opendart-html-v4-restored-v5', 'opendart-html-v5')
+			WHERE document.is_current
+			    AND (:forceFetch OR document.parser_version NOT IN ('opendart-html-v4-restored-v5', 'opendart-html-v5', 'opendart-html-v6'))
+			    AND (:allReceipts OR disclosure.receipt_number IN (:receipts))
 			    AND document.id > :afterId
 			    AND document.id < :beforeId
 			    AND disclosure.filed_date >= :sinceDate
 			ORDER BY document.id LIMIT :limit
-			""").param("limit", limit).param("afterId", afterId).param("beforeId", beforeId).param("sinceDate", sinceDate).query((rs, row) -> new Candidate(rs.getObject("id", UUID.class),
+			""").param("forceFetch", forceFetch).param("allReceipts", receipts.isEmpty())
+			.param("receipts", receipts.isEmpty() ? java.util.List.of("00000000000000") : receipts)
+			.param("limit", limit).param("afterId", afterId).param("beforeId", beforeId).param("sinceDate", sinceDate).query((rs, row) -> new Candidate(rs.getObject("id", UUID.class),
 				rs.getObject("disclosure_id", UUID.class), rs.getString("content_hash"), rs.getString("receipt_number"),
 				rs.getString("parser_version"), rs.getLong("original_bytes"), rs.getLong("compressed_bytes"),
 				rs.getString("source_filename"))).list();
@@ -120,15 +136,15 @@ public class DisclosureHtmlBackfillRunner implements ApplicationRunner {
 	private boolean restore(Candidate candidate) throws Exception {
 		byte[] previous = jdbc.sql("SELECT payload_zstd FROM disclosure_document WHERE id = :id")
 			.param("id", candidate.id()).query(byte[].class).optional().orElse(null);
+		if (forceFetch) {
+			if (fetched >= fetchLimit) return false;
+			fetched++;
+			return persistFetched(candidate, previous, null, gateway.fetchDocuments(candidate.receipt()));
+		}
 		if (previous == null) {
 			if (!reparse || fetched >= fetchLimit) return false;
 			fetched++;
-			var fresh = gateway.fetchDocuments(candidate.receipt()).documents().stream()
-				.filter(document -> document.filename().equals(candidate.filename())).findFirst();
-			if (fresh.isEmpty()) return false;
-			if (!apply) return true;
-			writeBackup(candidate, null);
-			return repair.restoreVersion(candidate.id(), candidate.disclosureId(), candidate.receipt(), null, fresh.get());
+			return persistFetched(candidate, null, null, gateway.fetchDocuments(candidate.receipt()));
 		}
 		ObjectNode payload;
 		try (var input = new ZstdInputStream(new ByteArrayInputStream(previous))) {
@@ -168,11 +184,36 @@ public class DisclosureHtmlBackfillRunner implements ApplicationRunner {
 		}
 		if (fetched < fetchLimit) {
 			fetched++;
-			var fresh = gateway.fetchDocuments(candidate.receipt()).documents().stream()
-				.filter(document -> document.contentHash().equals(candidate.hash())).findFirst();
-			if (fresh.isPresent()) return persist(candidate, previous, payload, fresh.get());
+			return persistFetched(candidate, previous, payload, gateway.fetchDocuments(candidate.receipt()));
 		}
 		return false;
+	}
+
+	private boolean persistFetched(Candidate candidate, byte[] previous, ObjectNode payload,
+		com.kmarket.navigator.backend.disclosure.application.port.OpenDartDocumentFetch fetch) throws Exception {
+		var same = fetch.documents().stream().filter(doc -> doc.contentHash().equals(candidate.hash())
+			&& doc.filename().equals(candidate.filename())).findFirst();
+		if (forceFetch && fetch.documents().stream().anyMatch(doc -> doc.contentHash().equals(candidate.hash())
+			&& (doc.filename().equals(candidate.filename()) || doc.filename().equals(candidate.receipt() + ".viewer.html")))) return true;
+		if (same.isPresent() && payload != null) return persist(candidate, previous, payload, same.get());
+		if (!reparse) return false;
+		// 공식 뷰어의 메인 문서만 같은 접수번호의 XML을 대체한다. 첨부 문서는 이름을 추정하지 않는다.
+		var candidates = fetch.documents().stream().filter(doc -> doc.filename().equals(candidate.filename())
+			|| (candidate.filename().equals(candidate.receipt() + ".xml")
+				&& doc.filename().equals(candidate.receipt() + ".viewer.html")
+				&& fetch.sources().stream().anyMatch(source -> source.kind() == com.kmarket.navigator.backend.disclosure.application.port.DocumentArchiveKind.DART_VIEWER_HTML
+					&& source.status() == com.kmarket.navigator.backend.disclosure.application.port.DocumentArchiveStatus.VERIFIED))).toList();
+		if (candidates.size() != 1) return false;
+		var original = candidates.getFirst();
+		var sections = original.sections().stream().map(section -> new DisclosureSection(UUID.randomUUID(),
+			section.ordinal(), section.kind(), section.heading(), section.text(), section.tableData())).toList();
+		if (original.sanitizedHtml().isBlank() || sections.isEmpty()) return false;
+		DisclosureHtmlRenderer.render(new DisclosureDocument(candidate.id(), original.filename(), 1,
+			original.contentHash(), original.sanitizedHtml(), sections), java.util.Map.of());
+		if (!apply) return true;
+		writeBackup(candidate, previous);
+		var archives = archiveStore.storeRecovered(candidate.receipt(), fetch);
+		return repair.restoreVersion(candidate.id(), candidate.disclosureId(), candidate.receipt(), previous, original, archives);
 	}
 
 	private boolean persist(Candidate candidate, byte[] previous, ObjectNode payload, OpenDartDocument original) throws Exception {
@@ -220,6 +261,10 @@ public class DisclosureHtmlBackfillRunner implements ApplicationRunner {
 		entry.put("id", candidate.id().toString()); entry.put("contentHash", candidate.hash());
 		entry.put("parserVersion", candidate.parserVersion()); entry.put("originalBytes", candidate.originalBytes());
 		entry.put("compressedBytes", candidate.compressedBytes());
+		entry.set("archives", mapper.valueToTree(jdbc.sql("""
+			SELECT archive_kind, archive_status, relative_path, sha256, size_bytes, error_code
+			FROM disclosure_archive WHERE disclosure_id = :id
+			""").param("id", candidate.disclosureId()).query().listOfRows()));
 		if (previous == null) entry.putNull("payloadZstd");
 		else entry.put("payloadZstd", java.util.Base64.getEncoder().encodeToString(previous));
 		var buffer = java.nio.ByteBuffer.wrap((mapper.writeValueAsString(entry) + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));

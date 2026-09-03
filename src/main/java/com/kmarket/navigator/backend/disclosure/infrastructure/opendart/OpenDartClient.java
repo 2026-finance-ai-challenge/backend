@@ -8,8 +8,6 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -52,11 +50,6 @@ class OpenDartClient implements OpenDartGateway {
 	private static final int MAX_RESPONSE_BYTES = 25 * 1024 * 1024;
 	private static final int MAX_ERROR_RESPONSE_BYTES = 64 * 1024;
 	private static final int MAX_ATTEMPTS = 3;
-	private static final Pattern VIEWER_REFERENCE = Pattern.compile(
-		"viewDoc\\(\\\"([0-9]{14})\\\",\\s*\\\"([0-9]{1,20})\\\",\\s*"
-			+ "\\\"([0-9]{1,20})\\\",\\s*\\\"([0-9]{1,20})\\\",\\s*"
-			+ "\\\"([0-9]{1,20})\\\",\\s*\\\"([A-Za-z0-9._-]{1,50})\\\","
-	);
 
 	private final RestClient restClient;
 	private final RestClient viewerRestClient;
@@ -134,12 +127,7 @@ class OpenDartClient implements OpenDartGateway {
 				ViewerSource viewer = fetchViewerDocument(receiptNumber);
 				return new OpenDartDocumentFetch(
 					List.of(viewer.document()),
-					List.of(new OpenDartSource(
-						DocumentArchiveKind.DART_VIEWER_HTML,
-						DocumentArchiveStatus.VERIFIED,
-						viewer.content(),
-						null
-					))
+					List.of(viewer.source())
 				);
 			}
 			if (archive == null) {
@@ -152,6 +140,9 @@ class OpenDartClient implements OpenDartGateway {
 					exception.errorCode()
 				);
 			if (!exception.errorCode().equals("SOURCE_TEXT_CORRUPTED")
+				&& !exception.errorCode().equals("EMPTY_DOCUMENT_CONTENT")
+				&& !exception.errorCode().equals("SOURCE_STRUCTURE_CHANGED")
+				&& !exception.errorCode().equals("INVALID_DOCUMENT_ENCODING")
 				&& !exception.errorCode().equals("INVALID_ARCHIVE")) {
 				throw new OpenDartSourceException(exception.errorCode(), rejectedSource);
 			}
@@ -161,12 +152,7 @@ class OpenDartClient implements OpenDartGateway {
 					List.of(viewer.document()),
 					List.of(
 						rejectedSource,
-						new OpenDartSource(
-							DocumentArchiveKind.DART_VIEWER_HTML,
-							DocumentArchiveStatus.VERIFIED,
-							viewer.content(),
-							null
-						)
+						viewer.source()
 					)
 				);
 			}
@@ -187,8 +173,14 @@ class OpenDartClient implements OpenDartGateway {
 					.queryParam("rcpNo", receiptNumber)
 					.build())
 				.exchange((request, response) -> readResponse(response, MAX_VIEWER_INDEX_BYTES)));
-			DartViewerReference reference = viewerReference(receiptNumber, index);
-			byte[] document = executeWithRetry(() -> viewerRestClient.get()
+			var references = DartViewerReferenceParser.parse(receiptNumber, new String(index, StandardCharsets.UTF_8));
+			var provenance = new java.util.LinkedHashMap<String, byte[]>();
+			provenance.put("index.raw", index);
+			var combined = new StringBuilder("<html><head><meta charset=\"UTF-8\"></head><body>");
+			byte[] single = null;
+			long totalBytes = index.length;
+			for (var reference : references) {
+				byte[] document = executeWithRetry(() -> viewerRestClient.get()
 				.uri(builder -> builder
 					.path("/report/viewer.do")
 					.queryParam("rcpNo", receiptNumber)
@@ -199,7 +191,17 @@ class OpenDartClient implements OpenDartGateway {
 					.queryParam("dtd", reference.dtd())
 					.build())
 				.exchange((request, response) -> readResponse(response, MAX_RESPONSE_BYTES)));
-			return new ViewerSource(archiveParser.parseViewerDocument(receiptNumber, document), document);
+				totalBytes += document.length;
+				if (totalBytes > MAX_RESPONSE_BYTES) throw new OpenDartException("DART_VIEWER_SIZE_LIMIT");
+				var parsed = archiveParser.parseViewerDocument(receiptNumber, document);
+				provenance.put("page-" + reference.elementId() + "-" + reference.offset() + ".raw", document);
+				combined.append(parsed.sanitizedHtml());
+				single = document;
+			}
+			combined.append("</body></html>");
+			byte[] content = references.size() == 1 ? single : combined.toString().getBytes(StandardCharsets.UTF_8);
+			if (content.length > MAX_RESPONSE_BYTES) throw new OpenDartException("DART_VIEWER_SIZE_LIMIT");
+			return new ViewerSource(archiveParser.parseViewerDocument(receiptNumber, content), content, provenance);
 		}
 		catch (OpenDartException exception) {
 			if (exception.errorCode().equals("NETWORK_ERROR")) {
@@ -209,23 +211,10 @@ class OpenDartClient implements OpenDartGateway {
 		}
 	}
 
-	private record ViewerSource(OpenDartDocument document, byte[] content) {
-	}
-
-	private static DartViewerReference viewerReference(String receiptNumber, byte[] index) {
-		Matcher matcher = VIEWER_REFERENCE.matcher(new String(index, StandardCharsets.UTF_8));
-		while (matcher.find()) {
-			if (matcher.group(1).equals(receiptNumber)) {
-				return new DartViewerReference(
-					matcher.group(2),
-					matcher.group(3),
-					matcher.group(4),
-					matcher.group(5),
-					matcher.group(6)
-				);
-			}
+	private record ViewerSource(OpenDartDocument document, byte[] content, java.util.Map<String, byte[]> provenance) {
+		OpenDartSource source() {
+			return new OpenDartSource(DocumentArchiveKind.DART_VIEWER_HTML, DocumentArchiveStatus.VERIFIED, content, null, provenance);
 		}
-		throw new OpenDartException("DART_VIEWER_REFERENCE_NOT_FOUND");
 	}
 
 	private byte[] fetchArchive(String path, String receiptNumber) {
@@ -395,12 +384,4 @@ class OpenDartClient implements OpenDartGateway {
 		return value == null || value.isBlank() ? null : value.trim();
 	}
 
-	private record DartViewerReference(
-		String documentNumber,
-		String elementId,
-		String offset,
-		String length,
-		String dtd
-	) {
-	}
 }
