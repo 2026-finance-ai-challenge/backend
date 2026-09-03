@@ -49,7 +49,7 @@ public class JdbcTaxDocumentRepository implements TaxDocumentRepository {
 	public Optional<TaxDocument> findDuplicate(UUID userId, TaxDocumentType type, String sha256) {
 		return jdbcClient.sql("SELECT " + COLUMNS + " FROM tax_document "
 			+ "WHERE user_id = :userId AND document_type = :type AND sha256 = :sha256 "
-			+ "AND deleted_at IS NULL")
+			+ "AND deleted_at IS NULL AND status NOT IN ('FAILED', 'REJECTED', 'REVIEW_REQUIRED')")
 			.param("userId", userId)
 			.param("type", type.name())
 			.param("sha256", sha256)
@@ -115,6 +115,24 @@ public class JdbcTaxDocumentRepository implements TaxDocumentRepository {
 			.param("userId", userId)
 			.query(this::map)
 			.optional();
+	}
+
+	@Override
+	public List<TaxDocument> findAllIncludingDeleted(UUID userId) {
+		return jdbcClient.sql("SELECT " + COLUMNS + " FROM tax_document WHERE user_id = :id")
+			.param("id", userId).query(this::map).list();
+	}
+	@Override
+	public void deleteAll(UUID userId) {
+		jdbcClient.sql("DELETE FROM tax_document WHERE user_id = :id").param("id", userId).update();
+	}
+	@Override
+	public void purgeFailedContent(UUID documentId, Instant now) {
+		jdbcClient.sql("""
+			UPDATE tax_document SET storage_key = 'purged/' || id, extracted_fields = '{}'::jsonb,
+			    original_file_name = 'removed', purged_at = :now
+			WHERE id = :id AND status IN ('FAILED', 'REJECTED', 'REVIEW_REQUIRED')
+			""").param("id", documentId).param("now", timestamp(now)).update();
 	}
 
 	@Override
@@ -269,7 +287,8 @@ public class JdbcTaxDocumentRepository implements TaxDocumentRepository {
 	@Override
 	public List<TaxDocument> findPurgeCandidates(Instant now, int limit) {
 		return jdbcClient.sql("SELECT " + COLUMNS + " FROM tax_document "
-			+ "WHERE deleted_at IS NOT NULL AND purge_after <= :now AND purged_at IS NULL "
+			+ "WHERE purged_at IS NULL AND ((deleted_at IS NOT NULL AND purge_after <= :now) "
+			+ "OR status IN ('FAILED', 'REJECTED', 'REVIEW_REQUIRED')) "
 			+ "ORDER BY purge_after, id LIMIT :limit")
 			.param("now", timestamp(now))
 			.param("limit", limit)

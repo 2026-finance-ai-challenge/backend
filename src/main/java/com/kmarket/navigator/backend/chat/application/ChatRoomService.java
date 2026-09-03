@@ -24,36 +24,26 @@ public class ChatRoomService {
 	private final ChatRoomRepository repository;
 	private final ChatContextResolver contextResolver;
 	private final Clock clock;
+	private final com.kmarket.navigator.backend.tax.application.TaxConversationService taxConversations;
 
 	@Autowired
-	public ChatRoomService(ChatRoomRepository repository, ChatContextResolver contextResolver) {
-		this(repository, contextResolver, Clock.systemUTC());
+	public ChatRoomService(ChatRoomRepository repository, ChatContextResolver contextResolver,
+		com.kmarket.navigator.backend.tax.application.TaxConversationService taxConversations) {
+		this(repository, contextResolver, Clock.systemUTC(), taxConversations);
 	}
 
-	ChatRoomService(ChatRoomRepository repository, ChatContextResolver contextResolver, Clock clock) {
+	ChatRoomService(ChatRoomRepository repository, ChatContextResolver contextResolver, Clock clock,
+		com.kmarket.navigator.backend.tax.application.TaxConversationService taxConversations) {
 		this.repository = repository;
 		this.contextResolver = contextResolver;
 		this.clock = clock;
+		this.taxConversations = taxConversations;
 	}
 
 	@Transactional
 	public ChatRoom create(AuthenticatedUser user, ChatContextType type, String referenceId) {
+		if (type == ChatContextType.TAX_GUIDE) return taxConversations.ensureRoom(user.id(), "en");
 		var context = contextResolver.resolve(type, referenceId);
-		if (type == ChatContextType.TAX_GUIDE) {
-			var existing = repository.findAll(user.id(), null, 100).stream()
-				.filter(room -> room.context().type() == ChatContextType.TAX_GUIDE)
-				.findFirst();
-			if (existing.isPresent()) {
-				var room = existing.get();
-				// 과거에 생성된 일반 제목을 세무 대화방 제목으로 한 번만 바로잡는다.
-				if ("New chat".equals(room.name())) {
-					return repository.rename(user.id(), room.id(), "Tax assessment", room.version(), Instant.now(clock))
-						.orElse(room);
-				}
-				return room;
-			}
-			return repository.create(user.id(), "Tax assessment", context, Instant.now(clock));
-		}
 		return repository.create(user.id(), "New chat", context, Instant.now(clock));
 	}
 
@@ -77,6 +67,10 @@ public class ChatRoomService {
 
 	@Transactional
 	public void delete(AuthenticatedUser user, UUID roomId) {
+		if (owned(user, roomId).context().type() == ChatContextType.TAX_GUIDE) {
+			taxConversations.delete(user.id(), roomId);
+			return;
+		}
 		Instant deletedAt = Instant.now(clock);
 		if (!repository.softDelete(
 			user.id(),
