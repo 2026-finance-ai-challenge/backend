@@ -103,8 +103,9 @@ public class AgentEvidenceProvider {
 				packet.put("publishedAt", article.publishedAt()); packet.put("sourceUrl", article.originalUrl());
 				packet.put("sourceExcerpt", excerpt(article.sourceText(), 1800));
 				String key = "N" + article.id();
+				// 대화 출처는 외부 검색 결과가 아니라 서비스에 수집·검증된 기사 상세로 연결한다.
 				found.putIfAbsent(key, new AgentEvidence(key, article.englishTitle(), objectMapper.writeValueAsString(packet),
-					article.publisher(), article.publishedAt(), article.id().toString(), article.originalUrl()));
+					article.publisher(), article.publishedAt(), article.id().toString(), "/news/" + article.id()));
 			}
 		}
 		if (includeFilings) {
