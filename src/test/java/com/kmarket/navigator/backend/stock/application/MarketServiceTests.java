@@ -118,11 +118,21 @@ class MarketServiceTests {
 			new ForeignLimitPolicy("003490", new BigDecimal("90"), LocalDate.of(2026, 8, 23))
 		));
 		when(repository.findForeignOwnershipHistory(securityId, 120)).thenReturn(List.of());
-		when(repository.findLatestForeignLimitPrediction(securityId))
+		when(repository.findForeignLimitPredictionBefore(securityId, LocalDate.of(2026, 9, 1)))
 			.thenReturn(Optional.of(storedPrediction));
 
 		assertThat(marketService.stockDetail("003490", null).foreignLimitPrediction())
 			.isEqualTo(storedPrediction);
+		verifyNoInteractions(gateway, engine);
+
+		MarketService intradayService = new MarketService(repository, engine, gateway,
+			Clock.fixed(Instant.parse("2026-09-01T03:00:00Z"), ZoneOffset.UTC));
+		assertThat(intradayService.stockDetail("003490", null).foreignLimitPrediction()).isEqualTo(storedPrediction);
+		verifyNoInteractions(gateway, engine);
+
+		MarketService expiredService = new MarketService(repository, engine, gateway,
+			Clock.fixed(Instant.parse("2026-09-01T07:00:00Z"), ZoneOffset.UTC));
+		assertThat(expiredService.stockDetail("003490", null).foreignLimitPrediction()).isNull();
 		verifyNoInteractions(gateway, engine);
 	}
 }

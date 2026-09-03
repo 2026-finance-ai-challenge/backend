@@ -36,6 +36,7 @@ import com.kmarket.navigator.backend.stock.domain.ScreenerQuery;
 import com.kmarket.navigator.backend.stock.domain.ScreenerSort;
 import com.kmarket.navigator.backend.stock.domain.StockIdentity;
 import com.kmarket.navigator.backend.stock.domain.StockMarketView;
+import com.kmarket.navigator.backend.stock.domain.OwnershipForecastWindow;
 
 @Service
 public class MarketService {
@@ -228,28 +229,27 @@ public class MarketService {
 		);
 	}
 
-	private ForeignLimitPrediction predict(String stockCode, UUID securityId) {
+	private ForeignLimitPrediction predict(String stockCode, UUID securityId, LocalDate targetDate) {
+		var stored = repository.findForeignLimitPredictionBefore(securityId, targetDate)
+			.filter(prediction -> targetDate.equals(OwnershipForecastWindow.nextTradingDay(prediction.baseDate())));
+		if (stored.isPresent()) return stored.get();
 		List<ForeignOwnershipSnapshot> history = repository.findForeignOwnershipHistory(
 			securityId,
 			FOREIGN_HISTORY_LIMIT
-		);
-		return repository.findLatestForeignLimitPrediction(securityId)
-			.filter(prediction -> history.isEmpty()
-				|| !prediction.baseDate().isBefore(history.getFirst().baseDate()))
-			.or(() -> predictionGateway.predict(stockCode, history))
+		).stream().filter(snapshot -> snapshot.baseDate() != null && snapshot.baseDate().isBefore(targetDate))
+			.sorted(Comparator.comparing(ForeignOwnershipSnapshot::baseDate).reversed()).toList();
+		// 오래된 입력을 반복 계산해 다음 거래일 예측으로 재명명하지 않는다.
+		if (history.isEmpty() || !targetDate.equals(OwnershipForecastWindow.nextTradingDay(history.getFirst().baseDate()))) return null;
+		return predictionGateway.predict(stockCode, history)
 			.or(() -> predictionEngine.predict(history))
+			.filter(prediction -> targetDate.equals(OwnershipForecastWindow.nextTradingDay(prediction.baseDate())))
 			.orElse(null);
 	}
 
 	private ForeignLimitPrediction predictionFor(StockMarketView view) {
-		if (!predictionAllowed(view)) {
-			return repository.findLatestForeignLimitPrediction(view.stock().securityId()).orElse(null);
-		}
-		return predict(view.stock().stockCode(), view.stock().securityId());
-	}
-
-	private boolean predictionAllowed(StockMarketView view) {
-		return view.quote() != null && "REGULAR".equals(view.quote().marketSession());
+		LocalDate targetDate = OwnershipForecastWindow.at(clock.instant()).targetDate();
+		if (targetDate == null) return null;
+		return predict(view.stock().stockCode(), view.stock().securityId(), targetDate);
 	}
 
 	private Map<String, ForeignLimitPolicy> policyByCode() {
