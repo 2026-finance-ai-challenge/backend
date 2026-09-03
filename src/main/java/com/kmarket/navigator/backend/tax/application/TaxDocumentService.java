@@ -4,6 +4,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -76,6 +77,7 @@ public class TaxDocumentService {
 			.orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
 		String country = expectedResidencyCountry.toUpperCase(Locale.ROOT);
 		ValidatedTaxFile validated = validator.validate(file);
+		assertUploadStep(userId, documentType);
 		var duplicate = repository.findDuplicate(userId, documentType, validated.sha256());
 		if (duplicate.isPresent()) {
 			return duplicate.get();
@@ -198,7 +200,8 @@ public class TaxDocumentService {
 
 	@Transactional
 	public TaxDocument retry(UUID userId, UUID documentId) {
-		get(userId, documentId);
+		TaxDocument document = get(userId, documentId);
+		assertRetryStep(userId, document);
 		Instant now = Instant.now(clock);
 		if (!repository.retry(userId, documentId, now)) {
 			throw new BusinessException(ErrorCode.TAX_DOCUMENT_NOT_RETRYABLE);
@@ -224,5 +227,71 @@ public class TaxDocumentService {
 
 	private TaxDocumentFields emptyFields() {
 		return new TaxDocumentFields(null, null, null, null, null, null, null, null, null);
+	}
+
+	public TaxDocumentContent original(UUID userId, UUID documentId) {
+		TaxDocument document = get(userId, documentId);
+		return new TaxDocumentContent(
+			document.originalFileName(),
+			document.mediaType(),
+			storage.read(
+				document.userId(),
+				document.id(),
+				document.sha256(),
+				document.mediaType(),
+				document.storageKey()
+			)
+		);
+	}
+
+	private void assertUploadStep(UUID userId, TaxDocumentType requestedType) {
+		TaxDocumentType expectedType = nextExpectedType(repository.findAll(userId));
+		if (expectedType != requestedType) {
+			throw new BusinessException(ErrorCode.TAX_DOCUMENT_STEP_BLOCKED, Map.of(
+				"expectedDocumentType", expectedType.name()
+			));
+		}
+	}
+
+	private void assertRetryStep(UUID userId, TaxDocument document) {
+		TaxDocumentType expectedType = nextExpectedType(repository.findAll(userId));
+		if (document.documentType() != expectedType) {
+			throw new BusinessException(ErrorCode.TAX_DOCUMENT_STEP_BLOCKED, Map.of(
+				"expectedDocumentType", expectedType.name()
+			));
+		}
+	}
+
+	private TaxDocumentType nextExpectedType(List<TaxDocument> documents) {
+		for (TaxDocumentType type : requiredDocumentTypes()) {
+			List<TaxDocument> supplied = documents.stream()
+				.filter(document -> document.documentType() == type)
+				.toList();
+			if (supplied.stream().anyMatch(document -> document.status() == TaxDocumentStatus.PROCESSING)) {
+				throw new BusinessException(ErrorCode.TAX_DOCUMENT_STEP_BLOCKED, Map.of(
+					"expectedDocumentType", type.name()
+				));
+			}
+			if (supplied.stream().noneMatch(this::allowsNextStep)) {
+				return type;
+			}
+		}
+		throw new BusinessException(ErrorCode.TAX_DOCUMENT_STEP_BLOCKED);
+	}
+
+	private boolean allowsNextStep(TaxDocument document) {
+		return document.status() == TaxDocumentStatus.VERIFIED
+			|| document.status() == TaxDocumentStatus.REVIEW_REQUIRED;
+	}
+
+	private List<TaxDocumentType> requiredDocumentTypes() {
+		return List.of(
+			TaxDocumentType.RESIDENCY_CERTIFICATE,
+			TaxDocumentType.APOSTILLE,
+			TaxDocumentType.REDUCED_TAX_APPLICATION
+		);
+	}
+
+	public record TaxDocumentContent(String originalFileName, String mediaType, byte[] content) {
 	}
 }

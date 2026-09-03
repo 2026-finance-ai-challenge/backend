@@ -71,7 +71,7 @@ public class AgentEvidenceProvider {
 		List<String> codes = context.type() == com.kmarket.navigator.backend.chat.domain.ChatContextType.STOCK
 			? List.of(context.referenceId()) : scope.stocks().stream().map(stock -> stock.stockCode()).toList();
 		List<AgentEvidence> result = new ArrayList<>();
-		if (!scope.news() && !scope.filings()) {
+		if (!scope.news() && !scope.filings() && !scope.financials()) {
 			if (codes.isEmpty()) return generalEvidence();
 			for (String code : codes) result.addAll(stockEvidence(code).stream().map(item -> new AgentEvidence(
 				"S" + code, item.title(), item.content(), item.source(), item.asOf(), item.referenceId(), item.url())).toList());
@@ -82,14 +82,14 @@ public class AgentEvidenceProvider {
 		List<String> targets = codes.isEmpty() ? java.util.Collections.singletonList(null) : codes;
 		Map<String, AgentEvidence> found = new LinkedHashMap<>();
 		for (String code : targets) {
-			if (scope.includeLatest()) addFeedEvidence(found, code, null, null, scope.news(), scope.filings());
-			if (scope.from() != null) addFeedEvidence(found, code, scope.from(), scope.to(), scope.news(), scope.filings());
+			if (scope.includeLatest()) addFeedEvidence(found, code, null, null, scope.news(), scope.filings(), scope.financials());
+			if (scope.from() != null) addFeedEvidence(found, code, scope.from(), scope.to(), scope.news(), scope.filings(), scope.financials());
 		}
 		return found.values().stream().limit(12).toList();
 	}
 
 	private void addFeedEvidence(Map<String, AgentEvidence> found, String stockCode, LocalDate from,
-		LocalDate to, boolean includeNews, boolean includeFilings) {
+		LocalDate to, boolean includeNews, boolean includeFilings, boolean includeFinancials) {
 		var zone = ZoneId.of("Asia/Seoul");
 		if (includeNews) {
 			var page = newsService.findAll(new NewsQuery(null, stockCode, null, null, null, null, false, null,
@@ -121,6 +121,49 @@ public class AgentEvidenceProvider {
 					"OpenDART", filing.detectedAt(), filing.receiptNumber(), "/disclosures/" + filing.receiptNumber()));
 			}
 		}
+		if (includeFinancials && stockCode != null) {
+			var page = disclosures.findAll(new DisclosureListQuery(stockCode, from, to, java.util.Set.of(), null, 12));
+			for (var filing : page.items()) {
+				var detail = disclosures.findPublished(filing.receiptNumber());
+				String content = financialExcerpt(detail);
+				if (content.isBlank()) continue;
+				Map<String, Object> packet = new LinkedHashMap<>();
+				packet.put("kind", "FILING_FINANCIAL_EXCERPT");
+				packet.put("stockCode", filing.stockCode());
+				packet.put("issuer", filing.issuerNameEn());
+				packet.put("title", filing.titleEn());
+				packet.put("originalTitle", filing.titleKo());
+				packet.put("filedDate", filing.filedDate());
+				packet.put("receiptNumber", filing.receiptNumber());
+				packet.put("sourceExcerpt", content);
+				String key = "F" + filing.receiptNumber();
+				found.putIfAbsent(key, new AgentEvidence(key, filing.titleEn(), objectMapper.writeValueAsString(packet),
+					"OpenDART", filing.detectedAt(), filing.receiptNumber(), "/disclosures/" + filing.receiptNumber()));
+				if (found.size() >= 6) return;
+			}
+		}
+	}
+
+	private String financialExcerpt(com.kmarket.navigator.backend.disclosure.domain.DisclosureDetail detail) {
+		StringBuilder excerpt = new StringBuilder();
+		for (var document : detail.documents()) {
+			for (var section : document.sections()) {
+				String value = String.join("\n", java.util.stream.Stream.of(section.heading(), section.text(), section.tableData())
+					.filter(java.util.Objects::nonNull).toList());
+				if (!isFinancialSection(value)) continue;
+				if (!excerpt.isEmpty()) excerpt.append("\n\n");
+				excerpt.append(value);
+				if (excerpt.length() >= 4_000) return excerpt.substring(0, 4_000);
+			}
+		}
+		return excerpt.toString();
+	}
+
+	private boolean isFinancialSection(String value) {
+		String normalized = value.toLowerCase(java.util.Locale.ROOT);
+		return normalized.contains("매출") || normalized.contains("영업이익") || normalized.contains("순이익")
+			|| normalized.contains("revenue") || normalized.contains("sales") || normalized.contains("operating profit")
+			|| normalized.contains("net income");
 	}
 
 	private static String excerpt(String value, int limit) {
