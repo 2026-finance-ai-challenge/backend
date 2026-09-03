@@ -60,7 +60,6 @@ public interface DisclosureRepository {
 	default Optional<DisclosureDetail> findPublishedByReceiptNumber(String receiptNumber) {
 		return findByReceiptNumber(receiptNumber).filter(detail ->
 			detail.documentStatus() == DocumentStatus.READY
-				&& detail.indexStatus() == IndexStatus.READY
 				&& EnglishTextPolicy.isValid(detail.titleEn())
 				&& detail.eventType() != null
 				&& detail.sentiment() != null
