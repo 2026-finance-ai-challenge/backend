@@ -182,16 +182,22 @@ class JdbcMarketRepository implements MarketRepository {
 
 	@Override
 	public Optional<ForeignLimitPrediction> findLatestForeignLimitPrediction(UUID securityId) {
+		return findForeignLimitPredictionBefore(securityId, LocalDate.of(9999, 12, 31));
+	}
+
+	@Override
+	public Optional<ForeignLimitPrediction> findForeignLimitPredictionBefore(UUID securityId, LocalDate targetDate) {
 		return jdbcClient.sql("""
 			SELECT min_rate, base_rate, max_rate, observation_count,
 			       observation_window_days, confidence, model_version,
 			       base_date, calculated_at, source
 			FROM foreign_limit_prediction_snapshot
-			WHERE security_id = :securityId
+			WHERE security_id = :securityId AND base_date < :targetDate
 			ORDER BY base_date DESC
 			LIMIT 1
 			""")
 			.param("securityId", securityId)
+			.param("targetDate", targetDate)
 			.query((resultSet, rowNumber) -> new ForeignLimitPrediction(
 				resultSet.getBigDecimal("min_rate"),
 				resultSet.getBigDecimal("base_rate"),

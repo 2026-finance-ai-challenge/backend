@@ -29,6 +29,11 @@ public interface MarketRepository {
 
 	Optional<ForeignLimitPrediction> findLatestForeignLimitPrediction(UUID securityId);
 
+	default Optional<ForeignLimitPrediction> findForeignLimitPredictionBefore(UUID securityId, LocalDate targetDate) {
+		return findLatestForeignLimitPrediction(securityId)
+			.filter(prediction -> prediction.baseDate() != null && prediction.baseDate().isBefore(targetDate));
+	}
+
 	List<MarketIndexSnapshot> findMarketIndices();
 
 	Optional<ExchangeRateSnapshot> findExchangeRate(String currency);

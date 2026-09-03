@@ -39,6 +39,7 @@ import com.kmarket.navigator.backend.stock.application.MarketStockDetail;
 import com.kmarket.navigator.backend.stock.domain.ExchangeRateSnapshot;
 import com.kmarket.navigator.backend.stock.domain.ForeignLimitPolicy;
 import com.kmarket.navigator.backend.stock.domain.ForeignLimitPrediction;
+import com.kmarket.navigator.backend.stock.domain.OwnershipForecastWindow;
 import com.kmarket.navigator.backend.stock.domain.ForeignOwnershipSnapshot;
 import com.kmarket.navigator.backend.stock.domain.GlobalPeerAnalysis;
 import com.kmarket.navigator.backend.stock.domain.MarketDailyPrice;
@@ -310,7 +311,6 @@ public class MarketController {
 				ForeignLimitPolicyResponse.from(detail.foreignLimitPolicy()),
 				ForeignLimitPredictionResponse.from(
 					detail.foreignLimitPrediction(),
-					view.quote() == null ? null : view.quote().marketSession(),
 					detail.foreignLimitPolicy() != null
 				)
 			);
@@ -440,29 +440,38 @@ public class MarketController {
 		String modelVersion,
 		LocalDate baseDate,
 		Instant calculatedAt,
-		String source
+		String source,
+		LocalDate targetDate,
+		String predictionSession
 	) {
 		static ForeignLimitPredictionResponse from(
 			ForeignLimitPrediction prediction,
-			String marketSession,
 			boolean applicable
 		) {
+			return from(prediction, applicable, Instant.now());
+		}
+
+		static ForeignLimitPredictionResponse from(
+			ForeignLimitPrediction prediction, boolean applicable, Instant now
+		) {
+			OwnershipForecastWindow window = OwnershipForecastWindow.at(now);
 			if (!applicable) {
 				return new ForeignLimitPredictionResponse(
 					"NOT_APPLICABLE", null, null, null, 0, 0, null, null, null, null,
-					"NOT_APPLICABLE"
+					"NOT_APPLICABLE", null, null
 				);
 			}
 			if (prediction == null) {
 				return new ForeignLimitPredictionResponse(
-					"REGULAR".equals(marketSession) ? "UNAVAILABLE" : "MARKET_CLOSED",
+					"UNAVAILABLE",
 					null, null, null, 0, 0, null, null, null, null,
-					"REGULAR".equals(marketSession) ? "UNAVAILABLE" : "MARKET_CLOSED"
+					"UNAVAILABLE", window.targetDate(), window.session()
 				);
 			}
-			if (!"REGULAR".equals(marketSession)) {
+			LocalDate targetDate = OwnershipForecastWindow.nextTradingDay(prediction.baseDate());
+			if (targetDate == null || !targetDate.equals(window.targetDate())) {
 				return new ForeignLimitPredictionResponse(
-					"MARKET_CLOSED",
+					"STALE",
 					null,
 					null,
 					null,
@@ -472,7 +481,7 @@ public class MarketController {
 					prediction.modelVersion(),
 					prediction.baseDate(),
 					prediction.calculatedAt(),
-					prediction.source()
+					prediction.source(), window.targetDate(), window.session()
 				);
 			}
 			return new ForeignLimitPredictionResponse(
@@ -486,7 +495,7 @@ public class MarketController {
 					prediction.modelVersion(),
 					prediction.baseDate(),
 					prediction.calculatedAt(),
-					prediction.source()
+					prediction.source(), targetDate, window.session()
 				);
 		}
 	}
@@ -504,7 +513,6 @@ public class MarketController {
 				monitor.warning(),
 				ForeignLimitPredictionResponse.from(
 					monitor.prediction(),
-					monitor.view().quote() == null ? null : monitor.view().quote().marketSession(),
 					true
 				)
 			);

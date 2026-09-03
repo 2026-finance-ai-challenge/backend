@@ -13,7 +13,7 @@ import com.kmarket.navigator.backend.stock.domain.ForeignLimitPrediction;
 class MarketControllerPredictionResponseTests {
 
 	@Test
-	void preservesObservationMetadataWhileMarketIsClosed() {
+	void exposesNextSessionPredictionWhileMarketIsClosed() {
 		ForeignLimitPrediction prediction = new ForeignLimitPrediction(
 			new BigDecimal("24.100000"),
 			new BigDecimal("24.200000"),
@@ -28,20 +28,29 @@ class MarketControllerPredictionResponseTests {
 		);
 
 		MarketController.ForeignLimitPredictionResponse response =
-			MarketController.ForeignLimitPredictionResponse.from(prediction, "CLOSED", true);
+			MarketController.ForeignLimitPredictionResponse.from(prediction, true, Instant.parse("2026-08-31T10:00:00Z"));
 
-		assertThat(response.status()).isEqualTo("MARKET_CLOSED");
-		assertThat(response.minRate()).isNull();
-		assertThat(response.baseRate()).isNull();
-		assertThat(response.maxRate()).isNull();
+		assertThat(response.status()).isEqualTo("AVAILABLE");
+		assertThat(response.minRate()).isEqualByComparingTo("24.1");
+		assertThat(response.baseRate()).isEqualByComparingTo("24.2");
+		assertThat(response.maxRate()).isEqualByComparingTo("24.3");
+		assertThat(response.targetDate()).isEqualTo(LocalDate.of(2026, 9, 1));
+		assertThat(response.predictionSession()).isEqualTo("NEXT_SESSION");
 		assertThat(response.observationCount()).isEqualTo(120);
 		assertThat(response.modelVersion()).isEqualTo("kmarket-foreign-owned-quantity-ml-v2");
+		var intraday = MarketController.ForeignLimitPredictionResponse.from(prediction, true, Instant.parse("2026-09-01T02:00:00Z"));
+		assertThat(intraday.status()).isEqualTo("AVAILABLE");
+		assertThat(intraday.predictionSession()).isEqualTo("INTRADAY");
+		assertThat(intraday.targetDate()).isEqualTo(response.targetDate());
+		var expired = MarketController.ForeignLimitPredictionResponse.from(prediction, true, Instant.parse("2026-09-01T07:00:00Z"));
+		assertThat(expired.status()).isEqualTo("STALE");
+		assertThat(expired.baseRate()).isNull();
 	}
 
 	@Test
 	void marksPredictionAsNotApplicableForStocksWithoutAnAcquisitionLimit() {
 		MarketController.ForeignLimitPredictionResponse response =
-			MarketController.ForeignLimitPredictionResponse.from(null, "OPEN", false);
+			MarketController.ForeignLimitPredictionResponse.from(null, false);
 
 		assertThat(response.status()).isEqualTo("NOT_APPLICABLE");
 		assertThat(response.source()).isEqualTo("NOT_APPLICABLE");
