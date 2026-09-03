@@ -17,6 +17,9 @@ public interface TaxDocumentRepository {
 	TaxDocument create(TaxDocument document);
 
 	List<TaxDocument> findAll(UUID userId);
+	Optional<TaxDocument> findPreviewBackfillCandidate(Instant now);
+	void updatePreviewFields(UUID documentId, com.kmarket.navigator.backend.tax.domain.TaxDocumentFields fields, Instant now);
+	void failPreviewBackfill(UUID documentId, Instant retryAt);
 	List<TaxDocument> findAllIncludingDeleted(UUID userId);
 	void deleteAll(UUID userId);
 	void purgeFailedContent(UUID documentId, Instant now);
