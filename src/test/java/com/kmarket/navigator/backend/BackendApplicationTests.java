@@ -444,14 +444,38 @@ class BackendApplicationTests {
 		mockMvc.perform(get("/api/v1/me").header("Authorization", auth)).andExpect(jsonPath("$.taxVerificationStatus").value("VERIFIED"))
 			.andExpect(jsonPath("$.nationality").value("US")).andExpect(jsonPath("$.investorType").value("INDIVIDUAL"));
 		mockMvc.perform(get("/api/v1/me/tax-review-package").header("Authorization", auth)).andExpect(status().isOk()).andExpect(jsonPath("$.documents.length()").value(3));
+		mockMvc.perform(get("/api/v1/me/tax-review-package").header("Authorization", auth)).andExpect(jsonPath("$.fieldsRefreshing").value(true));
+		when(taxDocumentGateway.verify(any(), any(), any(), any(), any(), any(), any())).thenAnswer(call -> new TaxDocumentVerification(
+			call.getArgument(0), TaxDocumentStatus.VERIFIED,
+			new TaxDocumentFields("Jane Investor", "US", "2026-01-10", null, "IRS", "TEST-100", "US", "US", "INDIVIDUAL", "1985-06-15", "+15555551234", "100 Example Road, USA", 1),
+			List.of(), List.of(), new BigDecimal("0.97"), new BigDecimal("0.01"), false, "test-model", "test-version"));
+		taxDocumentWorker.backfillPreviewFields();
+		mockMvc.perform(get("/api/v1/me/tax-review-package").header("Authorization", auth)).andExpect(jsonPath("$.fieldsRefreshing").value(false))
+			.andExpect(jsonPath("$.previewFields[1].value").value("1985-06-15"))
+			.andExpect(jsonPath("$.previewFields[3].value").value("+15555551234"))
+			.andExpect(jsonPath("$.previewFields[6].value").value("100 Example Road, USA"));
 		mockMvc.perform(get("/api/v1/me/tax-review-package").header("Authorization", "Bearer " + other.accessToken())).andExpect(status().isConflict());
 		byte[] pdf = mockMvc.perform(get("/api/v1/me/tax-review-package/correction.pdf").header("Authorization", auth)).andExpect(status().isOk())
 			.andExpect(header().string("Cache-Control", "no-store, private")).andReturn().getResponse().getContentAsByteArray();
 		try (var parsed = org.apache.pdfbox.Loader.loadPDF(pdf)) {
-			assertThat(new org.apache.pdfbox.text.PDFTextStripper().getText(parsed)).contains("예상 작성 경정청구서", "Jane Investor", "TEST-100");
+			assertThat(new org.apache.pdfbox.text.PDFTextStripper().getText(parsed)).contains("Estimated correction request", "Jane Investor", "TEST-100", "1985-06-15", "100 Example Road, USA")
+				.doesNotContain("예상 작성 경정청구서", "검증 문서에 근거한");
 			assertThat(parsed.getDocumentCatalog().getAcroForm() == null || parsed.getDocumentCatalog().getAcroForm().getFields().isEmpty()).isTrue();
 		}
 		Files.createDirectories(java.nio.file.Path.of("build/qa")); Files.write(java.nio.file.Path.of("build/qa/estimated-correction.pdf"), pdf);
+		byte[] koreanPdf = mockMvc.perform(get("/api/v1/me/tax-review-package/correction.pdf?locale=ko").header("Authorization", auth)).andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray();
+		try (var parsed = org.apache.pdfbox.Loader.loadPDF(koreanPdf)) { assertThat(new org.apache.pdfbox.text.PDFTextStripper().getText(parsed)).contains("예상 작성 경정청구서").doesNotContain("Estimated correction request"); }
+		Files.write(java.nio.file.Path.of("build/qa/estimated-correction-ko.pdf"), koreanPdf);
+		mockMvc.perform(get("/api/v1/me/tax-review-package?locale=invalid").header("Authorization", auth)).andExpect(status().isBadRequest());
+		jdbcClient.sql("UPDATE tax_document SET extracted_fields = jsonb_set(extracted_fields, '{previewVersion}', '0') WHERE id = :id")
+			.param("id", UUID.fromString(ids.get(2))).update();
+		when(taxDocumentGateway.verify(any(), any(), any(), any(), any(), any(), any())).thenAnswer(call -> new TaxDocumentVerification(
+			call.getArgument(0), TaxDocumentStatus.VERIFIED,
+			new TaxDocumentFields("Different Person", "US", "2026-01-10", null, "IRS", "TEST-100", "US", "US", "INDIVIDUAL", "1990-01-01", null, "Do not overwrite", 1),
+			List.of(), List.of(), new BigDecimal("0.97"), new BigDecimal("0.01"), false, "test-model", "test-version"));
+		taxDocumentWorker.backfillPreviewFields();
+		assertThat(jdbcClient.sql("SELECT extracted_fields->>'holderName' FROM tax_document WHERE id = :id").param("id", UUID.fromString(ids.get(2))).query(String.class).single()).isEqualTo("Jane Investor");
+		assertThat(jdbcClient.sql("SELECT preview_attempts FROM tax_document WHERE id = :id").param("id", UUID.fromString(ids.get(2))).query(Integer.class).single()).isEqualTo(1);
 		var roomId = jdbcClient.sql("SELECT id FROM chat_room WHERE user_id = :id AND context_type = 'TAX_GUIDE' AND deleted_at IS NULL").param("id", owner.userId()).query(UUID.class).single();
 		mockMvc.perform(post("/api/v1/me/tax-conversation/restart").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
 			.content("{\"roomId\":\"" + roomId + "\",\"locale\":\"en\"}")).andExpect(status().isOk());

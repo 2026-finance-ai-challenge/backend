@@ -79,6 +79,38 @@ public class TaxDocumentWorker {
 		}
 	}
 
+	@Scheduled(fixedDelayString = "${kmarket.tax.documents.preview-backfill-interval:30s}", initialDelayString = "${kmarket.tax.documents.preview-backfill-initial-delay:60s}")
+	@SchedulerLock(name = "tax-document-preview-backfill", lockAtMostFor = "PT10M")
+	public void backfillPreviewFields() {
+		repository.findPreviewBackfillCandidate(Instant.now(clock)).ifPresent(document -> {
+			byte[] content = null;
+			try {
+				content = storage.read(document.userId(), document.id(), document.sha256(), document.mediaType(), document.storageKey());
+				var generated = gateway.verify(document.documentType(), document.originalFileName(), document.mediaType(), content,
+					document.expectedResidencyCountry(), document.investorType(), safetyIdentifier.from(document.userId()));
+				var old = document.fields();
+				var fields = generated.fields();
+				// 기존 판정과 신원 정보는 바꾸지 않고 동일 원본의 누락된 보조 정보만 복구한다.
+				if (generated.status() != com.kmarket.navigator.backend.tax.domain.TaxDocumentStatus.VERIFIED
+					|| !Integer.valueOf(1).equals(fields.previewVersion())
+					|| !normalized(old.holderName()).equals(normalized(fields.holderName()))
+					|| !normalized(old.documentNumber()).equals(normalized(fields.documentNumber()))
+					|| !java.util.Objects.equals(old.treatyCountry(), fields.treatyCountry())) throw new IllegalStateException("Preview fields require review");
+				repository.updatePreviewFields(document.id(), new com.kmarket.navigator.backend.tax.domain.TaxDocumentFields(
+					old.holderName(), old.residencyCountry(), old.issueDate(), old.expiryDate(), old.issuingAuthority(), old.documentNumber(),
+					old.apostilleCountry(), old.treatyCountry(), old.investorType(), fields.birthDate(), fields.phoneNumber(), fields.address(), 1), Instant.now(clock));
+				repository.audit(document.id(), document.userId(), "PREVIEW_FIELDS_RESTORED", Instant.now(clock));
+			} catch (RuntimeException exception) {
+				repository.failPreviewBackfill(document.id(), Instant.now(clock).plusSeconds(300));
+				log.warn("Tax preview field recovery failed documentId={}", document.id());
+			} finally { if (content != null) java.util.Arrays.fill(content, (byte) 0); }
+		});
+	}
+
+	private static String normalized(String value) {
+		return value == null ? "" : value.toUpperCase(java.util.Locale.ROOT).replaceAll("[^\\p{L}\\p{N}]", "");
+	}
+
 	private void verify(TaxDocument document) {
 		try {
 			byte[] content = storage.read(

@@ -233,7 +233,11 @@ class AiTaxDocumentClient implements TaxDocumentGateway {
 		String documentNumber,
 		String apostilleCountry,
 		String treatyCountry,
-		String investorType
+		String investorType,
+		String birthDate,
+		String phoneNumber,
+		String address,
+		Integer previewVersion
 	) {
 		private static Fields from(TaxDocumentFields fields) {
 			return new Fields(
@@ -245,7 +249,7 @@ class AiTaxDocumentClient implements TaxDocumentGateway {
 				fields.documentNumber(),
 				fields.apostilleCountry(),
 				fields.treatyCountry(),
-				fields.investorType()
+				fields.investorType(), fields.birthDate(), fields.phoneNumber(), fields.address(), fields.previewVersion() != null && fields.previewVersion() > 0 ? fields.previewVersion() : null
 			);
 		}
 
@@ -259,7 +263,7 @@ class AiTaxDocumentClient implements TaxDocumentGateway {
 				documentNumber,
 				apostilleCountry,
 				treatyCountry,
-				investorType
+				investorType, birthDate, phoneNumber, address, previewVersion
 			);
 		}
 	}
