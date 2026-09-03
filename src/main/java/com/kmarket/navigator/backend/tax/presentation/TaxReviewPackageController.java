@@ -23,7 +23,7 @@ public class TaxReviewPackageController {
 		String language = language(locale);
 		var documents = service.verifiedDocuments(user.id());
 		var docs = documents.stream().map(d -> new DocumentResponse(d.id(), d.documentType().name(), d.mediaType())).toList();
-		boolean pending = documents.stream().anyMatch(d -> d.documentType() == com.kmarket.navigator.backend.tax.domain.TaxDocumentType.REDUCED_TAX_APPLICATION && (d.fields().previewVersion() == null || d.fields().previewVersion() == 0));
+		boolean pending = documents.stream().anyMatch(d -> d.documentType() == com.kmarket.navigator.backend.tax.domain.TaxDocumentType.REDUCED_TAX_APPLICATION && (d.fields().previewVersion() == null || d.fields().previewVersion() == 0 || d.fields().previewVersion() == 1));
 		return ResponseEntity.ok().header("Cache-Control", "no-store, private").body(new PackageResponse(docs, "/api/v1/me/tax-review-package/correction.pdf?locale=" + language, preview.fields(documents, language), pending));
 	}
 	@GetMapping("/correction.pdf")

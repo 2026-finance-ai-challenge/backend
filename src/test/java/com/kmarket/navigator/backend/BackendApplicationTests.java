@@ -447,7 +447,7 @@ class BackendApplicationTests {
 		mockMvc.perform(get("/api/v1/me/tax-review-package").header("Authorization", auth)).andExpect(jsonPath("$.fieldsRefreshing").value(true));
 		when(taxDocumentGateway.verify(any(), any(), any(), any(), any(), any(), any())).thenAnswer(call -> new TaxDocumentVerification(
 			call.getArgument(0), TaxDocumentStatus.VERIFIED,
-			new TaxDocumentFields("Jane Investor", "US", "2026-01-10", null, "IRS", "TEST-100", "US", "US", "INDIVIDUAL", "1985-06-15", "+15555551234", "100 Example Road, USA", 1),
+			new TaxDocumentFields("Jane Investor", "US", "2026-01-10", null, "IRS", "TEST-100", "US", "US", "INDIVIDUAL", "1985-06-15", "+15555551234", "100 Example Road, USA", 2),
 			List.of(), List.of(), new BigDecimal("0.97"), new BigDecimal("0.01"), false, "test-model", "test-version"));
 		taxDocumentWorker.backfillPreviewFields();
 		mockMvc.perform(get("/api/v1/me/tax-review-package").header("Authorization", auth)).andExpect(jsonPath("$.fieldsRefreshing").value(false))

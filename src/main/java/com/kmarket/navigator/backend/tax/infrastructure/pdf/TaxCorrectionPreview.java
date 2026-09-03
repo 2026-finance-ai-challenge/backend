@@ -58,7 +58,7 @@ public class TaxCorrectionPreview {
 			new PreviewField("taxpayerIdentificationNumber", ko ? "납세자번호" : "Taxpayer ID", application.documentNumber(), 1, 194, 670, 95, 16),
 			new PreviewField("claimantPhone", ko ? "전화번호" : "Phone number", application.phoneNumber(), 1, 441, 670, 90, 16),
 			new PreviewField("claimantResidence", ko ? "거주지국" : "Country of residence", country == null ? null : java.util.Locale.of("", country).getDisplayCountry(ko ? java.util.Locale.KOREAN : java.util.Locale.ENGLISH), 1, 194, 641, 150, 16),
-			new PreviewField("residencyCountryCode", ko ? "거주지국 코드" : "Country code", country, 1, 522, 641, 32, 16),
+			new PreviewField("residencyCountryCode", ko ? "거주지국 코드" : "Country code", country, 1, 522, 641, 16, 16),
 			new PreviewField("claimantAddress", ko ? "주소" : "Address", application.address(), 1, 173, 613, 360, 16));
 	}
 	public record PreviewField(String key, String label, String value, int page, float x, float y, float width, float height) { }
