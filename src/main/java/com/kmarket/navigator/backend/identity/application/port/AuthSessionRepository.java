@@ -20,6 +20,7 @@ public interface AuthSessionRepository {
 
 	enum RotationResult {
 		ROTATED,
+		REPLAYED,
 		MISSING,
 		REUSED,
 		EXPIRED

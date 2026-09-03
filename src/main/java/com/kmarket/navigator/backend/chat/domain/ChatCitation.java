@@ -12,8 +12,15 @@ public record ChatCitation(
 	String excerpt,
 	String url,
 	Instant asOf,
-	List<UUID> sectionIds
+	List<UUID> sectionIds,
+	String titleEn,
+	String titleKo
 ) {
+	public ChatCitation(String id, String sourceType, String referenceId, String title, String excerpt,
+		String url, Instant asOf, List<UUID> sectionIds) {
+		this(id, sourceType, referenceId, title, excerpt, url, asOf, sectionIds, null, null);
+	}
+
 	public ChatCitation {
 		sectionIds = sectionIds == null ? List.of() : List.copyOf(sectionIds);
 	}

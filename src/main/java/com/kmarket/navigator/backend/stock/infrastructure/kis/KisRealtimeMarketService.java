@@ -50,6 +50,7 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 import com.kmarket.navigator.backend.stock.application.port.MarketSnapshotRepository;
 import com.kmarket.navigator.backend.stock.domain.MarketDataStatus;
 import com.kmarket.navigator.backend.stock.domain.MarketIndexSnapshot;
+import com.kmarket.navigator.backend.stock.domain.MarketQuoteWindow;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -78,13 +79,21 @@ public class KisRealtimeMarketService {
 	private final CopyOnWriteArrayList<Client> clients = new CopyOnWriteArrayList<>();
 	private final LinkedHashMap<String, Boolean> stockSubscriptions = new LinkedHashMap<>(40, 0.75f, true);
 	private volatile String approvalKey = "";
+	private final java.time.Clock clock;
 
+	@org.springframework.beans.factory.annotation.Autowired
 	public KisRealtimeMarketService(
 		@Qualifier("kisMarketRestClient") RestClient restClient,
 		KisMarketProperties properties,
 		MarketSnapshotRepository snapshotRepository,
 		ObjectMapper objectMapper
 	) {
+		this(restClient, properties, snapshotRepository, objectMapper, java.time.Clock.systemUTC());
+	}
+
+	KisRealtimeMarketService(RestClient restClient, KisMarketProperties properties,
+		MarketSnapshotRepository snapshotRepository, ObjectMapper objectMapper, java.time.Clock clock) {
+		this.clock = clock;
 		this.restClient = restClient;
 		this.properties = properties;
 		this.snapshotRepository = snapshotRepository;
@@ -126,6 +135,7 @@ public class KisRealtimeMarketService {
 				MediaType.APPLICATION_JSON
 			));
 			latestEvents.values().stream()
+				.filter(event -> MarketQuoteWindow.acceptsLiveQuote(clock.instant(), event.asOf()))
 				.filter(event -> client.accepts(event))
 				.forEach(event -> send(client, event));
 		} catch (RuntimeException | java.io.IOException exception) {
@@ -254,6 +264,7 @@ public class KisRealtimeMarketService {
 
 	private void acceptStock(String[] fields) {
 		Instant asOf = marketInstant(fields[33], fields[1]);
+		if (!MarketQuoteWindow.acceptsLiveQuote(clock.instant(), asOf) || !completeNumbers(fields, 2, 4, 5, 7, 8, 9, 13)) return;
 		BigDecimal change = signed(decimal(fields[4]), fields[3]);
 		RealtimeMarketEvent event = new RealtimeMarketEvent(
 			"STOCK", fields[0], null, decimal(fields[2]), change,
@@ -266,7 +277,8 @@ public class KisRealtimeMarketService {
 	private void acceptIndex(String[] fields) {
 		String name = INDEX_NAMES.get(fields[0]);
 		if (name == null) return;
-		Instant asOf = marketInstant(LocalDate.now(KOREA_ZONE).format(KIS_DATE), fields[1]);
+		Instant asOf = marketInstant(LocalDate.now(clock.withZone(KOREA_ZONE)).format(KIS_DATE), fields[1]);
+		if (!MarketQuoteWindow.acceptsLiveQuote(clock.instant(), asOf) || !completeNumbers(fields, 2, 4, 9, 10, 11, 12, 5)) return;
 		BigDecimal change = signed(decimal(fields[4]), fields[3]);
 		BigDecimal rate = signed(decimal(fields[9]), fields[3]);
 		RealtimeMarketEvent event = new RealtimeMarketEvent(
@@ -308,13 +320,20 @@ public class KisRealtimeMarketService {
 			return LocalDateTime.of(LocalDate.parse(date, KIS_DATE), LocalTime.parse(time, KIS_TIME))
 				.atZone(KOREA_ZONE).toInstant();
 		} catch (RuntimeException exception) {
-			return Instant.now();
+			return null;
 		}
 	}
 
 	private static BigDecimal decimal(String value) {
 		try { return value == null || value.isBlank() ? BigDecimal.ZERO : new BigDecimal(value); }
 		catch (NumberFormatException exception) { return BigDecimal.ZERO; }
+	}
+
+	private static boolean completeNumbers(String[] fields, int... positions) {
+		try {
+			for (int position : positions) new BigDecimal(fields[position]);
+			return new BigDecimal(fields[2]).signum() > 0;
+		} catch (NumberFormatException exception) { return false; }
 	}
 
 	private static long longValue(String value) {

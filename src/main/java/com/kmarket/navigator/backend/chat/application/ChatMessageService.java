@@ -54,9 +54,18 @@ public class ChatMessageService {
 		UUID clientMessageId,
 		String requestedContent,
 		UUID selectedSectionId,
-		String selectedText
+		String selectedText,
+		String answerLocale
 	) {
+		if (answerLocale != null && !answerLocale.equals("en") && !answerLocale.equals("ko")) {
+			throw new BusinessException(ErrorCode.INVALID_CHAT_MESSAGE);
+		}
+		// 구버전 화면의 언어 힌트는 무시하고 현재 질문으로 답변 언어를 결정한다.
+		answerLocale = "auto";
 		var room = roomService.findOne(user, roomId);
+		if (room.context().type() == ChatContextType.FILING && content(requestedContent).length() > 2_000) {
+			throw new BusinessException(ErrorCode.INVALID_CHAT_MESSAGE);
+		}
 		validateSelection(room.context().type(), selectedSectionId, selectedText);
 		rateLimiter.check(user.id());
 		return repository.submit(
@@ -65,7 +74,8 @@ public class ChatMessageService {
 			clientMessageId,
 			content(requestedContent),
 			selectedSectionId,
-			selectedText == null ? null : selectedText.strip(),
+			selectedText == null || selectedText.isBlank() ? null : selectedText.strip(),
+			answerLocale,
 			Instant.now(clock)
 		);
 	}
@@ -82,23 +92,15 @@ public class ChatMessageService {
 	}
 
 	@Transactional(readOnly = true)
+	public java.util.Optional<ChatGeneration> latestGeneration(AuthenticatedUser user, UUID roomId) {
+		roomService.findOne(user, roomId);
+		return repository.findLatestGeneration(user.id(), roomId);
+	}
+
+	@Transactional(readOnly = true)
 	public ChatGeneration generation(AuthenticatedUser user, UUID roomId, UUID generationId) {
 		return repository.findGeneration(user.id(), roomId, generationId)
 			.orElseThrow(() -> new BusinessException(ErrorCode.CHAT_GENERATION_NOT_FOUND));
-	}
-
-	@Transactional
-	public ChatGeneration regenerate(
-		AuthenticatedUser user,
-		UUID roomId,
-		UUID assistantMessageId,
-		UUID requestKey
-	) {
-		roomService.findOne(user, roomId);
-		rateLimiter.check(user.id());
-		return repository.regenerate(
-			user.id(), roomId, assistantMessageId, requestKey, Instant.now(clock)
-		);
 	}
 
 	@Transactional
@@ -113,6 +115,9 @@ public class ChatMessageService {
 	@Transactional
 	public ChatGeneration retry(AuthenticatedUser user, UUID roomId, UUID generationId) {
 		roomService.findOne(user, roomId);
+		if (!generation(user, roomId, generationId).retryable()) {
+			throw new BusinessException(ErrorCode.CHAT_GENERATION_NOT_RETRYABLE);
+		}
 		rateLimiter.check(user.id());
 		if (!repository.retry(user.id(), roomId, generationId, Instant.now(clock))) {
 			throw new BusinessException(ErrorCode.CHAT_GENERATION_NOT_RETRYABLE);
@@ -130,16 +135,20 @@ public class ChatMessageService {
 		return normalized;
 	}
 
-	private void validateSelection(
+	static void validateSelection(
 		ChatContextType contextType,
 		UUID selectedSectionId,
 		String selectedText
 	) {
 		boolean hasId = selectedSectionId != null;
 		boolean hasText = selectedText != null && !selectedText.isBlank();
-		if (hasId != hasText
-			|| (hasId && contextType != ChatContextType.FILING)
-			|| (hasText && selectedText.strip().length() > 6_000)) {
+		boolean invalidContext = switch (contextType) {
+			case FILING -> hasId != hasText;
+			case NEWS -> hasId;
+			default -> hasId || hasText;
+		};
+		if (invalidContext
+			|| (hasText && selectedText.strip().length() > 2_000)) {
 			throw new BusinessException(ErrorCode.INVALID_CHAT_SELECTION);
 		}
 	}

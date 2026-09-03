@@ -11,9 +11,14 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 import java.math.BigDecimal;
 import java.time.Duration;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
@@ -222,21 +227,23 @@ class KisMarketDataGatewayTests {
 		server.verify();
 	}
 
-	@Test
-	void mapsOfficialIntradayPriceContract() {
+	@ParameterizedTest
+	@ValueSource(strings = {"2026-09-02T02:30:00Z", "2026-09-02T16:30:00Z"})
+	void mapsOfficialIntradayPriceContract(String instant) {
 		KisMarketProperties properties = configuredProperties();
 		properties.setCollectionDelay(Duration.ZERO);
 		RestClient.Builder builder = RestClient.builder();
 		MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
 		KisAccessTokenProvider tokenProvider = mock(KisAccessTokenProvider.class);
 		when(tokenProvider.accessToken()).thenReturn("access-token");
+		Clock clock = Clock.fixed(Instant.parse(instant), ZoneId.of("UTC"));
 		KisMarketDataGateway gateway = new KisMarketDataGateway(
 			builder.baseUrl("https://example.test").build(),
 			properties,
 			tokenProvider,
-			new KisCircuitBreaker()
+			new KisCircuitBreaker(), clock
 		);
-		LocalDate today = LocalDate.now();
+		LocalDate today = LocalDate.now(clock.withZone(ZoneId.of("Asia/Seoul")));
 
 		server.expect(header("tr_id", "FHKST03010200"))
 			.andExpect(queryParam("FID_INPUT_ISCD", "005930"))

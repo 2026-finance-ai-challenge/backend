@@ -16,3 +16,4 @@ data/*
 .gradle/
 build/
 out/
+scripts/__pycache__/

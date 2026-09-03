@@ -29,6 +29,33 @@ class DisclosureTitleTranslationWorkerTests {
 	private static final Instant NOW = Instant.parse("2026-09-01T00:00:00Z");
 
 	@Test
+	void persistsOtherFilingTitlesAfterOneStorageFailure() {
+		var repository = Mockito.mock(DisclosureTitleTranslationRepository.class);
+		var catalog = Mockito.mock(DisclosureTitleTranslationCatalog.class);
+		var gateway = Mockito.mock(TranslationAiGateway.class);
+		var translations = Mockito.mock(TranslationRepository.class);
+		var first = new DisclosureTitleTranslationJob(UUID.randomUUID(), "a".repeat(64), "공시 하나", 1);
+		var second = new DisclosureTitleTranslationJob(UUID.randomUUID(), "b".repeat(64), "공시 둘", 1);
+		var generated = List.of(first, second).stream().map(job -> new GeneratedTitle(job.translationId(),
+			job.sourceHash(), "Filing by Jo", "en", DisclosureTitlePolicy.TRANSLATION_VERSION,
+			"gpt-5-nano", "financial-title-translation-v8")).toList();
+		when(repository.claimJobs(eq(25), any(), eq(NOW), eq(NOW.minus(Duration.ofMinutes(5)))))
+			.thenReturn(List.of(first, second));
+		when(catalog.translate(any())).thenReturn(Optional.empty());
+		when(gateway.translateTitles(any())).thenReturn(generated);
+		Mockito.doThrow(new IllegalStateException("storage failure")).when(repository)
+			.complete(eq(first.translationId()), any(), any(), any(), eq(NOW));
+
+		new DisclosureTitleTranslationWorker(repository, catalog, gateway, translations,
+			Clock.fixed(NOW, ZoneOffset.UTC), "worker").processBatch(25);
+
+		verify(repository).complete(second.translationId(), "Filing by Jo", "gpt-5-nano", "financial-title-translation-v8", NOW);
+		verify(translations).fail(first.translationId(), 1, "IllegalStateException", NOW, Duration.ofMinutes(1));
+		verify(translations, Mockito.never()).fail(eq(second.translationId()), any(Integer.class), any(), any(), any());
+		verify(gateway, Mockito.times(1)).translateTitles(any());
+	}
+
+	@Test
 	void translatesUncataloguedTitleWithAi() {
 		DisclosureTitleTranslationRepository repository = Mockito.mock(DisclosureTitleTranslationRepository.class);
 		DisclosureTitleTranslationCatalog catalog = Mockito.mock(DisclosureTitleTranslationCatalog.class);

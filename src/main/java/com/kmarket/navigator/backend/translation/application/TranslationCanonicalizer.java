@@ -31,6 +31,12 @@ public class TranslationCanonicalizer {
 		return source(objectMapper.writeValueAsString(root));
 	}
 
+	public Source news(com.kmarket.navigator.backend.news.domain.NewsArticle article) {
+		List<String> paragraphs = java.util.Arrays.stream(article.sourceText().split("\\R\\s*\\R"))
+			.map(String::strip).filter(value -> !value.isBlank()).toList();
+		return news(article.originalTitle(), paragraphs, article.contentAvailability().name());
+	}
+
 	public Source disclosureSection(String heading, String text, String tableDataJson) {
 		ObjectNode root = objectMapper.createObjectNode();
 		putNullable(root, "heading", heading);

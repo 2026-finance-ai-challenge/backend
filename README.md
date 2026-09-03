@@ -168,7 +168,7 @@ docker compose up --build -d
 채팅방 생성·목록·문맥 복원·낙관적 잠금 이름 변경·삭제 보존 정책은 [AI Agent 채팅방 API 문서](docs/CHAT_API.md)를 따른다.
 국가별 조세조약 세율 안내와 암호화 OCR 문서 검증은 [세무 자격·문서 검증 API 문서](docs/TAX_API.md)를 따른다.
 글로벌 피어 랭킹과 비교 인사이트는 [글로벌 피어 API 문서](docs/GLOBAL_PEER_API.md)를 따른다.
-화면별 API 연결과 별도 프론트 구현 시 재사용할 계약은 [프론트 프로토타입 인계 가이드](docs/FRONTEND_PROTOTYPE.md)를 따른다.
+운영 화면별 API 연결은 서비스 Frontend 저장소의 `docs/API_INTEGRATION.md`를 따른다. 저장소 내부 화면은 [로컬 검증 프로토타입](docs/FRONTEND_PROTOTYPE.md)이다.
 
 질의응답을 사용하려면 AI API 서버가 `KMARKET_AI_BASE_URL`에서 실행 중이어야 하며 두 서비스의 `KMARKET_AI_SERVICE_TOKEN`이 같아야 한다. 그 외 경로는 기본 차단한다.
 

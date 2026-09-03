@@ -33,6 +33,7 @@ class AiDisclosureClientTests {
 			.andExpect(content().json("""
 				{
 				  "question": "What changed?",
+				  "answer_locale": "ko",
 				  "selected_context": {
 				    "section_id": "%s",
 				    "text": "Selected filing text"
@@ -54,7 +55,7 @@ class AiDisclosureClientTests {
 			"20260818000305",
 			new DisclosureQuestion(
 				"What changed?",
-				new DisclosureQuestion.SelectedContext(sectionId, "Selected filing text")
+				new DisclosureQuestion.SelectedContext(sectionId, "Selected filing text"), "ko"
 			)
 		);
 

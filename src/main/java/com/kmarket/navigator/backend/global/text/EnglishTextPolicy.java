@@ -10,7 +10,7 @@ public final class EnglishTextPolicy {
 		"[ㄱ-ㅎㅏ-ㅣ가-힣\\u3040-\\u30ff\\u3400-\\u4dbf\\u4e00-\\u9fff]"
 	);
 	private static final Pattern KOREAN_CURRENCY_ROMANIZATION = Pattern.compile(
-		"\\b(?:eok|jo)(?:[ -]?won)?\\b|\\bman[ -]?won\\b",
+		"\\b\\d[\\d,.]*\\s*(?:eok|jo)\\b|\\b(?:eok|jo)[ -]?won\\b|\\bman[ -]?won\\b",
 		Pattern.CASE_INSENSITIVE
 	);
 

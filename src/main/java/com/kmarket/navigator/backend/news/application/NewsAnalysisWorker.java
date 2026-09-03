@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import com.kmarket.navigator.backend.news.application.port.NewsAiGateway;
 import com.kmarket.navigator.backend.news.application.port.NewsRepository;
 import com.kmarket.navigator.backend.news.domain.NewsAnalysisJob;
+import com.kmarket.navigator.backend.global.concurrent.BoundedTasks;
 
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
@@ -42,8 +43,13 @@ public class NewsAnalysisWorker {
 	)
 	@SchedulerLock(name = "news-analysis", lockAtMostFor = "PT4M", lockAtLeastFor = "PT1S")
 	public void process() {
-		Instant now = Instant.now(clock);
-		for (NewsAnalysisJob job : repository.claimAnalysisJobs(BATCH_SIZE, now)) {
+		long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
+		int claimed = 0;
+		while (claimed < BATCH_SIZE && System.nanoTime() < deadline) {
+			var jobs = repository.claimAnalysisJobs(Math.min(2, BATCH_SIZE - claimed), Instant.now(clock));
+			if (jobs.isEmpty()) break;
+			claimed += jobs.size();
+			BoundedTasks.forEach(jobs, 2, job -> {
 			try {
 				var analysis = aiGateway.analyze(
 					job.title(),
@@ -66,6 +72,7 @@ public class NewsAnalysisWorker {
 					exception.getClass().getSimpleName()
 				);
 			}
+			});
 		}
 	}
 }

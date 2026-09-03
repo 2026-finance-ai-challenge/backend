@@ -10,6 +10,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.locks.LockSupport;
+import java.util.concurrent.ConcurrentHashMap;
+import com.kmarket.navigator.backend.global.concurrent.BoundedTasks;
+import com.kmarket.navigator.backend.news.domain.OriginalNewsArticle;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -80,29 +83,56 @@ public class NewsCollectionService {
 		if (!provider.configured()) {
 			return;
 		}
+		long deadline = System.nanoTime() + Duration.ofMinutes(5).toNanos();
 		List<NewsStockMapping> mappings = repository.findStockMappings();
+		var collectedIds = new java.util.HashSet<>(repository.findCollectedProviderIds(Instant.now(clock).minus(Duration.ofHours(72))));
 		NewsDuplicateIndex duplicateIndex = new NewsDuplicateIndex(fingerprint);
 		repository.findDuplicateCandidates(
 			Instant.now(clock).minus(Duration.ofHours(72)),
 			DUPLICATE_CANDIDATE_LIMIT
-		).forEach(candidate -> duplicateIndex.add(
+		).stream().filter(candidate -> candidate.body() == null || candidate.body().isBlank()
+			|| !stockMatcher.verifiedArticleMatches(candidate.title(), candidate.body(), mappings).isEmpty())
+		.forEach(candidate -> duplicateIndex.add(
 			candidate.clusterId(),
-			fingerprint.profile(candidate.title(), candidate.excerpt()),
+			fingerprint.profile(candidate.title(), candidate.excerpt(), candidate.body()),
 			candidate.publishedAt(),
-			candidate.publisher()
+			candidate.publisher(),
+			(candidate.body() == null || candidate.body().isBlank()
+				? stockMatcher.matchArticle(candidate.title(), "", mappings)
+				: stockMatcher.verifiedArticleMatches(candidate.title(), candidate.body(), mappings)).keySet()
 		));
 		Map<String, String> queries = new LinkedHashMap<>();
 		properties.getQueries().forEach(query -> queries.put(query, null));
 		List<NewsCollectionTarget> targets = repository.findCollectionTargets(properties.getTargetBatchSize());
 		targets.forEach(target -> queries.put(target.nameKo(), target.stockCode()));
 		for (var queryEntry : queries.entrySet()) {
+			if (System.nanoTime() >= deadline) break;
 			String query = queryEntry.getKey();
 			String queryStockCode = queryEntry.getValue();
 			try {
-				for (CollectedNewsArticle article : provider.search(query, properties.getDisplay())) {
-					store(article, queryStockCode, mappings, duplicateIndex);
+				var articles = provider.search(query, properties.getDisplay());
+				var originals = new ConcurrentHashMap<String, OriginalNewsArticle>();
+				BoundedTasks.forEach(articles, 4, article -> {
+					if (System.nanoTime() >= deadline) return;
+					if (collectedIds.contains(article.providerArticleId())) return;
+					var matches = stockMatcher.matchArticle(article.title(), "", mappings);
+					Instant now = Instant.now(clock);
+					if (matches.isEmpty() || (queryStockCode != null && !matches.containsKey(queryStockCode))
+						|| article.publishedAt().isBefore(now.minus(properties.getMaxArticleAge()))
+						|| article.publishedAt().isAfter(now.plus(Duration.ofMinutes(15)))) return;
+					try {
+						originalArticleGateway.fetch(article.originalUrl()).ifPresent(original -> originals.put(article.originalUrl(), original));
+					} catch (RuntimeException exception) {
+						log.warn("Original article failed type={}", exception.getClass().getSimpleName());
+					}
+				});
+				for (CollectedNewsArticle article : articles) {
+					if (collectedIds.contains(article.providerArticleId())) continue;
+					if (store(article, queryStockCode, mappings, duplicateIndex, originals.get(article.originalUrl()))) {
+						collectedIds.add(article.providerArticleId());
+					}
 				}
-				if (queryStockCode != null) {
+				if (queryStockCode != null && System.nanoTime() < deadline) {
 					repository.markTargetCollected(queryStockCode, Instant.now(clock));
 				}
 			} catch (RuntimeException exception) {
@@ -116,16 +146,17 @@ public class NewsCollectionService {
 		}
 	}
 
-	private void store(
+	private boolean store(
 		CollectedNewsArticle article,
 		String queryStockCode,
 		List<NewsStockMapping> mappings,
-		NewsDuplicateIndex duplicateIndex
+		NewsDuplicateIndex duplicateIndex,
+		OriginalNewsArticle original
 	) {
 		Instant now = Instant.now(clock);
 		if (article.publishedAt().isBefore(now.minus(properties.getMaxArticleAge()))
 			|| article.publishedAt().isAfter(now.plus(Duration.ofMinutes(15)))) {
-			return;
+			return false;
 		}
 		Map<String, BigDecimal> preliminaryMatches = stockMatcher.matchArticle(
 			article.title(),
@@ -134,30 +165,28 @@ public class NewsCollectionService {
 		);
 		if (preliminaryMatches.isEmpty()
 			|| (queryStockCode != null && !preliminaryMatches.containsKey(queryStockCode))) {
-			return;
+			return false;
 		}
-		var original = originalArticleGateway.fetch(article.originalUrl()).orElse(null);
-		if (original == null || original.body() == null || original.body().isBlank()) {
-			return;
-		}
-		String canonicalUrl = fingerprint.canonicalizeUrl(original.canonicalUrl());
+		if (original == null || original.body() == null || original.body().isBlank()) return false;
+		Map<String, BigDecimal> stockMatches = stockMatcher.verifiedArticleMatches(article.title(), original.body(), mappings);
+		if (stockMatches.isEmpty() || (queryStockCode != null && !stockMatches.containsKey(queryStockCode))) return false;
 		String normalizedTitle = fingerprint.normalize(article.title());
-		NewsFingerprint.Profile incoming = fingerprint.profile(article.title(), article.excerpt());
+		NewsFingerprint.Profile incoming = fingerprint.profile(article.title(), article.excerpt(), original == null ? "" : original.body());
 		NewsDuplicateIndex.Match duplicate = duplicateIndex.findBest(
 			incoming,
 			article.publishedAt(),
-			article.publisher()
+			article.publisher(),
+			stockMatches.keySet()
 		);
 		double bestScore = duplicate.score();
 		UUID clusterId = duplicate.targetClusterId() != null
 			? duplicate.targetClusterId()
 			: UUID.randomUUID();
-		// 본문에는 관련 기사 링크가 섞일 수 있으므로 제목에서 확정한 종목만 저장한다.
-		Map<String, BigDecimal> stockMatches = preliminaryMatches;
 		if (duplicate.targetClusterId() != null) {
-			repository.addClusterStockMappings(duplicate.targetClusterId(), stockMatches);
-			return;
+			// 유사 기사의 종목을 대표 기사에 전파하면 대표 원문에 없는 기업이 연결된다.
+			return true;
 		}
+		String canonicalUrl = fingerprint.canonicalizeUrl(original.canonicalUrl());
 		NewsDraft draft = new NewsDraft(
 			UUID.randomUUID(),
 			clusterId,
@@ -181,8 +210,9 @@ public class NewsCollectionService {
 			stockMatches
 		);
 		if (repository.saveCollected(draft)) {
-			duplicateIndex.add(clusterId, incoming, article.publishedAt(), article.publisher());
+			duplicateIndex.add(clusterId, incoming, article.publishedAt(), article.publisher(), stockMatches.keySet());
 		}
+		return true;
 	}
 
 	private void pause(Duration duration) {

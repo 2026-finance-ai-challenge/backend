@@ -1,6 +1,11 @@
 package com.kmarket.navigator.backend.translation.infrastructure;
 
 import java.util.List;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.function.Consumer;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Function;
@@ -36,7 +41,7 @@ class AiTranslationClient implements TranslationAiGateway {
 	private final ObjectMapper objectMapper;
 
 	AiTranslationClient(
-		@Qualifier("aiServiceRestClient") RestClient restClient,
+		@Qualifier("aiTranslationRestClient") RestClient restClient,
 		AiServiceProperties properties,
 		ObjectMapper objectMapper
 	) {
@@ -100,6 +105,56 @@ class AiTranslationClient implements TranslationAiGateway {
 			throw new TranslationProviderException(Failure.INVALID_OUTPUT);
 		}
 		return generated;
+	}
+
+	@Override
+	public GeneratedTranslation streamNews(
+		String sourceHash, String title, List<String> paragraphs, String contentAvailability,
+		String version, Consumer<GeneratedTranslation> progress
+	) {
+		if (properties.serviceToken() == null || properties.serviceToken().isBlank()) {
+			throw new BusinessException(ErrorCode.AI_SERVICE_UNAVAILABLE);
+		}
+		return restClient.post().uri("/internal/v1/news/narratives/stream")
+			.header(HttpHeaders.AUTHORIZATION, "Bearer " + properties.serviceToken())
+			.body(new NewsRequest(sourceHash, title, paragraphs, contentAvailability, "en", version))
+			.exchange((request, response) -> {
+				if (!response.getStatusCode().is2xxSuccessful()) throw new TranslationProviderException(Failure.UNAVAILABLE);
+				try (var reader = new BufferedReader(new InputStreamReader(response.getBody(), StandardCharsets.UTF_8))) {
+					String line;
+					GeneratedTranslation complete = null;
+					while ((line = boundedLine(reader)) != null) {
+						var event = objectMapper.readTree(line);
+						String type = event.path("type").asString();
+						if ("error".equals(type)) throw new TranslationProviderException(failure(event.path("code").asString()));
+						if (!List.of("progress", "complete").contains(type) || !event.path("result").isObject()) {
+							throw new TranslationProviderException(Failure.INVALID_OUTPUT);
+						}
+						GeneratedTranslation value = generated(sourceHash, version,
+							event.path("source_hash").asString(), event.path("target_locale").asString(),
+							event.path("translation_version").asString(), (ObjectNode) event.path("result"),
+							event.path("model").asString(), event.path("prompt_version").asString(), "en");
+						if ("complete".equals(type)) complete = value;
+						else progress.accept(value);
+					}
+					if (complete == null) throw new TranslationProviderException(Failure.UNAVAILABLE);
+					return complete;
+				}
+				catch (IOException exception) {
+					throw new TranslationProviderException(Failure.UNAVAILABLE);
+				}
+			});
+	}
+
+	private String boundedLine(BufferedReader reader) throws IOException {
+		StringBuilder line = new StringBuilder();
+		int value;
+		while ((value = reader.read()) != -1) {
+			if (value == '\n') return line.toString();
+			if (line.length() >= 2_000_000) throw new TranslationProviderException(Failure.INVALID_OUTPUT);
+			if (value != '\r') line.append((char) value);
+		}
+		return line.isEmpty() ? null : line.toString();
 	}
 
 	@Override
@@ -224,14 +279,18 @@ class AiTranslationClient implements TranslationAiGateway {
 		catch (RuntimeException ignored) {
 			code = "";
 		}
-		Failure failure = switch (code) {
+		return new TranslationProviderException(failure(code));
+	}
+
+	private Failure failure(String code) {
+		return switch (code) {
 			case "AI_INVALID_OUTPUT" -> Failure.INVALID_OUTPUT;
+			case "AI_GENERATION_INCOMPLETE" -> Failure.INCOMPLETE;
 			case "AI_PROVIDER_QUOTA_EXHAUSTED" -> Failure.QUOTA_EXHAUSTED;
 			case "AI_PROVIDER_RATE_LIMITED" -> Failure.RATE_LIMITED;
 			case "AI_PROVIDER_TIMEOUT" -> Failure.TIMEOUT;
 			default -> Failure.UNAVAILABLE;
 		};
-		return new TranslationProviderException(failure);
 	}
 
 	private static void putNullable(ObjectNode node, String field, String value) {

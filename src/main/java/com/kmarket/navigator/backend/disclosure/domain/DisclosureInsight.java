@@ -15,7 +15,10 @@ public record DisclosureInsight(
 	String refusalReason,
 	String modelId,
 	String promptVersion,
-	Instant generatedAt
+	Instant generatedAt,
+	String whatKo,
+	String whyKo,
+	String impactKo
 ) {
 	public DisclosureInsight {
 		sourceSectionIds = List.copyOf(sourceSectionIds);

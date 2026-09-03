@@ -23,6 +23,14 @@ class OpenDartArchiveParserTests {
 	private final OpenDartArchiveParser parser = new OpenDartArchiveParser(new ObjectMapper());
 
 	@Test
+	void preservesDartXmlNumericCellsAndNestedTableText() {
+		String html = "<TABLE><TR><TU ROWSPAN='2'>100</TU><TE>매출<TABLE><TR><TD>이익</TD></TR></TABLE></TE></TR></TABLE>";
+		var document = parser.parseDocuments(zip("filing.xml", html.getBytes(StandardCharsets.UTF_8))).getFirst();
+		assertThat(document.sections().getFirst().tableData()).isEqualTo("[[\"100\",\"매출\"],[\"이익\"]]");
+		assertThat(document.sanitizedHtml()).contains("<td rowspan=\"2\">100</td>");
+	}
+
+	@Test
 	void parsesKoreanDocumentAndPreservesTableStructure() {
 		String html = """
 			<html>
@@ -102,9 +110,36 @@ class OpenDartArchiveParserTests {
 		var document = parser.parseDocuments(zip("filing.xml", html.getBytes(StandardCharsets.UTF_8)))
 			.getFirst();
 
-		assertThat(document.sections())
-			.extracting(section -> section.text())
-			.containsSubsequence("앞부분", "중간부분", "뒷부분", "사용자 정의 태그 내용");
+		assertThat(String.join(" ", document.sections().stream().map(section -> section.text()).toList()))
+			.isEqualTo("앞부분 중간부분 뒷부분 사용자 정의 태그 내용");
+	}
+
+	@Test
+	void rejectsXmlDeclarationWithoutDocumentContent() {
+		assertThatThrownBy(() -> parser.parseDocuments(zip("filing.xml",
+			"<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n\r\n\r\n".getBytes(StandardCharsets.UTF_8))))
+			.isInstanceOfSatisfying(OpenDartException.class,
+				error -> assertThat(error.errorCode()).isEqualTo("EMPTY_DOCUMENT_CONTENT"));
+	}
+
+	@Test
+	void mapsSectionsAfterLegacyWrappersAreRemovedAndTablesReparented() {
+		String html = "<html><head><title>보고서</title></head><body><p><legacy>앞문단"
+			+ "<table><tr><td>금액</td><td>18,018,012</td></tr></table>뒷문단</legacy></p>"
+			+ "<legacy>같은 문구</legacy><legacy>같은 문구</legacy></body></html>";
+		var original = parser.parseDocuments(zip("filing.xml", html.getBytes(StandardCharsets.UTF_8))).getFirst();
+		var sections = original.sections().stream().map(s -> new com.kmarket.navigator.backend.disclosure.domain.DisclosureSection(
+			java.util.UUID.randomUUID(), s.ordinal(), s.kind(), s.heading(), s.text(), s.tableData())).toList();
+		var source = new com.kmarket.navigator.backend.disclosure.domain.DisclosureDocument(java.util.UUID.randomUUID(),
+			original.filename(), 1, original.contentHash(), original.sanitizedHtml(), sections);
+		String rendered = com.kmarket.navigator.backend.translation.application.DisclosureHtmlRenderer.annotateOriginal(source);
+		assertThat(org.jsoup.Jsoup.parse(com.kmarket.navigator.backend.translation.application.DisclosureHtmlRenderer.render(source, java.util.Map.of())).select("table")).hasSize(1);
+		assertThat(org.jsoup.Jsoup.parse(rendered).text().replace(" ", ""))
+			.isEqualTo("앞문단금액18,018,012뒷문단같은문구같은문구");
+		assertThat(original.sections()).anySatisfy(s -> {
+			assertThat(s.kind()).isEqualTo(SectionKind.TABLE);
+			assertThat(s.tableData()).isEqualTo("[[\"금액\",\"18,018,012\"]]");
+		});
 	}
 
 	@Test

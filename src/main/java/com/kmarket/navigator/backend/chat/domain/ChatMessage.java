@@ -25,4 +25,9 @@ public record ChatMessage(
 	public ChatMessage {
 		citations = List.copyOf(citations);
 	}
+
+	public ChatMessage withCitations(List<ChatCitation> localized) {
+		return new ChatMessage(id, roomId, sequence, role, content, replyToMessageId, localized,
+			insufficientEvidence, refusalReason, disclaimer, confidence, modelId, promptVersion, requestId, createdAt);
+	}
 }

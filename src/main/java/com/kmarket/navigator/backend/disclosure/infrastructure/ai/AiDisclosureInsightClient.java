@@ -81,7 +81,10 @@ class AiDisclosureInsightClient implements DisclosureInsightGateway {
 		boolean sufficientEvidence,
 		String refusalReason,
 		String model,
-		String promptVersion
+		String promptVersion,
+		String whatKo,
+		String whyKo,
+		String impactKo
 	) {
 		private DisclosureInsightGeneration toDomain() {
 			return new DisclosureInsightGeneration(
@@ -92,7 +95,10 @@ class AiDisclosureInsightClient implements DisclosureInsightGateway {
 				sufficientEvidence,
 				refusalReason,
 				model,
-				promptVersion
+				promptVersion,
+				whatKo,
+				whyKo,
+				impactKo
 			);
 		}
 	}

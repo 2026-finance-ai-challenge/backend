@@ -17,7 +17,8 @@ public record ChatGenerationTask(
 	UUID selectedSectionId,
 	String selectedText,
 	ChatContext context,
-	List<AgentHistoryMessage> history
+	List<AgentHistoryMessage> history,
+	String answerLocale
 ) {
 	public ChatGenerationTask {
 		history = List.copyOf(history);

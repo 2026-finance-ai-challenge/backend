@@ -29,6 +29,35 @@ import com.kmarket.navigator.backend.disclosure.application.port.DocumentArchive
 import tools.jackson.databind.ObjectMapper;
 
 class OpenDartClientTests {
+	@Test
+	void collectsAllViewerSectionsAndPreservesOriginalResponses() {
+		var apiBuilder = RestClient.builder();
+		var viewerBuilder = RestClient.builder();
+		var api = MockRestServiceServer.bindTo(apiBuilder).build();
+		var viewer = MockRestServiceServer.bindTo(viewerBuilder).build();
+		var mapper = new ObjectMapper();
+		var props = new OpenDartProperties();
+		props.setApiKey("0".repeat(40));
+		var client = new OpenDartClient(apiBuilder.baseUrl("https://opendart.fss.or.kr").build(),
+			viewerBuilder.baseUrl("https://dart.fss.or.kr").build(), props, new OpenDartArchiveParser(mapper), mapper);
+		api.expect(requestTo(containsString("/api/document.xml"))).andRespond(withSuccess(
+			"<result><status>014</status></result>", MediaType.APPLICATION_XML));
+		String index = DartViewerReferenceParserTests.INITIAL + DartViewerReferenceParserTests.node("1", "100", "200")
+			+ DartViewerReferenceParserTests.node("2", "301", "100");
+		viewer.expect(requestTo(containsString("/dsaf001/main.do"))).andRespond(withSuccess(index, MediaType.TEXT_HTML));
+		String cover = "<html><body><p>표지 원문</p></body></html>";
+		String body = "<html><body><h2>마지막 본문</h2><table><tr><td>배정액</td><td>100</td></tr></table></body></html>";
+		viewer.expect(requestTo(containsString("eleId=1"))).andRespond(withSuccess(cover, MediaType.TEXT_HTML));
+		viewer.expect(requestTo(containsString("eleId=2"))).andRespond(withSuccess(body, MediaType.TEXT_HTML));
+		var result = client.fetchDocuments(DartViewerReferenceParserTests.RECEIPT);
+		assertThat(result.documents()).singleElement().satisfies(doc -> {
+			assertThat(doc.bodyText()).contains("표지 원문", "마지막 본문", "배정액", "100");
+			assertThat(org.jsoup.Jsoup.parse(doc.sanitizedHtml()).select("table")).hasSize(1);
+		});
+		assertThat(result.sources().getFirst().provenance().get("page-2-301.raw")).isEqualTo(body.getBytes(StandardCharsets.UTF_8));
+		assertThat(result.sources().getFirst().provenance().get("index.raw")).isEqualTo(index.getBytes(StandardCharsets.UTF_8));
+		api.verify(); viewer.verify();
+	}
 
 	@Test
 	void switchesToNextApiKeyAfterDailyLimitResponse() {
@@ -243,6 +272,37 @@ class OpenDartClientTests {
 			.anySatisfy(source -> assertThat(source.kind()).isEqualTo(DocumentArchiveKind.DART_VIEWER_HTML));
 		openDartServer.verify();
 		viewerServer.verify();
+	}
+
+	@Test
+	void fetchesVerifiedViewerInsteadOfStoringAnEmptyXmlDocument() {
+		var api = RestClient.builder();
+		var viewer = RestClient.builder();
+		var apiServer = MockRestServiceServer.bindTo(api).build();
+		var viewerServer = MockRestServiceServer.bindTo(viewer).build();
+		var mapper = new ObjectMapper();
+		var properties = new OpenDartProperties();
+		properties.setApiKey("0".repeat(40));
+		var client = new OpenDartClient(api.baseUrl("https://opendart.fss.or.kr").build(),
+			viewer.baseUrl("https://dart.fss.or.kr").build(), properties, new OpenDartArchiveParser(mapper), mapper);
+		apiServer.expect(requestTo(containsString("/api/document.xml"))).andRespond(withSuccess(zip("20240416000014.xml",
+			"<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n\r\n\r\n".getBytes(StandardCharsets.UTF_8)), MediaType.APPLICATION_OCTET_STREAM));
+		viewerServer.expect(requestTo(containsString("/dsaf001/main.do"))).andRespond(withSuccess(
+			"viewDoc(\"20240416000014\", \"12345\", \"0\", \"0\", \"0\", \"dart4.xsd\", \"\")", MediaType.TEXT_HTML));
+		viewerServer.expect(requestTo(containsString("/report/viewer.do"))).andRespond(withSuccess(
+			"<table><tr><td>발행금액</td><td>100,000,000</td></tr></table>", MediaType.TEXT_HTML));
+		var fetched = client.fetchDocuments("20240416000014");
+		assertThat(fetched.documents()).singleElement().satisfies(doc -> {
+			assertThat(doc.filename()).isEqualTo("20240416000014.viewer.html");
+			assertThat(doc.sanitizedHtml()).contains("<table>");
+			assertThat(doc.sections()).isNotEmpty();
+		});
+		assertThat(fetched.sources()).anySatisfy(source -> {
+			assertThat(source.kind()).isEqualTo(DocumentArchiveKind.OPENDART_ZIP);
+			assertThat(source.status()).isEqualTo(DocumentArchiveStatus.REJECTED);
+			assertThat(source.errorCode()).isEqualTo("EMPTY_DOCUMENT_CONTENT");
+		});
+		apiServer.verify(); viewerServer.verify();
 	}
 
 	@Test

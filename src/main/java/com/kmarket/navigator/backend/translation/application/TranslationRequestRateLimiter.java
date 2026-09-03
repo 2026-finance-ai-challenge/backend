@@ -33,12 +33,12 @@ class TranslationRequestRateLimiter {
 	}
 
 	void checkBatch(String clientHash, int workUnits) {
-		if (workUnits < 1) {
-			return;
-		}
+		if (workUnits < 0) throw new IllegalArgumentException("Negative work units");
 		long minute = System.currentTimeMillis() / 60_000L;
 		increment("kmarket:translation:rate:client:" + clientHash + ":" + minute,
 			1, perClientMinute, Duration.ofMinutes(2));
+		// 완료·진행 중 공유 캐시 조회는 신규 생성 예산을 소비하지 않는다.
+		if (workUnits == 0) return;
 		String date = LocalDate.now(ZoneOffset.UTC).toString();
 		increment("kmarket:translation:rate:global:" + date,
 			workUnits, globalDaily, Duration.ofDays(2));

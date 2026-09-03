@@ -45,7 +45,8 @@ public class MarketCollectionService {
 		lockAtLeastFor = "PT1S"
 	)
 	public void collect() {
-		if (!gateway.configured()) {
+		// 개장 전 공급자 초기값이 전 거래일 종가와 등락을 덮어쓰지 않게 한다.
+		if (!gateway.configured() || !com.kmarket.navigator.backend.stock.domain.MarketQuoteWindow.acceptsRestQuote(java.time.Instant.now())) {
 			return;
 		}
 		int consecutiveFailures = 0;

@@ -17,7 +17,8 @@ public record AuthSession(
 	UUID replacedBySessionId
 ) {
 	public boolean accessActiveAt(Instant now) {
-		return "ACTIVE".equals(state) && accessExpiresAt.isAfter(now);
+		// Refresh 회전은 다른 탭의 미만료 Access JWT를 폐기하지 않는다.
+		return ("ACTIVE".equals(state) || "ROTATED".equals(state)) && accessExpiresAt.isAfter(now);
 	}
 
 	public boolean refreshActiveAt(Instant now) {

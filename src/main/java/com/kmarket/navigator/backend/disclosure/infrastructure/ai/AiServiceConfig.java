@@ -14,13 +14,22 @@ class AiServiceConfig {
 
 	@Bean
 	RestClient aiServiceRestClient(RestClient.Builder builder, AiServiceProperties properties) {
+		return client(builder, properties, properties.readTimeout());
+	}
+
+	@Bean
+	RestClient aiTranslationRestClient(RestClient.Builder builder, AiServiceProperties properties) {
+		return client(builder, properties, java.time.Duration.ofSeconds(210));
+	}
+
+	private RestClient client(RestClient.Builder builder, AiServiceProperties properties, java.time.Duration readTimeout) {
 		HttpClient httpClient = HttpClient.newBuilder()
 			.connectTimeout(properties.connectTimeout())
 			.version(HttpClient.Version.HTTP_1_1)
 			.followRedirects(HttpClient.Redirect.NEVER)
 			.build();
 		JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
-		requestFactory.setReadTimeout(properties.readTimeout());
+		requestFactory.setReadTimeout(readTimeout);
 		return builder
 			.baseUrl(properties.baseUrl().toString())
 			.requestFactory(requestFactory)

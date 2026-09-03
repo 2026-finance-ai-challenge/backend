@@ -1,6 +1,7 @@
 package com.kmarket.navigator.backend;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
@@ -80,6 +81,8 @@ import com.kmarket.navigator.backend.news.domain.TermReference;
 import com.kmarket.navigator.backend.news.domain.NewsRetention;
 import com.kmarket.navigator.backend.news.infrastructure.naver.NaverNewsProperties;
 import com.kmarket.navigator.backend.chat.application.ChatGenerationWorker;
+import com.kmarket.navigator.backend.identity.application.port.AuthSessionRepository;
+import com.kmarket.navigator.backend.identity.domain.AuthSession;
 import com.kmarket.navigator.backend.chat.application.port.AgentGateway;
 import com.kmarket.navigator.backend.chat.domain.AgentAnswer;
 import com.kmarket.navigator.backend.tax.application.TaxDocumentWorker;
@@ -153,6 +156,77 @@ class BackendApplicationTests {
 	JdbcClient jdbcClient;
 
 	@Autowired
+	AuthSessionRepository authSessions;
+
+	@Test
+	void browserRefreshReplayIsBoundToRequestContextAndShortRecoveryWindow() {
+		for (String scenario : List.of("same", "expired", "different-request", "different-context")) {
+			Instant now = Instant.now();
+			UUID userId = UUID.randomUUID();
+			UUID familyId = UUID.randomUUID();
+			AuthSession original = authSession(userId, familyId, UUID.randomUUID().toString(), "ip", now.minusSeconds(180));
+			authSessions.insert(original);
+			String successorHash = UUID.randomUUID().toString();
+			AuthSession successor = authSession(userId, familyId, successorHash, "ip",
+				scenario.equals("expired") ? now.minusSeconds(121) : now);
+			assertThat(authSessions.rotate(original, successor)).isEqualTo(AuthSessionRepository.RotationResult.ROTATED);
+			AuthSession duplicate = authSession(userId, familyId,
+				scenario.equals("different-request") ? UUID.randomUUID().toString() : successorHash,
+				scenario.equals("different-context") ? "other-ip" : "ip", now);
+			assertThat(authSessions.rotate(original, duplicate)).as(scenario).isEqualTo(scenario.equals("same")
+				? AuthSessionRepository.RotationResult.REPLAYED : AuthSessionRepository.RotationResult.REUSED);
+			assertThat(authSessions.findActiveById(successor.id()).isPresent()).isEqualTo(scenario.equals("same"));
+		}
+	}
+
+	private AuthSession authSession(UUID userId, UUID familyId, String tokenHash, String ip, Instant issuedAt) {
+		return new AuthSession(UUID.randomUUID(), familyId, userId, tokenHash, ip, "agent", issuedAt,
+			issuedAt.plusSeconds(900), issuedAt.plusSeconds(86400), "ACTIVE", null);
+	}
+
+	@Test
+	void databaseEnglishTitleChecksMatchCurrencyAndPersonNamePolicy() {
+		List<String> titles = List.of("Jo discusses earnings", "Samjeonnix rallies", "Sales of KRW 3 trillion",
+			"Sales of 3 jo", "Sales of 3jo", "Sales of 3.2 eok", "Sales of eok won", "Sales of man-won",
+			"삼성 earnings", "東京 earnings", "㐀 earnings");
+		for (String table : List.of("translation_memory", "news_article")) {
+			String check = jdbcClient.sql("SELECT pg_get_expr(conbin, conrelid) FROM pg_constraint WHERE conname=:name")
+				.param("name", table + "_english_title_script").query(String.class).single();
+			for (String title : titles) {
+				boolean accepted = jdbcClient.sql("SELECT " + check + " FROM (SELECT CAST(:title AS text) AS translated_text, "
+					+ "CAST(:title AS text) AS english_title, 'NEWS_TITLE' AS content_kind, 'en' AS target_locale, 'READY' AS status) value")
+					.param("title", title).query(Boolean.class).single();
+				assertThat(accepted).as("%s: %s", table, title)
+					.isEqualTo(com.kmarket.navigator.backend.global.text.EnglishTextPolicy.isValid(title));
+			}
+		}
+	}
+
+	@Test
+	void staleFailureCannotReopenCompletedTranslationJob() {
+		UUID id = UUID.randomUUID();
+		jdbcClient.sql("""
+			INSERT INTO translation_memory (id,content_kind,source_locale,target_locale,translation_version,
+			    source_hash,source_text,normalized_source_text,translated_text,status,model_id,prompt_version,
+			    generated_at,created_at,updated_at)
+			VALUES (:id,'NEWS_TITLE','ko','en','news-title-v3',repeat('a',64),'조 회장','조 회장',
+			    'Chairman Jo','READY','gpt-5-nano','financial-title-translation-v8',now(),now(),now())
+			""").param("id", id).update();
+		jdbcClient.sql("""
+			INSERT INTO translation_job (translation_memory_id,status,attempts,available_at,created_at,updated_at)
+			VALUES (:id,'READY',1,now(),now(),now())
+			""").param("id", id).update();
+		translationRepository.fail(id, 1, "STALE_FAILURE", Instant.now(), Duration.ZERO);
+		assertThat(jdbcClient.sql("SELECT status FROM translation_job WHERE translation_memory_id=:id")
+			.param("id", id).query(String.class).single()).isEqualTo("READY");
+		assertThat(jdbcClient.sql("SELECT status FROM translation_memory WHERE id=:id")
+			.param("id", id).query(String.class).single()).isEqualTo("READY");
+	}
+
+	@Autowired
+	com.kmarket.navigator.backend.disclosure.infrastructure.persistence.DisclosureDocumentRepairService documentRepair;
+
+	@Autowired
 	ObjectMapper objectMapper;
 
 	@Autowired
@@ -193,6 +267,12 @@ class BackendApplicationTests {
 	TranslationWorker translationWorker;
 
 	@Autowired
+	com.kmarket.navigator.backend.translation.application.OnDemandTranslationService onDemandTranslationService;
+
+	@Autowired
+	com.kmarket.navigator.backend.translation.application.port.TranslationRepository translationRepository;
+
+	@Autowired
 	TaxDocumentProperties taxDocumentProperties;
 
 	@Autowired
@@ -206,6 +286,52 @@ class BackendApplicationTests {
 
 	@Test
 	void contextLoads() {
+	}
+
+	@Test
+	@Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+	void concurrentLanguagesShareOneJobAndFailedRequestsDoNotRestartItImmediately() throws Exception {
+		UUID articleId = insertReadyNews("Concurrent news " + UUID.randomUUID(), "삼성전자가 새로운 투자를 발표했다.", Instant.now(), "HIGH");
+		UUID clusterId = jdbcClient.sql("SELECT cluster_id FROM news_article WHERE id = :id")
+			.param("id", articleId).query(UUID.class).single();
+		try (var executor = java.util.concurrent.Executors.newFixedThreadPool(8)) {
+			var tasks = new java.util.ArrayList<java.util.concurrent.Callable<com.kmarket.navigator.backend.translation.domain.TranslationView>>();
+			for (int index = 0; index < 32; index++) {
+				String locale = index % 2 == 0 ? "en" : "ko";
+				tasks.add(() -> onDemandTranslationService.ensureNewsRequested(articleId, locale));
+			}
+			var results = executor.invokeAll(tasks);
+			var ids = new java.util.HashSet<UUID>();
+			for (var result : results) ids.add(result.get().jobId());
+			assertThat(ids).hasSize(1);
+			UUID jobId = ids.iterator().next();
+			String sourceHash = results.getFirst().get().sourceHash();
+			assertThat(translationRepository.findMany(com.kmarket.navigator.backend.translation.domain.TranslationKind.NEWS_NARRATIVE,
+				List.of(sourceHash, "0".repeat(64)), "en", com.kmarket.navigator.backend.translation.application.OnDemandTranslationService.NEWS_VERSION)).containsOnlyKeys(sourceHash);
+			assertThat(translationRepository.findMany(com.kmarket.navigator.backend.translation.domain.TranslationKind.NEWS_NARRATIVE,
+				List.of(sourceHash), "ko", com.kmarket.navigator.backend.translation.application.OnDemandTranslationService.NEWS_VERSION)).isEmpty();
+			var calls = new java.util.concurrent.atomic.AtomicInteger();
+			when(translationAiGateway.streamNews(any(), any(), any(), any(), any(), any())).thenAnswer(invocation -> {
+				calls.incrementAndGet();
+				throw new com.kmarket.navigator.backend.translation.application.TranslationProviderException(
+					com.kmarket.navigator.backend.translation.application.TranslationProviderException.Failure.INVALID_OUTPUT);
+			});
+			translationWorker.processNews();
+			assertThat(calls.get()).isEqualTo(1);
+			for (var result : executor.invokeAll(tasks)) {
+				assertThat(result.get().jobId()).isEqualTo(jobId);
+				assertThat(result.get().status()).isEqualTo(com.kmarket.navigator.backend.translation.domain.TranslationStatus.FAILED);
+			}
+			translationWorker.processNews();
+			assertThat(calls.get()).isEqualTo(1);
+			assertThat(jdbcClient.sql("SELECT attempts FROM translation_job WHERE translation_memory_id = :id")
+				.param("id", jobId).query(Integer.class).single()).isEqualTo(1);
+		} finally {
+			jdbcClient.sql("DELETE FROM translation_memory WHERE request_context ->> 'article_id' = :id")
+				.param("id", articleId.toString()).update();
+			jdbcClient.sql("DELETE FROM news_article WHERE id = :id").param("id", articleId).update();
+			jdbcClient.sql("DELETE FROM news_cluster WHERE id = :id").param("id", clusterId).update();
+		}
 	}
 
 	@Test
@@ -536,9 +662,77 @@ class BackendApplicationTests {
 	}
 
 	@Test
+	void browserSessionSurvivesReloadWithoutExposingRefreshToken() throws Exception {
+		AuthFixture fixture = signupAndLogin("browser");
+		String loginId = jdbcClient.sql("SELECT login_id FROM user_account WHERE id=:id")
+			.param("id", fixture.userId()).query(String.class).single();
+		var loginResponse = mockMvc.perform(post("/api/v1/auth/browser/login")
+			.header("Origin", "https://kartkr.cloud").header("X-KART-CSRF", "1")
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("{\"loginId\":\"%s\",\"password\":\"Secure!Pass123\"}".formatted(loginId)))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.refreshToken").doesNotExist())
+			.andExpect(header().string("Cache-Control", "no-store")).andReturn().getResponse();
+		String setCookie = loginResponse.getHeader("Set-Cookie");
+		assertThat(setCookie).contains("HttpOnly", "Secure", "SameSite=Strict", "Path=/api/v1/auth/browser", "Max-Age=")
+			.doesNotContain("Domain=");
+		String refreshToken = loginResponse.getCookie("kart_browser_refresh").getValue();
+		String firstAccess = objectMapper.readTree(loginResponse.getContentAsString()).get("accessToken").stringValue();
+		var restored = mockMvc.perform(post("/api/v1/auth/browser/refresh").contentType(MediaType.APPLICATION_JSON).content("{\"requestId\":\"00000000-0000-4000-8000-000000000001\"}")
+			.header("Origin", "https://kartkr.cloud").header("X-KART-CSRF", "1")
+			.cookie(new jakarta.servlet.http.Cookie("kart_browser_refresh", refreshToken)))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.user.loginId").value(loginId))
+			.andExpect(jsonPath("$.refreshToken").doesNotExist()).andReturn().getResponse();
+		String rotated = restored.getCookie("kart_browser_refresh").getValue();
+		assertThat(rotated).isNotEqualTo(refreshToken);
+		// 첫 응답을 받지 못한 브라우저가 같은 쿠키·요청 ID로 재접속해도 재사용 공격으로 처리하지 않는다.
+		mockMvc.perform(post("/api/v1/auth/browser/refresh").contentType(MediaType.APPLICATION_JSON)
+			.content("{\"requestId\":\"00000000-0000-4000-8000-000000000001\"}")
+			.header("Origin", "https://kartkr.cloud").header("X-KART-CSRF", "1")
+			.cookie(new jakarta.servlet.http.Cookie("kart_browser_refresh", refreshToken)))
+			.andExpect(status().isOk()).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie().value("kart_browser_refresh", rotated));
+		mockMvc.perform(get("/api/v1/me").header("Authorization", "Bearer " + firstAccess))
+			.andExpect(status().isOk());
+		String accessToken = objectMapper.readTree(restored.getContentAsString()).get("accessToken").stringValue();
+		mockMvc.perform(get("/api/v1/me").header("Authorization", "Bearer " + accessToken))
+			.andExpect(status().isOk());
+		mockMvc.perform(post("/api/v1/auth/browser/logout")
+			.header("Origin", "https://kartkr.cloud").header("X-KART-CSRF", "1")
+			.cookie(new jakarta.servlet.http.Cookie("kart_browser_refresh", rotated)))
+			.andExpect(status().isNoContent()).andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.containsString("Max-Age=0")));
+		mockMvc.perform(get("/api/v1/me").header("Authorization", "Bearer " + accessToken))
+			.andExpect(status().isUnauthorized());
+		mockMvc.perform(get("/api/v1/me").header("Authorization", "Bearer " + firstAccess))
+			.andExpect(status().isUnauthorized());
+		mockMvc.perform(post("/api/v1/auth/browser/refresh").contentType(MediaType.APPLICATION_JSON).content("{\"requestId\":\"00000000-0000-4000-8000-000000000001\"}")
+			.header("Origin", "https://kartkr.cloud").header("X-KART-CSRF", "1")
+			.cookie(new jakarta.servlet.http.Cookie("kart_browser_refresh", rotated)))
+			.andExpect(status().isUnauthorized());
+	}
+
+	@Test
+	void browserCookieEndpointsRejectCsrfAndPermitCredentialedTrustedPreflight() throws Exception {
+		for (String action : List.of("refresh", "logout")) {
+			mockMvc.perform(post("/api/v1/auth/browser/" + action).contentType(MediaType.APPLICATION_JSON).content("{\"requestId\":\"00000000-0000-4000-8000-000000000001\"}").header("Origin", "https://kartkr.cloud"))
+				.andExpect(status().isForbidden());
+			mockMvc.perform(post("/api/v1/auth/browser/" + action).contentType(MediaType.APPLICATION_JSON).content("{\"requestId\":\"00000000-0000-4000-8000-000000000001\"}").header("X-KART-CSRF", "1"))
+				.andExpect(status().isForbidden());
+			mockMvc.perform(post("/api/v1/auth/browser/" + action).contentType(MediaType.APPLICATION_JSON).content("{\"requestId\":\"00000000-0000-4000-8000-000000000001\"}")
+				.header("Origin", "https://attacker.example").header("X-KART-CSRF", "1"))
+				.andExpect(status().isForbidden());
+		}
+		mockMvc.perform(post("/api/v1/auth/browser/refresh").contentType(MediaType.APPLICATION_JSON).content("{\"requestId\":\"00000000-0000-4000-8000-000000000001\"}")
+			.header("Origin", "https://kartkr.cloud").header("X-KART-CSRF", "1"))
+			.andExpect(status().isUnauthorized());
+		mockMvc.perform(options("/api/v1/auth/browser/refresh")
+			.header("Origin", "https://kartkr.cloud").header("Access-Control-Request-Method", "POST")
+			.header("Access-Control-Request-Headers", "Content-Type,X-KART-CSRF"))
+			.andExpect(status().isOk()).andExpect(header().string("Access-Control-Allow-Credentials", "true"));
+	}
+
+	@Test
 	void issuesJwtAndRotatesRefreshTokenWithRedisSessionValidation() throws Exception {
 		String loginId = "investor_" + UUID.randomUUID().toString().substring(0, 8);
-		String password = "Secure!Pass123";
+		String password = "orange!8";
 		mockMvc.perform(post("/api/v1/auth/signup")
 				.contentType(MediaType.APPLICATION_JSON)
 				.content("""
@@ -549,10 +743,13 @@ class BackendApplicationTests {
 					  "nationality": "US",
 					  "investorType": "INDIVIDUAL",
 					  "termsAccepted": true,
-					  "privacyAccepted": true
+					  "privacyAccepted": true,
+					  "fscDisclaimerAccepted": true
 					}
 					""".formatted(loginId, password, password)))
 			.andExpect(status().isCreated());
+		assertThat(jdbcClient.sql("SELECT count(*) FROM security_audit_event a JOIN user_account u ON u.id=a.user_id WHERE u.login_id=:id AND a.event_type='FSC_DISCLAIMER_ACCEPTED'")
+			.param("id", loginId).query(Long.class).single()).isEqualTo(1);
 		assertThat(jdbcClient.sql("SELECT password_hash FROM user_account WHERE login_id = :loginId")
 			.param("loginId", loginId)
 			.query(String.class)
@@ -876,7 +1073,7 @@ class BackendApplicationTests {
 	}
 
 	@Test
-	void generatesStopsAndRegeneratesOwnedAgentMessagesWithVerifiedCitations() throws Exception {
+	void generatesStopsAndRejectsRegenerationOfAnsweredMessages() throws Exception {
 		AuthFixture owner = signupAndLogin("agent_owner");
 		AuthFixture other = signupAndLogin("agent_other");
 		JsonNode room = createdResponse(post("/api/v1/me/chats")
@@ -885,7 +1082,7 @@ class BackendApplicationTests {
 			.content("{\"contextType\":\"GENERAL\"}"));
 		UUID roomId = UUID.fromString(room.get("id").stringValue());
 		UUID clientMessageId = UUID.randomUUID();
-		when(agentGateway.answer(any(), eq("What is the KOSPI snapshot?"), any(), any(), any()))
+		when(agentGateway.answer(any(), eq("What is the KOSPI snapshot?"), any(), any(), any(), any()))
 			.thenReturn(new AgentAnswer(
 				"The supplied KOSPI snapshot is currently unavailable. [E1]",
 				List.of("E1"),
@@ -928,25 +1125,26 @@ class BackendApplicationTests {
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.name").value("KOSPI snapshot"));
 
-		when(agentGateway.answer(any(), eq("What is the KOSPI snapshot?"), any(), any(), any()))
+		when(agentGateway.answer(any(), eq("What is the KOSPI snapshot?"), any(), any(), any(), any()))
 			.thenReturn(new AgentAnswer(
 				"The current server snapshot is unavailable. [E1]",
 				List.of("E1"), false, null, "KOSPI snapshot", "For information only.",
 				new BigDecimal("0.80"), "test-agent", "market-agent-test-v1"
 			));
-		acceptedResponse(post(
+		mockMvc.perform(post(
 				"/api/v1/me/chats/{roomId}/messages/{assistantMessageId}/regenerate",
 				roomId,
 				assistantId
 			)
 			.header("Authorization", "Bearer " + owner.accessToken())
 			.contentType(MediaType.APPLICATION_JSON)
-			.content("{\"requestKey\":\"%s\"}".formatted(UUID.randomUUID())));
+			.content("{\"requestKey\":\"%s\"}".formatted(UUID.randomUUID())))
+			.andExpect(status().isNotFound());
 		chatGenerationWorker.process();
 		mockMvc.perform(get("/api/v1/me/chats/{roomId}/messages", roomId)
 				.header("Authorization", "Bearer " + owner.accessToken()))
 			.andExpect(status().isOk())
-			.andExpect(jsonPath("$.length()").value(3));
+			.andExpect(jsonPath("$.length()").value(2));
 
 		JsonNode stoppedSubmission = acceptedResponse(post("/api/v1/me/chats/{roomId}/messages", roomId)
 			.header("Authorization", "Bearer " + owner.accessToken())
@@ -976,14 +1174,218 @@ class BackendApplicationTests {
 	}
 
 	@Test
-	void boundsAgentRetriesAndAllowsExplicitRetryAfterFailure() throws Exception {
+	void restoresLatestGenerationWithoutRetryingAndProtectsRoomOwnership() throws Exception {
+		AuthFixture owner = signupAndLogin("generation_recovery");
+		AuthFixture other = signupAndLogin("generation_intruder");
+		JsonNode room = createdResponse(post("/api/v1/me/chats")
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"contextType\":\"GENERAL\"}"));
+		UUID roomId = UUID.fromString(room.get("id").stringValue());
+		mockMvc.perform(get("/api/v1/me/chats/{roomId}/generations/latest", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.generation").doesNotExist())
+			.andExpect(header().string("Cache-Control", "no-store"));
+		JsonNode submitted = acceptedResponse(post("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"clientMessageId\":\"%s\",\"content\":\"Recover this question.\"}".formatted(UUID.randomUUID())));
+		String generationId = submitted.get("generation").get("id").stringValue();
+		mockMvc.perform(get("/api/v1/me/chats/{roomId}/generations/latest", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.generation.id").value(generationId))
+			.andExpect(jsonPath("$.generation.status").value("PENDING"));
+		when(agentGateway.answer(any(), any(), any(), any(), any(), any()))
+			.thenThrow(new com.kmarket.navigator.backend.global.error.BusinessException(
+				com.kmarket.navigator.backend.global.error.ErrorCode.AI_SERVICE_UNAVAILABLE));
+		chatGenerationWorker.process();
+		mockMvc.perform(get("/api/v1/me/chats/{roomId}/generations/latest", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.generation.id").value(generationId))
+			.andExpect(jsonPath("$.generation.status").value("FAILED"))
+			.andExpect(jsonPath("$.generation.retryable").value(true));
+		verify(agentGateway, times(1)).answer(any(), any(), any(), any(), any(), any());
+		mockMvc.perform(get("/api/v1/me/chats/{roomId}/generations/latest", roomId)
+			.header("Authorization", "Bearer " + other.accessToken())).andExpect(status().isNotFound());
+		acceptedResponse(post("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"clientMessageId\":\"%s\",\"content\":\"A newer question.\"}".formatted(UUID.randomUUID())));
+		mockMvc.perform(get("/api/v1/me/chats/{roomId}/generations/latest", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.generation.status").value("PENDING"));
+		mockMvc.perform(delete("/api/v1/me/chats/{roomId}", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken())).andExpect(status().isNoContent());
+		mockMvc.perform(get("/api/v1/me/chats/{roomId}/generations/latest", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken())).andExpect(status().isNotFound());
+	}
+
+	@Test
+	void localizesPreviouslySavedNewsCitationsWithoutGeneratingAgain() throws Exception {
+		activateCommonStocks("005930");
+		UUID articleId = insertReadyNews("삼성전자 생산 소식", "삼성전자 생산 계획을 설명하는 원문입니다.", Instant.now(), "HIGH");
+		AuthFixture owner = signupAndLogin("news_citation");
+		JsonNode room = createdResponse(post("/api/v1/me/chats")
+			.header("Authorization", "Bearer " + owner.accessToken())
+			.contentType(MediaType.APPLICATION_JSON)
+			.content("{\"contextType\":\"NEWS\",\"referenceId\":\"%s\"}".formatted(articleId)));
+		UUID roomId = UUID.fromString(room.get("id").stringValue());
+		when(agentGateway.answer(any(), any(), any(), any(), any(), any())).thenReturn(new AgentAnswer(
+			"The article describes a production update. [E1]", List.of("E1"), false, null,
+			"Production update", "For information only.", new BigDecimal("0.8"), "test-agent", "test-v1"));
+		acceptedResponse(post("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"clientMessageId\":\"%s\",\"content\":\"What happened?\"}".formatted(UUID.randomUUID())));
+		chatGenerationWorker.process();
+		jdbcClient.sql("""
+			UPDATE chat_message SET citations = jsonb_set(citations, '{0,title}', '"옛 한글 제목"')
+			WHERE room_id = :room AND role = 'ASSISTANT'
+			""").param("room", roomId).update();
+		mockMvc.perform(get("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$[1].citations[0].titleEn").value("Ready English news title"))
+			.andExpect(jsonPath("$[1].citations[0].titleKo").value("삼성전자 생산 소식"));
+		verify(agentGateway, times(1)).answer(any(), any(), any(), any(), any(), any());
+	}
+
+	@Test
+	void questionLanguagePolicySurvivesUiChangesAndRetryWithoutRewritingHistory() throws Exception {
+		AuthFixture owner = signupAndLogin("chat_locale");
+		JsonNode room = createdResponse(post("/api/v1/me/chats")
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"contextType\":\"GENERAL\"}"));
+		UUID roomId = UUID.fromString(room.get("id").stringValue());
+		UUID requestId = UUID.randomUUID();
+		String body = "{\"clientMessageId\":\"%s\",\"content\":\"위험이 무엇인가요?\",\"answerLocale\":\"ko\"}".formatted(requestId);
+		when(agentGateway.answer(any(), any(), any(), any(), any(), eq("auto")))
+			.thenThrow(new com.kmarket.navigator.backend.global.error.BusinessException(
+				com.kmarket.navigator.backend.global.error.ErrorCode.AI_SERVICE_UNAVAILABLE))
+			.thenReturn(new AgentAnswer("위험은 손실 가능성을 뜻합니다.", List.of(), false, null,
+				"위험 설명", "정보 제공용입니다.", new BigDecimal("0.8"), "test-agent", "test-locale"));
+		JsonNode submitted = acceptedResponse(post("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON).content(body));
+		String generationId = submitted.get("generation").get("id").stringValue();
+		JsonNode duplicate = acceptedResponse(post("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON).content(body));
+		assertThat(duplicate.get("generation").get("id").stringValue()).isEqualTo(generationId);
+		mockMvc.perform(post("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON)
+			.content(body.replace("\"ko\"", "\"en\"")))
+			.andExpect(status().isAccepted())
+			.andExpect(jsonPath("$.generation.id").value(generationId));
+		mockMvc.perform(post("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON)
+			.content(body.replace("\"ko\"", "\"fr\"")))
+			.andExpect(status().isBadRequest());
+		chatGenerationWorker.process();
+		mockMvc.perform(post("/api/v1/me/chats/{roomId}/generations/{id}/retry", roomId, generationId)
+			.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isOk());
+		chatGenerationWorker.process();
+		verify(agentGateway, times(2)).answer(any(), any(), any(), any(), any(), eq("auto"));
+		assertThat(jdbcClient.sql("SELECT answer_locale FROM chat_generation WHERE id = :id")
+			.param("id", UUID.fromString(generationId)).query(String.class).single()).isEqualTo("auto");
+		mockMvc.perform(get("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(jsonPath("$.length()").value(2))
+			.andExpect(jsonPath("$[1].content").value("위험은 손실 가능성을 뜻합니다."));
+		when(agentGateway.answer(any(), any(), any(), any(), any(), eq("auto"))).thenReturn(new AgentAnswer(
+			"Risk means the possibility of loss.", List.of(), false, null, "Risk", "For information only.",
+			new BigDecimal("0.8"), "test-agent", "test-locale"));
+		acceptedResponse(post("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"clientMessageId\":\"%s\",\"content\":\"Explain risk again.\"}".formatted(UUID.randomUUID())));
+		chatGenerationWorker.process();
+		verify(agentGateway).answer(any(), eq("Explain risk again."), any(), any(), any(), eq("auto"));
+		mockMvc.perform(get("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(jsonPath("$.length()").value(4))
+			.andExpect(jsonPath("$[1].content").value("위험은 손실 가능성을 뜻합니다."))
+			.andExpect(jsonPath("$[3].content").value("Risk means the possibility of loss."));
+	}
+
+	@Test
+	void persistsAndValidatesNewsSelectionWithoutAFilingSectionOrAnotherTranslation() throws Exception {
+		activateCommonStocks("005930");
+		String original = "삼성전자의 배당 계획은 아직 확정되지 않았다.";
+		UUID articleId = insertReadyNews("삼성전자 배당 전망", original, Instant.now(), "HIGH");
+		var cached = onDemandTranslationService.ensureNewsRequested(articleId, "en");
+		translationRepository.claimForKind(com.kmarket.navigator.backend.translation.domain.TranslationKind.NEWS_NARRATIVE,
+			1, "selection-test", Instant.now(), Instant.now().minusSeconds(300));
+		translationRepository.complete(cached.jobId(), new GeneratedTranslation(cached.sourceHash(), "en", cached.translationVersion(),
+			objectMapper.readTree("""
+				{"translatedParagraphs":["Samsung Electronics' dividend plan is not confirmed."],
+				 "what":"The dividend plan remains unconfirmed.","why":"No decision has been announced.","impact":"Future dividends remain uncertain."}
+				"""), "test-model", "test-news-selection"), Instant.now());
+		AuthFixture owner = signupAndLogin("news_selection");
+		JsonNode room = createdResponse(post("/api/v1/me/chats")
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"contextType\":\"NEWS\",\"referenceId\":\"%s\"}".formatted(articleId)));
+		UUID roomId = UUID.fromString(room.get("id").stringValue());
+		when(agentGateway.answer(any(), any(), any(), any(), any(), any())).thenReturn(new AgentAnswer(
+			"The plan is unconfirmed. [E1]", List.of("E1"), false, null, "Dividend plan", "For information only.",
+			new BigDecimal("0.8"), "test-agent", "test-v1"));
+		for (String selection : List.of("배당 계획은 아직 확정되지 않았다", "dividend plan is not confirmed")) {
+			String body = objectMapper.writeValueAsString(Map.of("clientMessageId", UUID.randomUUID(),
+				"content", "Explain the selected passage.", "selectedText", selection));
+			JsonNode submitted = acceptedResponse(post("/api/v1/me/chats/{roomId}/messages", roomId)
+				.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON).content(body));
+			JsonNode duplicate = acceptedResponse(post("/api/v1/me/chats/{roomId}/messages", roomId)
+				.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON).content(body));
+			UUID generationId = UUID.fromString(submitted.path("generation").path("id").asString());
+			assertThat(duplicate.path("generation").path("id")).isEqualTo(submitted.path("generation").path("id"));
+			assertThat(jdbcClient.sql("SELECT selected_text FROM chat_generation WHERE id = :id AND selected_section_id IS NULL")
+				.param("id", generationId).query(String.class).single()).isEqualTo(selection);
+			chatGenerationWorker.process();
+			mockMvc.perform(get("/api/v1/me/chats/{roomId}/generations/{generationId}", roomId, generationId)
+				.header("Authorization", "Bearer " + owner.accessToken()))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.status").value("COMPLETED"))
+				.andExpect(jsonPath("$.attempts").value(1));
+		}
+		org.mockito.ArgumentCaptor<List<com.kmarket.navigator.backend.chat.domain.AgentEvidence>> evidence = org.mockito.ArgumentCaptor.captor();
+		verify(agentGateway, times(2)).answer(any(), any(), any(), evidence.capture(), any(), any());
+		assertThat(evidence.getAllValues()).allSatisfy(items -> {
+			var packet = objectMapper.readTree(items.getFirst().content());
+			assertThat(packet.path("verifiedSelection").path("sourceHash").asString()).isEqualTo(cached.sourceHash());
+			assertThat(packet.path("verifiedSelection").path("context").asString()).contains(packet.path("verifiedSelection").path("text").asString());
+		});
+		org.mockito.Mockito.verifyNoInteractions(translationAiGateway);
+	}
+
+	@Test
+	void rejectsUnrelatedNewsSelectionBeforeCallingTheModel() throws Exception {
+		activateCommonStocks("005930");
+		UUID articleId = insertReadyNews("삼성전자 투자 계획", "삼성전자 투자 계획은 미정이다.", Instant.now(), "HIGH");
+		AuthFixture owner = signupAndLogin("news_invalid");
+		JsonNode room = createdResponse(post("/api/v1/me/chats")
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"contextType\":\"NEWS\",\"referenceId\":\"%s\"}".formatted(articleId)));
+		UUID roomId = UUID.fromString(room.path("id").asString());
+		mockMvc.perform(post("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON)
+			.content(objectMapper.writeValueAsString(Map.of("clientMessageId", UUID.randomUUID(), "content", "Explain this.",
+				"selectedText", "삼성전자", "selectedSectionId", UUID.randomUUID()))))
+			.andExpect(status().isBadRequest());
+		JsonNode submitted = acceptedResponse(post("/api/v1/me/chats/{roomId}/messages", roomId)
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON)
+			.content(objectMapper.writeValueAsString(Map.of("clientMessageId", UUID.randomUUID(),
+				"content", "Explain this.", "selectedText", "An invented acquisition completed yesterday."))));
+		chatGenerationWorker.process();
+		mockMvc.perform(get("/api/v1/me/chats/{roomId}/generations/{generationId}", roomId, submitted.path("generation").path("id").asString())
+			.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.status").value("FAILED"))
+			.andExpect(jsonPath("$.errorCode").value("INVALID_CHAT_SELECTION"))
+			.andExpect(jsonPath("$.retryable").value(false));
+		org.mockito.Mockito.verifyNoInteractions(agentGateway, translationAiGateway);
+	}
+
+	@Test
+	void disablesAutomaticAgentRetriesAndAllowsExplicitRetryAfterFailure() throws Exception {
 		AuthFixture owner = signupAndLogin("agent_retry");
 		JsonNode room = createdResponse(post("/api/v1/me/chats")
 			.header("Authorization", "Bearer " + owner.accessToken())
 			.contentType(MediaType.APPLICATION_JSON)
 			.content("{\"contextType\":\"GENERAL\"}"));
 		UUID roomId = UUID.fromString(room.get("id").stringValue());
-		when(agentGateway.answer(any(), any(), any(), any(), any()))
+		when(agentGateway.answer(any(), any(), any(), any(), any(), any()))
 			.thenThrow(new com.kmarket.navigator.backend.global.error.BusinessException(
 				com.kmarket.navigator.backend.global.error.ErrorCode.AI_SERVICE_UNAVAILABLE
 			));
@@ -997,13 +1399,6 @@ class BackendApplicationTests {
 
 		for (int attempt = 0; attempt < 3; attempt++) {
 			chatGenerationWorker.process();
-			jdbcClient.sql("""
-				UPDATE chat_generation
-				SET available_at = CURRENT_TIMESTAMP
-				WHERE id = :generationId AND status = 'PENDING'
-				""")
-				.param("generationId", generationId)
-				.update();
 		}
 		mockMvc.perform(get(
 				"/api/v1/me/chats/{roomId}/generations/{generationId}",
@@ -1013,7 +1408,8 @@ class BackendApplicationTests {
 			.header("Authorization", "Bearer " + owner.accessToken()))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.status").value("FAILED"))
-			.andExpect(jsonPath("$.attempts").value(3))
+			.andExpect(jsonPath("$.attempts").value(1))
+			.andExpect(jsonPath("$.retryable").value(true))
 			.andExpect(jsonPath("$.errorCode").value("AI_SERVICE_UNAVAILABLE"));
 		mockMvc.perform(post(
 				"/api/v1/me/chats/{roomId}/generations/{generationId}/retry",
@@ -1027,9 +1423,51 @@ class BackendApplicationTests {
 	}
 
 	@Test
+	void reservesNewsTranslationClaimsWithoutWaitingForOlderFilingSections() {
+		var now = java.time.Instant.now();
+		var kind = com.kmarket.navigator.backend.translation.domain.TranslationKind.NEWS_NARRATIVE;
+		var filingKind = com.kmarket.navigator.backend.translation.domain.TranslationKind.DISCLOSURE_SECTION;
+		var mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+		var context = mapper.createObjectNode();
+		var filing = translationRepository.request(filingKind, "a".repeat(64), "공시", context,
+			"en", "queue-isolation-test", now.minusSeconds(60));
+		var news = translationRepository.request(kind, "b".repeat(64), "뉴스", context,
+			"en", "queue-isolation-test", now);
+		var newsJobs = translationRepository.claimForKind(kind, 2, "news-test", now, now.minusSeconds(300));
+		assertThat(newsJobs).extracting(com.kmarket.navigator.backend.translation.domain.TranslationJob::id)
+			.containsExactly(news.jobId());
+		var filingJobs = translationRepository.claimForKind(filingKind, 2, "filing-test", now, now.minusSeconds(300));
+		assertThat(filingJobs).extracting(com.kmarket.navigator.backend.translation.domain.TranslationJob::id)
+			.containsExactly(filing.jobId());
+	}
+
+	@Test
+	void preservesVerifiedSummaryWhenFailedBodyIsRequestedAgain() {
+		var now = java.time.Instant.now();
+		var kind = com.kmarket.navigator.backend.translation.domain.TranslationKind.NEWS_NARRATIVE;
+		var mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+		var context = mapper.createObjectNode();
+		var view = translationRepository.request(kind, "c".repeat(64), "원문", context,
+			"en", "partial-cache-test", now);
+		translationRepository.claimForKind(kind, 2, "partial-test", now, now.minusSeconds(300));
+		var result = mapper.createObjectNode().put("what", "An investment was announced.")
+			.put("why", "The company cited expansion.").put("impact", "No impact was stated.")
+			.put("summaryReady", true).put("bodyReady", false);
+		translationRepository.progress(view.jobId(), new com.kmarket.navigator.backend.translation.domain.GeneratedTranslation(
+			view.sourceHash(), "en", view.translationVersion(), result, "gpt-5-nano", "test-prompt"), now);
+		translationRepository.fail(view.jobId(), 1, "AI_GENERATION_INCOMPLETE", now, java.time.Duration.ZERO);
+		var resumed = translationRepository.request(kind, view.sourceHash(), "원문", context,
+			"en", view.translationVersion(), now.plusSeconds(901));
+		assertThat(resumed.status()).isEqualTo(com.kmarket.navigator.backend.translation.domain.TranslationStatus.PENDING);
+		assertThat(resumed.result()).isEqualTo(result);
+		assertThat(resumed.modelId()).isEqualTo("gpt-5-nano");
+	}
+
+	@Test
 	void isolatesFilingAgentToBoundDocumentVersionAndSelectedSection() throws Exception {
 		OpenDartFiling filing = filing("20260821800677");
 		disclosureRepository.saveFiling(filing);
+		publishDisclosureFixture(filing.receiptNumber());
 		activateCommonStocks("005930");
 		disclosureRepository.completeDocumentJob(
 			filing.receiptNumber(),
@@ -1081,6 +1519,9 @@ class BackendApplicationTests {
 				.header("Authorization", "Bearer " + owner.accessToken()))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$[1].citations[0].sourceType").value("FILING"))
+			.andExpect(jsonPath("$[1].citations[0].titleEn").value("Translated disclosure title"))
+			.andExpect(jsonPath("$[1].citations[0].titleKo").value(filing.reportName()))
+			.andExpect(jsonPath("$[1].citations[0].url").value("/disclosures/" + filing.receiptNumber()))
 			.andExpect(jsonPath("$[1].citations[0].referenceId").value(filing.receiptNumber()))
 			.andExpect(jsonPath("$[1].citations[0].sectionIds[0]").value(sectionId.toString()));
 
@@ -1105,7 +1546,11 @@ class BackendApplicationTests {
 			.header("Authorization", "Bearer " + owner.accessToken()))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.status").value("FAILED"))
-			.andExpect(jsonPath("$.errorCode").value("CHAT_CONTEXT_STALE"));
+			.andExpect(jsonPath("$.errorCode").value("CHAT_CONTEXT_STALE"))
+			.andExpect(jsonPath("$.retryable").value(false));
+		mockMvc.perform(post("/api/v1/me/chats/{roomId}/generations/{generationId}/retry", roomId, staleGenerationId)
+			.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isConflict());
 		assertThat(submitted.get("generation").get("status").stringValue()).isEqualTo("PENDING");
 	}
 
@@ -1417,14 +1862,14 @@ class BackendApplicationTests {
 	void reconcilesExistingCrossPublisherNewsAndReturnsOneStory() throws Exception {
 		Instant publishedAt = Instant.now().minus(Duration.ofHours(80));
 		UUID firstArticleId = insertReadyNews(
-			"네팔 중국 대홍수 사망자 584명 실종자 2500명 육박",
-			"네팔과 중국에서 발생한 홍수로 사망자가 584명으로 늘고 실종자가 2500명에 육박했다.",
+			"삼성전자 신규 투자 2500억원 발표",
+			"삼성전자는 반도체 생산시설에 2500억원을 투자한다고 발표했다. 생산 능력 확충과 고객사의 수요 대응이 목적이다. 회사는 단계적으로 장비를 도입하고 기존 제조 공정의 효율을 개선할 계획이라고 설명했다. 신규 시설은 기존 사업장 안에 마련되며 별도 해외 공장 신설은 포함하지 않는다. 투자 집행 일정은 이사회 승인과 장비 인도 일정에 따라 결정된다. 회사는 계획의 주요 내용과 자금 조달 방안을 공시했다.",
 			publishedAt,
 			"HIGH"
 		);
 		UUID duplicateArticleId = insertReadyNews(
-			"네팔 대홍수 사망자 584명 실종자 2천500명 육박",
-			"대홍수 피해가 이어져 사망자 584명과 실종자 약 2500명이 집계됐다.",
+			"삼성전자 신규 투자 2천500억원 발표",
+			"삼성전자는 반도체 생산시설에 2500억원을 투자한다고 발표했다. 생산 능력 확충과 고객사의 수요 대응이 목적이다. 회사는 단계적으로 장비를 도입하고 기존 제조 공정의 효율을 개선할 계획이라고 설명했다. 신규 시설은 기존 사업장 안에 마련되며 별도 해외 공장 신설은 포함하지 않는다. 투자 집행 일정은 이사회 승인과 장비 인도 일정에 따라 결정된다. 회사는 계획의 주요 내용과 자금 조달 방안을 공시했다.",
 			publishedAt.plusSeconds(600),
 			"HIGH"
 		);
@@ -1449,7 +1894,7 @@ class BackendApplicationTests {
 			.query(Long.class)
 			.single();
 		assertThat(clusters).isEqualTo(1);
-		mockMvc.perform(get("/api/v1/news").param("query", "대홍수"))
+		mockMvc.perform(get("/api/v1/news").param("query", "신규 투자"))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.items.length()").value(1))
 			.andExpect(jsonPath("$.items[0].relatedCoverageCount").value(2));
@@ -1730,7 +2175,7 @@ class BackendApplicationTests {
 			""")
 			.param("receiptNumber", filing.receiptNumber())
 			.query(String.class)
-			.single()).isEqualTo("opendart-html-v4");
+			.single()).isEqualTo("opendart-html-v6");
 		assertThat(jdbcClient.sql("""
 			SELECT status FROM ingestion_job
 			WHERE job_type = 'DISCLOSURE_EMBEDDING' AND business_key = :receiptNumber
@@ -1744,6 +2189,85 @@ class BackendApplicationTests {
 			.andExpect(jsonPath("$.receiptNumber").value(filing.receiptNumber()))
 			.andExpect(jsonPath("$.documents[0].version").value(2))
 			.andExpect(jsonPath("$.documents[0].sections[0].text").value("second"));
+	}
+
+	@Test
+	void preservesSectionIdsOnReplayAndVersionsParserChanges() {
+		var filing = filing("20260902999101");
+		disclosureRepository.saveFiling(filing);
+		var source = document("a", "first");
+		disclosureRepository.completeDocumentJob(filing.receiptNumber(), List.of(source), List.of());
+		var original = jdbcClient.sql("SELECT payload_zstd FROM disclosure_document WHERE is_current")
+			.query(byte[].class).single();
+		disclosureRepository.completeDocumentJob(filing.receiptNumber(), List.of(source), List.of());
+		assertThat(jdbcClient.sql("SELECT payload_zstd FROM disclosure_document WHERE is_current")
+			.query(byte[].class).single()).isEqualTo(original);
+		jdbcClient.sql("UPDATE disclosure_document SET parser_version = 'opendart-html-v3'").update();
+		disclosureRepository.completeDocumentJob(filing.receiptNumber(), List.of(source), List.of());
+		assertThat(jdbcClient.sql("SELECT version_no FROM disclosure_document WHERE is_current")
+			.query(Integer.class).single()).isEqualTo(2);
+		assertThat(jdbcClient.sql("SELECT payload_zstd FROM disclosure_document WHERE NOT is_current")
+			.query(byte[].class).single()).isEqualTo(original);
+	}
+
+	@Test
+	void repairsLegacyTablesWithNewVersionAndKeepsBackupSource() {
+		var filing = filing("20260902999102");
+		disclosureRepository.saveFiling(filing);
+		disclosureRepository.completeDocumentJob(filing.receiptNumber(), List.of(document("a", "old section")), List.of());
+		jdbcClient.sql("UPDATE disclosure_document SET parser_version = 'opendart-html-v3'").update();
+		jdbcClient.sql("UPDATE ingestion_job SET status = 'COMPLETED' WHERE job_type = 'DISCLOSURE_SIGNAL'").update();
+		var id = jdbcClient.sql("SELECT id FROM disclosure_document WHERE is_current").query(UUID.class).single();
+		var disclosureId = jdbcClient.sql("SELECT disclosure_id FROM disclosure_document WHERE id = :id")
+			.param("id", id).query(UUID.class).single();
+		var previous = jdbcClient.sql("SELECT payload_zstd FROM disclosure_document WHERE id = :id")
+			.param("id", id).query(byte[].class).single();
+		var fixed = new OpenDartDocument(document("a", "old section").filename(), "a".repeat(64), "날짜 2026",
+			"<table><tr><td>날짜</td><td>2026</td></tr></table>",
+			List.of(new OpenDartSection(0, SectionKind.TABLE, null, "날짜 2026", "[[\"날짜\",\"2026\"]]")));
+		assertThat(documentRepair.restoreVersion(id, disclosureId, filing.receiptNumber(), new byte[]{1}, fixed)).isFalse();
+		assertThat(documentRepair.restoreVersion(id, disclosureId, filing.receiptNumber(), previous, fixed)).isTrue();
+		assertThat(documentRepair.restoreVersion(id, disclosureId, filing.receiptNumber(), previous, fixed)).isFalse();
+		assertThat(jdbcClient.sql("SELECT payload_zstd FROM disclosure_document WHERE id = :id")
+			.param("id", id).query(byte[].class).single()).isEqualTo(previous);
+		assertThat(jdbcClient.sql("SELECT version_no FROM disclosure_document WHERE is_current").query(Integer.class).single()).isEqualTo(2);
+		assertThat(jdbcClient.sql("SELECT status FROM ingestion_job WHERE job_type = 'DISCLOSURE_EMBEDDING'")
+			.query(String.class).single()).isEqualTo("PENDING");
+		assertThat(jdbcClient.sql("SELECT status FROM ingestion_job WHERE job_type = 'DISCLOSURE_SIGNAL'")
+			.query(String.class).single()).isEqualTo("COMPLETED");
+	}
+
+	@org.junit.jupiter.params.ParameterizedTest
+	@org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+	void repairsVerifiedMainSourceInEitherDirectionAndPreservesOriginalVersion(boolean viewerToXml) {
+		var filing = filing("20260902999103");
+		disclosureRepository.saveFiling(filing);
+		String originalFilename = filing.receiptNumber() + (viewerToXml ? ".viewer.html" : ".xml");
+		var empty = new OpenDartDocument(originalFilename, "a".repeat(64), "", "", List.of());
+		disclosureRepository.completeDocumentJob(filing.receiptNumber(), List.of(empty), List.of());
+		jdbcClient.sql("UPDATE disclosure_document SET parser_version = 'opendart-html-v3'").update();
+		var id = jdbcClient.sql("SELECT id FROM disclosure_document WHERE is_current").query(UUID.class).single();
+		var disclosureId = jdbcClient.sql("SELECT disclosure_id FROM disclosure_document WHERE id=:id").param("id", id).query(UUID.class).single();
+		var previous = jdbcClient.sql("SELECT payload_zstd FROM disclosure_document WHERE id=:id").param("id", id).query(byte[].class).single();
+		var verified = new OpenDartDocument(filing.receiptNumber() + (viewerToXml ? ".xml" : ".viewer.html"), "b".repeat(64), "검증 원문",
+			"<p>검증 원문</p>", List.of(new OpenDartSection(0, SectionKind.TEXT, null, "검증 원문", null)));
+		var unrelated = new OpenDartDocument("other.viewer.html", verified.contentHash(), verified.bodyText(), verified.sanitizedHtml(), verified.sections());
+		assertThatThrownBy(() -> documentRepair.restoreVersion(id, disclosureId, filing.receiptNumber(), previous, unrelated))
+			.isInstanceOf(IllegalArgumentException.class);
+		assertThatThrownBy(() -> documentRepair.restoreVersion(id, disclosureId, filing.receiptNumber(), previous, empty))
+			.isInstanceOf(IllegalArgumentException.class);
+		var archive = new StoredDocumentArchive(viewerToXml ? DocumentArchiveKind.OPENDART_ZIP : DocumentArchiveKind.DART_VIEWER_HTML, DocumentArchiveStatus.VERIFIED,
+			"html-repair/20260902999103/verified.viewer.zip", "c".repeat(64), 100, null);
+		assertThat(documentRepair.restoreVersion(id, disclosureId, filing.receiptNumber(), previous, verified, List.of(archive))).isTrue();
+		assertThat(documentRepair.restoreVersion(id, disclosureId, filing.receiptNumber(), previous, verified, List.of(archive))).isFalse();
+		assertThat(jdbcClient.sql("SELECT payload_zstd FROM disclosure_document WHERE id=:id AND NOT is_current")
+			.param("id", id).query(byte[].class).single()).isEqualTo(previous);
+		assertThat(jdbcClient.sql("SELECT source_filename FROM disclosure_document WHERE is_current").query(String.class).single())
+			.isEqualTo(originalFilename);
+		assertThat(jdbcClient.sql("SELECT content_hash FROM disclosure_document WHERE is_current").query(String.class).single()).isEqualTo("b".repeat(64));
+		assertThat(jdbcClient.sql("SELECT parser_version FROM disclosure_document WHERE is_current").query(String.class).single()).isEqualTo("opendart-html-v6");
+		assertThat(jdbcClient.sql("SELECT relative_path FROM disclosure_archive WHERE receipt_number=:receipt")
+			.param("receipt", filing.receiptNumber()).query(String.class).single()).isEqualTo(archive.relativePath());
 	}
 
 	@Test
@@ -1870,12 +2394,12 @@ class BackendApplicationTests {
 			FROM translation_memory memory
 			JOIN translation_job job ON job.translation_memory_id = memory.id
 			WHERE memory.content_kind = 'NEWS_NARRATIVE'
-			  AND memory.translation_version = 'news-narrative-v12'
+			  AND memory.translation_version = 'news-bilingual-v1'
 			  AND memory.request_context ->> 'article_id' = :articleId
 			""")
 			.param("articleId", articleId.toString())
 			.query(Long.class)
-			.single()).isEqualTo(2);
+			.single()).isEqualTo(1);
 
 		OpenDartFiling filing = filing("20260823800003");
 		disclosureRepository.saveFiling(filing);
@@ -1941,9 +2465,9 @@ class BackendApplicationTests {
 			.andExpect(status().isAccepted());
 		mockMvc.perform(post("/api/v1/news/{articleId}/translation?locale=ko", articleId))
 			.andExpect(status().isAccepted());
-		when(translationAiGateway.translateNews(any(), any(), any(), any(), any(), any()))
+		when(translationAiGateway.streamNews(any(), any(), any(), any(), any(), any()))
 			.thenAnswer(invocation -> {
-				String targetLocale = invocation.getArgument(4);
+				String targetLocale = "en";
 				var result = objectMapper.createObjectNode();
 				result.putArray("translatedParagraphs")
 					.add("ko".equals(targetLocale)
@@ -1957,19 +2481,26 @@ class BackendApplicationTests {
 					: "The filing cites capacity expansion.");
 				result.put("impact", "ko".equals(targetLocale)
 					? "향후 생산 능력이 늘어날 수 있다."
-					: "The investment may increase future capacity.");
+						: "The investment may increase future capacity.");
+				var summaries = result.putObject("summaries");
+				var en = summaries.putObject("en");
+				for (String key : List.of("what", "why", "impact")) en.set(key, result.path(key));
+				var ko = summaries.putObject("ko");
+				ko.put("what", "회사가 신규 반도체 투자를 발표했다.");
+				ko.put("why", "생산 능력 확대가 필요했다.");
+				ko.put("impact", "향후 생산 능력이 늘어날 수 있다.");
 				return new GeneratedTranslation(
 					invocation.getArgument(0),
 					targetLocale,
-					invocation.getArgument(5),
+					invocation.getArgument(4),
 					result,
 					"translation-test-model",
 					"news-narrative-v12"
 				);
 			});
 
-		translationWorker.process();
-		translationWorker.process();
+		translationWorker.processNews();
+		translationWorker.processNews();
 
 		mockMvc.perform(get("/api/v1/news/{articleId}", articleId))
 			.andExpect(status().isOk())
@@ -2015,8 +2546,11 @@ class BackendApplicationTests {
 				List.of(evidence.getFirst().id()),
 				true,
 				null,
-				"gpt-5-mini",
-					"filing-summary-v2"
+				"gpt-5-nano",
+				"filing-summary-v3",
+				"회사가 신규 반도체 설비를 승인했습니다.",
+				"공시에 추가 이유는 기재되어 있지 않습니다.",
+				"설비가 생산 능력에 영향을 줄 수 있습니다."
 			);
 		});
 
@@ -2034,7 +2568,8 @@ class BackendApplicationTests {
 			))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.sufficientEvidence").value(true))
-				.andExpect(jsonPath("$.promptVersion").value("filing-summary-v2"));
+			.andExpect(jsonPath("$.promptVersion").value("filing-summary-v3"))
+			.andExpect(jsonPath("$.whatKo").value("회사가 신규 반도체 설비를 승인했습니다."));
 		verify(disclosureInsightGateway, times(1)).summarize(
 			eq(filing.receiptNumber()),
 			eq(filing.reportName()),

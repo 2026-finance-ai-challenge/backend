@@ -254,10 +254,14 @@ class JdbcMarketRepository implements MarketRepository {
 			       MAX(collected_at) AS collected_at,
 			       string_agg(DISTINCT source, '+') AS source
 			FROM market_foreign_net_flow
+			WHERE trading_date <= :latestStartedDate
+			  AND market_code IN ('KOSPI', 'KOSDAQ')
 			GROUP BY trading_date
+			HAVING COUNT(DISTINCT market_code) = 2
 			ORDER BY trading_date DESC
 			LIMIT 30
 			""")
+			.param("latestStartedDate", com.kmarket.navigator.backend.stock.domain.MarketQuoteWindow.latestStartedDate(java.time.Instant.now()))
 			.query((resultSet, rowNumber) -> new ForeignFlowRow(
 				resultSet.getObject("trading_date", LocalDate.class),
 				resultSet.getBigDecimal("total_amount"),

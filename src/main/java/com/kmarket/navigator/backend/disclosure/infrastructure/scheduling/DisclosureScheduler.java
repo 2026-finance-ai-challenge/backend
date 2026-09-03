@@ -3,6 +3,8 @@ package com.kmarket.navigator.backend.disclosure.infrastructure.scheduling;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.List;
+import com.kmarket.navigator.backend.global.concurrent.BoundedTasks;
 
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
@@ -65,14 +67,19 @@ class DisclosureScheduler {
 	}
 
 	@Scheduled(fixedDelay = 2_000, initialDelay = 10_000)
-	@SchedulerLock(name = "processDisclosureDocuments", lockAtMostFor = "PT3M")
+	@SchedulerLock(name = "processDisclosureDocuments", lockAtMostFor = "PT15M")
 	void processDisclosureDocuments() {
-		documentHandler.processNext();
+		BoundedTasks.forEach(List.of(0, 1), 2, ignored -> documentHandler.processNext());
 	}
 
 	@Scheduled(fixedDelay = 2_000, initialDelay = 15_000)
 	@SchedulerLock(name = "processDisclosureSignals", lockAtMostFor = "PT3M")
 	void processDisclosureSignals() {
-		signalHandler.processNext();
+		long deadline = System.nanoTime() + java.time.Duration.ofSeconds(30).toNanos();
+		BoundedTasks.forEach(List.of(0, 1), 2, ignored -> {
+			for (int count = 0; count < 20 && System.nanoTime() < deadline && signalHandler.processNext(); count++) {
+				// 과거 큐를 연속 처리하되 매 claim마다 최신 공시 우선순위를 다시 평가한다.
+			}
+		});
 	}
 }
