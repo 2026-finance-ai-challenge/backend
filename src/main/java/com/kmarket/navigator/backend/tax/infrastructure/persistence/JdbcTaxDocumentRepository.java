@@ -111,7 +111,7 @@ public class JdbcTaxDocumentRepository implements TaxDocumentRepository {
 	public Optional<TaxDocument> findPreviewBackfillCandidate(Instant now) {
 		return jdbcClient.sql("SELECT " + COLUMNS + " FROM tax_document WHERE document_type = 'REDUCED_TAX_APPLICATION' "
 			+ "AND status = 'VERIFIED' AND deleted_at IS NULL AND storage_key NOT LIKE 'purged/%' "
-			+ "AND COALESCE(extracted_fields->>'previewVersion', '0') = '0' AND preview_attempts < 3 "
+			+ "AND COALESCE(extracted_fields->>'previewVersion', '0') IN ('0', '1') AND preview_attempts < 3 "
 			+ "AND preview_retry_at <= :now ORDER BY created_at DESC LIMIT 1")
 			.param("now", timestamp(now)).query(this::map).optional();
 	}

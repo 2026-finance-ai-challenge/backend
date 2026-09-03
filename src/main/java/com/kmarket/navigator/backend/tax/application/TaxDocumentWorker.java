@@ -92,13 +92,13 @@ public class TaxDocumentWorker {
 				var fields = generated.fields();
 				// 기존 판정과 신원 정보는 바꾸지 않고 동일 원본의 누락된 보조 정보만 복구한다.
 				if (generated.status() != com.kmarket.navigator.backend.tax.domain.TaxDocumentStatus.VERIFIED
-					|| !Integer.valueOf(1).equals(fields.previewVersion())
+					|| !Integer.valueOf(2).equals(fields.previewVersion())
 					|| !normalized(old.holderName()).equals(normalized(fields.holderName()))
 					|| !normalized(old.documentNumber()).equals(normalized(fields.documentNumber()))
 					|| !java.util.Objects.equals(old.treatyCountry(), fields.treatyCountry())) throw new IllegalStateException("Preview fields require review");
 				repository.updatePreviewFields(document.id(), new com.kmarket.navigator.backend.tax.domain.TaxDocumentFields(
 					old.holderName(), old.residencyCountry(), old.issueDate(), old.expiryDate(), old.issuingAuthority(), old.documentNumber(),
-					old.apostilleCountry(), old.treatyCountry(), old.investorType(), fields.birthDate(), fields.phoneNumber(), fields.address(), 1), Instant.now(clock));
+					old.apostilleCountry(), old.treatyCountry(), old.investorType(), fields.birthDate(), fields.phoneNumber(), fields.address(), 2), Instant.now(clock));
 				repository.audit(document.id(), document.userId(), "PREVIEW_FIELDS_RESTORED", Instant.now(clock));
 			} catch (RuntimeException exception) {
 				repository.failPreviewBackfill(document.id(), Instant.now(clock).plusSeconds(300));
