@@ -11,6 +11,9 @@ def module(name):
 
 
 class DeploymentSafetyTests(unittest.TestCase):
+    def test_backend_bundle_does_not_overwrite_ai_deployer(self):
+        self.assertFalse(Path(__file__).with_name("deploy-ai.sh").exists())
+
     def test_preserves_running_stopped_pinned_latest_and_foreign_images(self):
         images = [{"Id": str(i), "Created": f"2026-09-{i + 1:02}", "RepoTags": [f"kart-backend:{i}"]} for i in range(10)]
         images += [{"Id": "foreign", "Created": "2020-01-01", "RepoTags": ["postgres:18"]}]
