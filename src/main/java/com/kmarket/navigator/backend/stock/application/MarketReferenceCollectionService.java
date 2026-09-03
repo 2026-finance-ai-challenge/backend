@@ -58,7 +58,7 @@ public class MarketReferenceCollectionService {
 		}
 		try {
 			repository.saveForeignNetFlows(
-				marketGateway.fetchForeignNetFlows(LocalDate.now(KOREA_ZONE))
+				marketGateway.fetchForeignNetFlows(com.kmarket.navigator.backend.stock.domain.MarketQuoteWindow.latestStartedDate(java.time.Instant.now()))
 			);
 		} catch (RuntimeException exception) {
 			log.warn("KIS foreign net-flow collection failed type={}",

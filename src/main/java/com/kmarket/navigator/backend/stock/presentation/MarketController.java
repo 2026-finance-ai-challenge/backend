@@ -82,7 +82,7 @@ public class MarketController {
 	@GetMapping("/stocks/search")
 	public ResponseEntity<SearchResponse> search(
 		@RequestParam @NotBlank @Size(max = 40) String query,
-		@RequestParam(defaultValue = "10") @Min(1) @Max(20) int limit,
+		@RequestParam(defaultValue = "10") @Min(1) @Max(75) int limit,
 		@AuthenticationPrincipal AuthenticatedUser user
 	) {
 		List<SearchItem> items = service.searchStocks(query, user, limit).stream()
