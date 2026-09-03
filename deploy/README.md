@@ -2,6 +2,8 @@
 
 `main` 푸시 시 Backend ARM64 이미지만 GHCR에 발행하고 Backend 서비스만 `--no-deps`로 교체한다. AI·RAG 작업자·DB·Redis를 함께 재기동하지 않는다. Frontend는 별도 저장소와 호스팅에서 배포한다.
 
+AI 배포 스크립트는 AI 저장소에서만 관리·전송한다. Backend 배포 묶음에는 같은 이름의 스크립트를 포함하지 않아 복구 보존 정책이 과거 버전으로 덮어써지지 않도록 검사한다.
+
 - `runtime.env`는 서버에만 보관하고 권한을 `0600`으로 제한한다.
 - 데이터베이스·Redis·AI 포트는 공개하지 않는다. Backend는 호스트 루프백에만 바인딩한다.
 - 호스트 Nginx는 `/api`와 Swagger 경로만 Backend로 전달하고 그 외 경로는 `404`로 차단한다.
