@@ -22,14 +22,17 @@
 
 ## 문서 검증
 
+세무 채팅은 사용자당 활성 방 하나에 저장한다. `POST /api/v1/me/tax-conversation`은 기존 방과 저장된 언어·세율 결과·비교 결과를 반환하고, 없는 경우에만 생성한다. `/eligibility`는 세율 결과를 저장한다. `/restart`는 소유한 `roomId`와 `locale`을 받아 기존 방·문서·암호문을 삭제한 뒤 새 방을 만든다. 업로드·판정·세율 조회·비교 완료 시 최근 사용 시각을 갱신한다.
+
 모든 문서 API에는 `Authorization: Bearer <access-token>`이 필요하며 JWT 소유 사용자의 문서만 조회·변경할 수 있다.
 
 - `POST /api/v1/me/tax-documents`: 문서 업로드 및 비동기 검증 요청
 - `GET /api/v1/me/tax-documents`: 내 문서 목록
 - `POST /api/v1/me/tax-documents/comparison`: 소유권이 확인된 문서 3종 교차검증
 - `GET /api/v1/me/tax-documents/{documentId}`: 진행률·추출 필드·검증 결과
-- `POST /api/v1/me/tax-documents/{documentId}/retry`: 실패 문서 재시도
-- `DELETE /api/v1/me/tax-documents/{documentId}`: 화면에서 즉시 제거하고 보존기간 후 암호문 파기
+- `POST /api/v1/me/tax-documents/{documentId}/retry`: 원본이 남은 일시 장애 건만 재시도. 파기된 파일은 새 업로드가 필요하다.
+- `GET /api/v1/me/tax-documents/{documentId}/original`: 소유권 확인 후 원본 제공. `contentAvailable=false`인 문서는 원본이 파기된 상태다.
+- `DELETE /api/v1/me/tax-documents/{documentId}`: 목록에서 제거하고 암호문·추출 필드를 즉시 파기
 
 업로드는 `multipart/form-data`이며 다음 필드를 사용한다.
 
@@ -37,7 +40,7 @@
 - `expectedResidencyCountry`: ISO 3166-1 alpha-2 국가 코드
 - `file`: PDF, JPEG 또는 PNG, 최대 10 MiB
 
-같은 사용자가 같은 유형과 SHA-256의 문서를 중복 업로드하면 기존 활성 문서를 반환한다. 암호화된 PDF, JavaScript·실행 액션이 포함된 PDF, 확장자·MIME·magic byte가 다른 파일은 거부한다.
+같은 사용자의 처리 중·통과 문서는 유형과 SHA-256으로 중복 저장을 방지한다. 실패 파일을 다시 선택하면 새로운 업로드로 처리하며, 기존 파일을 재검증하지 않는다. 이전 단계가 `VERIFIED`여야 다음 종류를 받는다. 암호화된 PDF, JavaScript·실행 액션이 포함된 PDF, 확장자·MIME·magic byte가 다른 파일은 거부한다.
 
 개별 문서 검증은 해당 문서의 유형·필수 필드·국가·유효기간·위변조 신호만 판정한다. 다른 문서와의 일치 여부는 업로드 순서에 따라 결과가 달라지지 않도록 개별 판정에 섞지 않는다.
 
@@ -60,7 +63,7 @@
 - 내부 AI 서비스에는 직접 사용자 식별자 대신 비가역 해시 식별자를 보낸다. 세무 OCR은 OpenAI를 호출하지 않는다.
 - OCR 결과는 문서 내용을 신뢰할 수 없는 입력으로 취급하고 정부 발급 진위나 승인 여부를 단정하지 않는다.
 - 업로드는 Redis에서 사용자별 시간당 10회로 제한한다.
-- 삭제한 문서는 기본 30일 뒤 암호문과 추출 개인정보를 파기하고 최소 감사 tombstone만 남긴다.
+- 삭제한 문서 및 미통과 문서는 암호문과 추출 개인정보를 즉시 파기한다. 미통과 판정 기록은 대화 복원을 위해 남기며 정리 실패·과거 잔존 파일은 정기 파기 작업에서 재처리한다. 세무 채팅 재시작·삭제는 문서 행과 기존 방까지 삭제한다.
 - 암호화 키는 최소 32바이트 무작위 값을 Base64로 주입하고 저장소나 이미지에 포함하지 않는다.
 
 키 생성 예시:

@@ -383,6 +383,40 @@ class BackendApplicationTests {
 	}
 
 	@Test
+	void persistsSingletonTaxConversationAndReplacesItOnRestart() throws Exception {
+		AuthFixture owner = signupAndLogin("taxconv_owner");
+		AuthFixture other = signupAndLogin("taxconv_other");
+		String authorization = "Bearer " + owner.accessToken();
+		String opened = mockMvc.perform(post("/api/v1/me/tax-conversation")
+			.header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"locale\":\"ko\"}"))
+			.andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+		String roomId = objectMapper.readTree(opened).get("roomId").stringValue();
+		mockMvc.perform(post("/api/v1/me/tax-conversation/eligibility")
+			.header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"locale\":\"ko\",\"residencyCountry\":\"US\",\"investorType\":\"INDIVIDUAL\"}"))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.roomId").value(roomId))
+			.andExpect(jsonPath("$.eligibility.treatyDividendRate").value(15.0));
+		mockMvc.perform(post("/api/v1/me/tax-conversation")
+			.header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"locale\":\"en\"}"))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.roomId").value(roomId))
+			.andExpect(jsonPath("$.locale").value("ko"))
+			.andExpect(jsonPath("$.eligibility.treatyDividendRate").value(15.0));
+		String resetBody = "{\"locale\":\"en\",\"roomId\":\"" + roomId + "\"}";
+		mockMvc.perform(post("/api/v1/me/tax-conversation/restart")
+			.header("Authorization", "Bearer " + other.accessToken()).contentType(MediaType.APPLICATION_JSON).content(resetBody))
+			.andExpect(status().isNotFound());
+		String restarted = mockMvc.perform(post("/api/v1/me/tax-conversation/restart")
+			.header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON).content(resetBody))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.eligibility").doesNotExist())
+			.andReturn().getResponse().getContentAsString();
+		assertThat(objectMapper.readTree(restarted).get("roomId").stringValue()).isNotEqualTo(roomId);
+		assertThat(jdbcClient.sql("SELECT count(*) FROM chat_room WHERE id = :id")
+			.param("id", UUID.fromString(roomId)).query(Long.class).single()).isZero();
+	}
+
+	@Test
 	void encryptsValidatesVerifiesIsolatesAndPurgesTaxDocuments() throws Exception {
 		when(taxDocumentGateway.verify(any(), any(), any(), any(), any(), any(), any()))
 			.thenReturn(new TaxDocumentVerification(
@@ -460,6 +494,40 @@ class BackendApplicationTests {
 			.param("id", documentId)
 			.query(Boolean.class)
 			.single()).isTrue();
+
+		when(taxDocumentGateway.verify(any(), any(), any(), any(), any(), any(), any()))
+			.thenThrow(new com.kmarket.navigator.backend.global.error.BusinessException(
+				com.kmarket.navigator.backend.global.error.ErrorCode.INVALID_TAX_DOCUMENT));
+		String failedUpload = mockMvc.perform(multipart("/api/v1/me/tax-documents").file(file)
+			.param("documentType", "RESIDENCY_CERTIFICATE").param("expectedResidencyCountry", "US")
+			.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isAccepted()).andReturn().getResponse().getContentAsString();
+		UUID failedId = UUID.fromString(objectMapper.readTree(failedUpload).get("id").stringValue());
+		String failedKey = jdbcClient.sql("SELECT storage_key FROM tax_document WHERE id = :id")
+			.param("id", failedId).query(String.class).single();
+		taxDocumentWorker.process();
+		mockMvc.perform(get("/api/v1/me/tax-documents/{id}", failedId)
+			.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.status").value("FAILED"))
+			.andExpect(jsonPath("$.contentAvailable").value(false));
+		assertThat(Files.exists(taxDocumentProperties.root().resolve(failedKey))).isFalse();
+		String replacement = mockMvc.perform(multipart("/api/v1/me/tax-documents").file(file)
+			.param("documentType", "RESIDENCY_CERTIFICATE").param("expectedResidencyCountry", "US")
+			.header("Authorization", "Bearer " + owner.accessToken()))
+			.andExpect(status().isAccepted()).andReturn().getResponse().getContentAsString();
+		UUID replacementId = UUID.fromString(objectMapper.readTree(replacement).get("id").stringValue());
+		assertThat(replacementId).isNotEqualTo(failedId);
+		String replacementKey = jdbcClient.sql("SELECT storage_key FROM tax_document WHERE id = :id")
+			.param("id", replacementId).query(String.class).single();
+		UUID roomId = jdbcClient.sql("SELECT id FROM chat_room WHERE user_id = :id AND context_type = 'TAX_GUIDE' AND deleted_at IS NULL")
+			.param("id", owner.userId()).query(UUID.class).single();
+		mockMvc.perform(post("/api/v1/me/tax-conversation/restart")
+			.header("Authorization", "Bearer " + owner.accessToken()).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"roomId\":\"" + roomId + "\",\"locale\":\"en\"}"))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.roomId").value(org.hamcrest.Matchers.not(roomId.toString())));
+		assertThat(Files.exists(taxDocumentProperties.root().resolve(replacementKey))).isFalse();
+		assertThat(jdbcClient.sql("SELECT count(*) FROM tax_document WHERE user_id = :id")
+			.param("id", owner.userId()).query(Long.class).single()).isZero();
 	}
 
 	@Test

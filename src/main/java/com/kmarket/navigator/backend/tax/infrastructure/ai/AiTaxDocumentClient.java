@@ -75,6 +75,10 @@ class AiTaxDocumentClient implements TaxDocumentGateway {
 			}
 			return response.toDomain();
 		}
+		catch (org.springframework.web.client.RestClientResponseException exception) {
+			throw new BusinessException(exception.getStatusCode().is4xxClientError()
+				&& exception.getStatusCode().value() != 429 ? ErrorCode.INVALID_TAX_DOCUMENT : ErrorCode.AI_SERVICE_UNAVAILABLE);
+		}
 		catch (RestClientException | IllegalArgumentException exception) {
 			throw new BusinessException(ErrorCode.AI_SERVICE_UNAVAILABLE);
 		}
