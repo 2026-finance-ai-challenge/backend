@@ -387,11 +387,13 @@ class BackendApplicationTests {
 		AuthFixture owner = signupAndLogin("taxconv_owner");
 		AuthFixture other = signupAndLogin("taxconv_other");
 		String authorization = "Bearer " + owner.accessToken();
+		mockMvc.perform(get("/api/v1/me").header("Authorization", authorization)).andExpect(jsonPath("$.taxVerificationStatus").value("NOT_STARTED"));
 		String opened = mockMvc.perform(post("/api/v1/me/tax-conversation")
 			.header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON)
 			.content("{\"locale\":\"ko\"}"))
 			.andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
 		String roomId = objectMapper.readTree(opened).get("roomId").stringValue();
+		mockMvc.perform(get("/api/v1/me").header("Authorization", authorization)).andExpect(jsonPath("$.taxVerificationStatus").value("IN_PROGRESS"));
 		mockMvc.perform(post("/api/v1/me/tax-conversation/eligibility")
 			.header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON)
 			.content("{\"locale\":\"ko\",\"residencyCountry\":\"US\",\"investorType\":\"INDIVIDUAL\"}"))
@@ -412,8 +414,49 @@ class BackendApplicationTests {
 			.andExpect(status().isOk()).andExpect(jsonPath("$.eligibility").doesNotExist())
 			.andReturn().getResponse().getContentAsString();
 		assertThat(objectMapper.readTree(restarted).get("roomId").stringValue()).isNotEqualTo(roomId);
+		mockMvc.perform(get("/api/v1/me").header("Authorization", authorization)).andExpect(jsonPath("$.taxVerificationStatus").value("IN_PROGRESS"));
 		assertThat(jdbcClient.sql("SELECT count(*) FROM chat_room WHERE id = :id")
 			.param("id", UUID.fromString(roomId)).query(Long.class).single()).isZero();
+	}
+
+	@Test
+	void exposesVerifiedPackageAndInvalidatesItOnRestart() throws Exception {
+		var owner = signupAndLogin("tax_package_owner");
+		var other = signupAndLogin("tax_package_other");
+		String auth = "Bearer " + owner.accessToken();
+		when(taxDocumentGateway.verify(any(), any(), any(), any(), any(), any(), any())).thenAnswer(call -> new TaxDocumentVerification(
+			call.getArgument(0), TaxDocumentStatus.VERIFIED,
+			new TaxDocumentFields("Jane Investor", "US", "2026-01-10", null, "IRS", "TEST-100", "US", "US", "INDIVIDUAL"),
+			List.of(), List.of(), new BigDecimal("0.97"), new BigDecimal("0.01"), false, "test-model", "test-version"));
+		when(taxDocumentGateway.compare(any(), any(), any(), any())).thenReturn(new com.kmarket.navigator.backend.tax.domain.TaxDocumentComparison(
+			"VERIFIED", List.of(), java.util.Map.of("matched", true), List.of(), "test-model"));
+		var ids = new java.util.ArrayList<String>();
+		for (var type : List.of("RESIDENCY_CERTIFICATE", "APOSTILLE", "REDUCED_TAX_APPLICATION")) {
+			var file = new MockMultipartFile("file", type + ".pdf", "application/pdf", "%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+			var body = mockMvc.perform(multipart("/api/v1/me/tax-documents").file(file).param("documentType", type)
+				.param("expectedResidencyCountry", "US").header("Authorization", auth)).andExpect(status().isAccepted()).andReturn().getResponse().getContentAsString();
+			ids.add(objectMapper.readTree(body).get("id").stringValue());
+			taxDocumentWorker.process();
+		}
+		mockMvc.perform(get("/api/v1/me").header("Authorization", auth)).andExpect(jsonPath("$.taxVerificationStatus").value("IN_PROGRESS"));
+		mockMvc.perform(post("/api/v1/me/tax-documents/comparison").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
+			.content(objectMapper.writeValueAsString(java.util.Map.of("documentIds", ids)))).andExpect(status().isOk());
+		mockMvc.perform(get("/api/v1/me").header("Authorization", auth)).andExpect(jsonPath("$.taxVerificationStatus").value("VERIFIED"))
+			.andExpect(jsonPath("$.nationality").value("US")).andExpect(jsonPath("$.investorType").value("INDIVIDUAL"));
+		mockMvc.perform(get("/api/v1/me/tax-review-package").header("Authorization", auth)).andExpect(status().isOk()).andExpect(jsonPath("$.documents.length()").value(3));
+		mockMvc.perform(get("/api/v1/me/tax-review-package").header("Authorization", "Bearer " + other.accessToken())).andExpect(status().isConflict());
+		byte[] pdf = mockMvc.perform(get("/api/v1/me/tax-review-package/correction.pdf").header("Authorization", auth)).andExpect(status().isOk())
+			.andExpect(header().string("Cache-Control", "no-store, private")).andReturn().getResponse().getContentAsByteArray();
+		try (var parsed = org.apache.pdfbox.Loader.loadPDF(pdf)) {
+			assertThat(new org.apache.pdfbox.text.PDFTextStripper().getText(parsed)).contains("예상 작성 경정청구서", "Jane Investor", "TEST-100");
+			assertThat(parsed.getDocumentCatalog().getAcroForm() == null || parsed.getDocumentCatalog().getAcroForm().getFields().isEmpty()).isTrue();
+		}
+		Files.createDirectories(java.nio.file.Path.of("build/qa")); Files.write(java.nio.file.Path.of("build/qa/estimated-correction.pdf"), pdf);
+		var roomId = jdbcClient.sql("SELECT id FROM chat_room WHERE user_id = :id AND context_type = 'TAX_GUIDE' AND deleted_at IS NULL").param("id", owner.userId()).query(UUID.class).single();
+		mockMvc.perform(post("/api/v1/me/tax-conversation/restart").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"roomId\":\"" + roomId + "\",\"locale\":\"en\"}")).andExpect(status().isOk());
+		mockMvc.perform(get("/api/v1/me").header("Authorization", auth)).andExpect(jsonPath("$.taxVerificationStatus").value("IN_PROGRESS"));
+		mockMvc.perform(get("/api/v1/me/tax-review-package/correction.pdf").header("Authorization", auth)).andExpect(status().isConflict());
 	}
 
 	@Test
