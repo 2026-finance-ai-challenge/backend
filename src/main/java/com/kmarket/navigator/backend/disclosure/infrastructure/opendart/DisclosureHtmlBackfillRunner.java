@@ -124,7 +124,8 @@ public class DisclosureHtmlBackfillRunner implements ApplicationRunner {
 		for (var candidate : candidates) {
 			try { if (restore(candidate)) restored++; }
 			catch (Exception exception) {
-				log.warn("HTML 백필 실패 document={} type={}", candidate.id(), exception.getClass().getSimpleName());
+				log.warn("HTML 백필 실패 document={} type={} code={}", candidate.id(), exception.getClass().getSimpleName(),
+					exception instanceof OpenDartException dart ? dart.errorCode() : "STRUCTURE_OR_STORAGE_ERROR");
 			}
 			if (restored > 0 && restored % 1000 == 0) log.info("HTML 백필 진행 restored={}", restored);
 		}
@@ -197,11 +198,15 @@ public class DisclosureHtmlBackfillRunner implements ApplicationRunner {
 			&& (doc.filename().equals(candidate.filename()) || doc.filename().equals(candidate.receipt() + ".viewer.html")))) return true;
 		if (same.isPresent() && payload != null) return persist(candidate, previous, payload, same.get());
 		if (!reparse) return false;
-		// 공식 뷰어의 메인 문서만 같은 접수번호의 XML을 대체한다. 첨부 문서는 이름을 추정하지 않는다.
+		// 같은 접수번호의 검증된 XML·뷰어 메인 문서만 서로 대체한다. 첨부 문서 이름은 추정하지 않는다.
 		var candidates = fetch.documents().stream().filter(doc -> doc.filename().equals(candidate.filename())
 			|| (candidate.filename().equals(candidate.receipt() + ".xml")
 				&& doc.filename().equals(candidate.receipt() + ".viewer.html")
 				&& fetch.sources().stream().anyMatch(source -> source.kind() == com.kmarket.navigator.backend.disclosure.application.port.DocumentArchiveKind.DART_VIEWER_HTML
+					&& source.status() == com.kmarket.navigator.backend.disclosure.application.port.DocumentArchiveStatus.VERIFIED))
+			|| (candidate.filename().equals(candidate.receipt() + ".viewer.html")
+				&& doc.filename().equals(candidate.receipt() + ".xml")
+				&& fetch.sources().stream().anyMatch(source -> source.kind() == com.kmarket.navigator.backend.disclosure.application.port.DocumentArchiveKind.OPENDART_ZIP
 					&& source.status() == com.kmarket.navigator.backend.disclosure.application.port.DocumentArchiveStatus.VERIFIED))).toList();
 		if (candidates.size() != 1) return false;
 		var original = candidates.getFirst();

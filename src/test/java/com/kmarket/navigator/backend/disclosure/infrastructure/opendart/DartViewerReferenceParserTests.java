@@ -22,6 +22,13 @@ class DartViewerReferenceParserTests {
 	}
 
 	@Test
+	void followsExplicitTocHierarchyWhenLegacyChildClosingTagsExtendPastParentRange() {
+		var result = DartViewerReferenceParser.parse(RECEIPT, INITIAL + node("1", "100", "200")
+			+ node("2", "120", "195").replace("node1", "node2") + node("3", "315", "100"));
+		assertThat(result).extracting(DartViewerReferenceParser.Reference::elementId).containsExactly("1", "3");
+	}
+
+	@Test
 	void rejectsPartialOverlapAndUnrecognizedTocInsteadOfReturningOnlyCover() {
 		assertThatThrownBy(() -> DartViewerReferenceParser.parse(RECEIPT, INITIAL + node("2", "250", "100")))
 			.isInstanceOfSatisfying(OpenDartException.class, error -> assertThat(error.errorCode()).isEqualTo("DART_VIEWER_TOC_OVERLAP"));

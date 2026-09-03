@@ -2234,31 +2234,33 @@ class BackendApplicationTests {
 			.query(String.class).single()).isEqualTo("COMPLETED");
 	}
 
-	@Test
-	void repairsEmptyMainXmlWithVerifiedViewerAndPreservesOriginalVersion() {
+	@org.junit.jupiter.params.ParameterizedTest
+	@org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+	void repairsVerifiedMainSourceInEitherDirectionAndPreservesOriginalVersion(boolean viewerToXml) {
 		var filing = filing("20260902999103");
 		disclosureRepository.saveFiling(filing);
-		var empty = new OpenDartDocument(filing.receiptNumber() + ".xml", "a".repeat(64), "", "", List.of());
+		String originalFilename = filing.receiptNumber() + (viewerToXml ? ".viewer.html" : ".xml");
+		var empty = new OpenDartDocument(originalFilename, "a".repeat(64), "", "", List.of());
 		disclosureRepository.completeDocumentJob(filing.receiptNumber(), List.of(empty), List.of());
 		jdbcClient.sql("UPDATE disclosure_document SET parser_version = 'opendart-html-v3'").update();
 		var id = jdbcClient.sql("SELECT id FROM disclosure_document WHERE is_current").query(UUID.class).single();
 		var disclosureId = jdbcClient.sql("SELECT disclosure_id FROM disclosure_document WHERE id=:id").param("id", id).query(UUID.class).single();
 		var previous = jdbcClient.sql("SELECT payload_zstd FROM disclosure_document WHERE id=:id").param("id", id).query(byte[].class).single();
-		var verified = new OpenDartDocument(filing.receiptNumber() + ".viewer.html", "b".repeat(64), "검증 원문",
+		var verified = new OpenDartDocument(filing.receiptNumber() + (viewerToXml ? ".xml" : ".viewer.html"), "b".repeat(64), "검증 원문",
 			"<p>검증 원문</p>", List.of(new OpenDartSection(0, SectionKind.TEXT, null, "검증 원문", null)));
 		var unrelated = new OpenDartDocument("other.viewer.html", verified.contentHash(), verified.bodyText(), verified.sanitizedHtml(), verified.sections());
 		assertThatThrownBy(() -> documentRepair.restoreVersion(id, disclosureId, filing.receiptNumber(), previous, unrelated))
 			.isInstanceOf(IllegalArgumentException.class);
 		assertThatThrownBy(() -> documentRepair.restoreVersion(id, disclosureId, filing.receiptNumber(), previous, empty))
 			.isInstanceOf(IllegalArgumentException.class);
-		var archive = new StoredDocumentArchive(DocumentArchiveKind.DART_VIEWER_HTML, DocumentArchiveStatus.VERIFIED,
+		var archive = new StoredDocumentArchive(viewerToXml ? DocumentArchiveKind.OPENDART_ZIP : DocumentArchiveKind.DART_VIEWER_HTML, DocumentArchiveStatus.VERIFIED,
 			"html-repair/20260902999103/verified.viewer.zip", "c".repeat(64), 100, null);
 		assertThat(documentRepair.restoreVersion(id, disclosureId, filing.receiptNumber(), previous, verified, List.of(archive))).isTrue();
 		assertThat(documentRepair.restoreVersion(id, disclosureId, filing.receiptNumber(), previous, verified, List.of(archive))).isFalse();
 		assertThat(jdbcClient.sql("SELECT payload_zstd FROM disclosure_document WHERE id=:id AND NOT is_current")
 			.param("id", id).query(byte[].class).single()).isEqualTo(previous);
 		assertThat(jdbcClient.sql("SELECT source_filename FROM disclosure_document WHERE is_current").query(String.class).single())
-			.isEqualTo(filing.receiptNumber() + ".xml");
+			.isEqualTo(originalFilename);
 		assertThat(jdbcClient.sql("SELECT content_hash FROM disclosure_document WHERE is_current").query(String.class).single()).isEqualTo("b".repeat(64));
 		assertThat(jdbcClient.sql("SELECT parser_version FROM disclosure_document WHERE is_current").query(String.class).single()).isEqualTo("opendart-html-v6");
 		assertThat(jdbcClient.sql("SELECT relative_path FROM disclosure_archive WHERE receipt_number=:receipt")

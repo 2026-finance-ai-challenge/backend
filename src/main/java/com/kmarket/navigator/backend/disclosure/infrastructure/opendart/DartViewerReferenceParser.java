@@ -34,15 +34,21 @@ final class DartViewerReferenceParser {
 		if (main == null) throw new OpenDartException("DART_VIEWER_REFERENCE_NOT_FOUND");
 		if (main.elementId().equals("0") && main.offset().equals("0") && main.length().equals("0")) return List.of(main);
 		var refs = new ArrayList<Reference>();
+		int rootLevel = Integer.MAX_VALUE;
+		int matchedNodes = 0;
 		var matcher = NODE.matcher(index);
 		while (matcher.find()) {
 			if (receipt.equals(matcher.group(2)) && main.documentNumber().equals(matcher.group(3))) {
-				refs.add(new Reference(matcher.group(3), matcher.group(4), matcher.group(5), matcher.group(6), matcher.group(7)));
+				matchedNodes++;
+				int level = Integer.parseInt(matcher.group(1).substring(4));
+				// DART 목차의 상위 항목은 하위 항목 전체를 포함한다. 구형 DTD의 닫는 태그 바이트 오차로 중복 수집하지 않는다.
+				if (level < rootLevel) { rootLevel = level; refs.clear(); }
+				if (level == rootLevel) refs.add(new Reference(matcher.group(3), matcher.group(4), matcher.group(5), matcher.group(6), matcher.group(7)));
 			}
 		}
 		long expected = Pattern.compile("node[0-9]+\\['dcmNo'\\]\\s*=\\s*\"" + Pattern.quote(main.documentNumber()) + "\";")
 			.matcher(index).results().count();
-		if (expected != refs.size()) throw new OpenDartException("DART_VIEWER_TOC_UNRECOGNIZED");
+		if (expected != matchedNodes) throw new OpenDartException("DART_VIEWER_TOC_UNRECOGNIZED");
 		if (refs.isEmpty()) {
 			if (index.contains("['rcpNo']")) throw new OpenDartException("DART_VIEWER_TOC_UNRECOGNIZED");
 			return List.of(main);

@@ -45,7 +45,8 @@ public class DisclosureDocumentRepairService {
 		if (current.isEmpty()) return false;
 		if (original.sanitizedHtml().isBlank() || original.sections().isEmpty()
 			|| !(current.get().equals(original.filename()) || (current.get().equals(receipt + ".xml")
-				&& original.filename().equals(receipt + ".viewer.html")))) {
+				&& original.filename().equals(receipt + ".viewer.html"))
+				|| (current.get().equals(receipt + ".viewer.html") && original.filename().equals(receipt + ".xml")))) {
 			throw new IllegalArgumentException("Replacement document identity or content mismatch");
 		}
 		var payload = codec.encode(original);
