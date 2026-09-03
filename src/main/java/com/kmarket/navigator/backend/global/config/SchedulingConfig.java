@@ -42,7 +42,7 @@ class SchedulingConfig {
 		scheduler.setPoolSize(16);
 		scheduler.setThreadNamePrefix("pipeline-scheduler-");
 		scheduler.setWaitForTasksToCompleteOnShutdown(true);
-		scheduler.setAwaitTerminationSeconds(20);
+		scheduler.setAwaitTerminationSeconds(180);
 		return scheduler;
 	}
 }

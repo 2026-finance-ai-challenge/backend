@@ -66,6 +66,7 @@ jobs:
       - name: 배포 스크립트 및 Nginx 구성 검증
         run: |
           bash -n deploy/deploy-backend.sh
+          python3 -m unittest discover -s deploy -p 'test_*.py'
           install -m 700 -d "$RUNNER_TEMP/nginx-cert"
           openssl req -x509 -newkey rsa:2048 -nodes -subj /CN=localhost \
             -keyout "$RUNNER_TEMP/nginx-cert/privkey.pem" \
@@ -185,12 +186,9 @@ jobs:
             printf 'KMARKET_KIS_REALTIME_ENABLED=true\n'
             printf 'KMARKET_KIS_MAX_REALTIME_STOCKS=40\n'
             printf 'KMARKET_MARKET_FOREIGN_FLOW_INTERVAL=1m\n'
-            printf 'KMARKET_KRX_ENABLED=false\n'
-            printf 'KMARKET_KRX_MEMBER_ID=\n'
-            printf 'KMARKET_KRX_PASSWORD=\n'
           } > "$RUNNER_TEMP/runtime.env"
           SSH_OPTIONS=(-i "$RUNNER_TEMP/ssh/key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/ssh/known_hosts" -o PreferredAuthentications=publickey,keyboard-interactive,password)
-          sshpass -e scp "${SSH_OPTIONS[@]}" "$RUNNER_TEMP/runtime.env" "ubuntu@$PROD_HOST:/opt/kmarket/runtime.env"
+          sshpass -e scp "${SSH_OPTIONS[@]}" "$RUNNER_TEMP/runtime.env" "ubuntu@$PROD_HOST:/opt/kmarket/runtime.incoming.env"
           rm -f "$RUNNER_TEMP/runtime.env"
       - name: Backend 배포
         env:

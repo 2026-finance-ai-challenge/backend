@@ -26,9 +26,9 @@
 
 - Backend: `./gradlew test` 통과
 - 제목·HTML·RAG 백필은 서로 다른 작업이다. 완료 여부는 각 운영 큐와 저장 상태를 따로 확인한다.
-- AI: `uv run pytest -q`, 69개 테스트 통과
-- Frontend: Node 테스트 3개와 프로덕션 빌드 통과
-- Docker: PostgreSQL, Redis, AI API, Backend, Frontend 헬스체크 통과
+- AI: `uv run pytest -q`, 180개 테스트 및 Ruff·Mypy 통과(2026-09-03)
+- 서비스 Frontend: Node 테스트 65개와 프로덕션 빌드 통과(2026-09-03)
+- 운영 구성: PostgreSQL·Redis·AI API·Backend·독립 RAG 작업자. Frontend는 별도 호스팅
 - 통합 보안: 실제 회원가입·로그인으로 Access JWT 발급, Redis 세션 응답, CSP 등 보안 헤더 확인
 - API 문서: Spring MVC 전체 매핑과 OpenAPI 경로 일치, 모든 작업의 요약·태그·보안 정의와 Swagger UI 응답 검증
 - 모델 런타임: 읽기 전용 Hana 저장소의 허용 commit·SHA-256을 확인한 뒤 실제 분류 추론 성공
