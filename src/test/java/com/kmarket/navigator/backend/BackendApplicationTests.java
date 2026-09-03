@@ -640,6 +640,23 @@ class BackendApplicationTests {
 	}
 
 	@Test
+	void disclosureListDoesNotExposeARecordBeforeItsDetailIsPublished() throws Exception {
+		String receiptNumber = "20990102000001";
+		disclosureRepository.saveFiling(filingAt(receiptNumber, LocalDate.of(2099, 1, 2)));
+		publishDisclosureFixture(receiptNumber);
+		jdbcClient.sql("UPDATE disclosure SET index_status = 'PENDING' WHERE receipt_number = :receiptNumber")
+			.param("receiptNumber", receiptNumber)
+			.update();
+		activateCommonStocks("005930");
+
+		mockMvc.perform(get("/api/v1/disclosures")
+				.param("from", "2099-01-02")
+				.param("to", "2099-01-02"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.items").isEmpty());
+	}
+
+	@Test
 	void permitsOnlyConfiguredFrontendOrigins() throws Exception {
 		mockMvc.perform(options("/api/v1/news")
 				.header("Origin", "https://kartkr.cloud")
