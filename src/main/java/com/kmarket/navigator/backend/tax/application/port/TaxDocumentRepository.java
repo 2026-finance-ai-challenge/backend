@@ -17,6 +17,9 @@ public interface TaxDocumentRepository {
 	TaxDocument create(TaxDocument document);
 
 	List<TaxDocument> findAll(UUID userId);
+	List<TaxDocument> findAllIncludingDeleted(UUID userId);
+	void deleteAll(UUID userId);
+	void purgeFailedContent(UUID documentId, Instant now);
 
 	Optional<TaxDocument> findOwned(UUID userId, UUID documentId);
 

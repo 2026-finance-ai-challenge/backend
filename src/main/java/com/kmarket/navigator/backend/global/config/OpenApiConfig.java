@@ -94,6 +94,9 @@ public class OpenApiConfig {
 
 		entry("TaxEligibilityController#countries", operation("지원 국가별 조세조약 정보 조회", "Tax")),
 		entry("TaxEligibilityController#eligibility", operation("조세조약 적용 가능성 확인", "Tax")),
+		entry("TaxConversationController#open", operation("세무 채팅 상태 조회 및 생성", "Tax", Access.AUTHENTICATED)),
+		entry("TaxConversationController#assess", operation("세무 채팅 세율 확인 결과 저장", "Tax", Access.AUTHENTICATED)),
+		entry("TaxConversationController#restart", operation("세무 채팅 및 서류 삭제 후 재시작", "Tax", Access.AUTHENTICATED)),
 		entry("TaxDocumentController#upload", operation("세무 문서 업로드", "Tax", Access.AUTHENTICATED, "202")),
 		entry("TaxDocumentController#list", operation("내 세무 문서 목록 조회", "Tax", Access.AUTHENTICATED)),
 		entry("TaxDocumentController#compare", operation("세무 문서 3종 교차 검증", "Tax", Access.AUTHENTICATED)),

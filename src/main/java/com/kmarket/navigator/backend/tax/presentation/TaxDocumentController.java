@@ -150,6 +150,7 @@ public class TaxDocumentController {
 		String promptVersion,
 		String requestId,
 		String errorCode,
+		boolean contentAvailable,
 		Instant createdAt,
 		Instant updatedAt
 	) {
@@ -177,6 +178,7 @@ public class TaxDocumentController {
 				document.promptVersion(),
 				document.requestId(),
 				document.errorCode(),
+				!document.storageKey().startsWith("purged/"),
 				document.createdAt(),
 				document.updatedAt()
 			);

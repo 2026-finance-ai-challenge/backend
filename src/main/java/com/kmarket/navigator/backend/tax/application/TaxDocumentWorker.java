@@ -30,6 +30,7 @@ public class TaxDocumentWorker {
 	private final TaxDocumentGateway gateway;
 	private final TaxDocumentVerificationPolicy policy;
 	private final AgentSafetyIdentifier safetyIdentifier;
+	private final com.kmarket.navigator.backend.tax.application.port.TaxConversationRepository conversations;
 	private final Clock clock = Clock.systemUTC();
 	private final String workerId = "tax-" + UUID.randomUUID();
 
@@ -38,13 +39,15 @@ public class TaxDocumentWorker {
 		TaxDocumentStorage storage,
 		TaxDocumentGateway gateway,
 		TaxDocumentVerificationPolicy policy,
-		AgentSafetyIdentifier safetyIdentifier
+		AgentSafetyIdentifier safetyIdentifier,
+		com.kmarket.navigator.backend.tax.application.port.TaxConversationRepository conversations
 	) {
 		this.repository = repository;
 		this.storage = storage;
 		this.gateway = gateway;
 		this.policy = policy;
 		this.safetyIdentifier = safetyIdentifier;
+		this.conversations = conversations;
 	}
 
 	@Scheduled(
@@ -56,7 +59,7 @@ public class TaxDocumentWorker {
 		Instant now = Instant.now(clock);
 		for (TaxVerificationTask task : repository.claim(
 			workerId,
-			3,
+			1,
 			now,
 			now.minus(PROCESSING_TIMEOUT)
 		)) {
@@ -72,6 +75,7 @@ public class TaxDocumentWorker {
 			storage.delete(document.storageKey());
 			repository.audit(document.id(), document.userId(), "CONTENT_PURGED", now);
 			repository.markPurged(document.id(), now);
+			repository.purgeFailedContent(document.id(), now);
 		}
 	}
 
@@ -96,7 +100,11 @@ public class TaxDocumentWorker {
 			var verified = policy.validate(document, generated);
 			Instant now = Instant.now(clock);
 			repository.complete(document.id(), verified, "tax-" + UUID.randomUUID(), now);
-			repository.audit(document.id(), document.userId(), "VERIFICATION_COMPLETED", now);
+			if (repository.findOwned(document.userId(), document.id()).isPresent()) {
+				repository.audit(document.id(), document.userId(), "VERIFICATION_COMPLETED", now);
+				conversations.touch(document.userId());
+				if (verified.status() != com.kmarket.navigator.backend.tax.domain.TaxDocumentStatus.VERIFIED) removeFailedContent(document, now);
+			}
 		}
 		catch (BusinessException exception) {
 			fail(document, exception.errorCode().code());
@@ -107,7 +115,8 @@ public class TaxDocumentWorker {
 	}
 
 	private void fail(TaxDocument document, String errorCode) {
-		boolean terminal = document.attempts() >= MAX_ATTEMPTS;
+		boolean terminal = document.attempts() >= MAX_ATTEMPTS
+			|| errorCode.equals(com.kmarket.navigator.backend.global.error.ErrorCode.INVALID_TAX_DOCUMENT.code());
 		long delay = Math.min(60, 5L << Math.max(0, document.attempts() - 1));
 		Instant now = Instant.now(clock);
 		repository.fail(
@@ -117,11 +126,20 @@ public class TaxDocumentWorker {
 			now.plusSeconds(delay),
 			now
 		);
+		if (terminal) {
+			removeFailedContent(document, now);
+			conversations.touch(document.userId());
+		}
 		log.warn(
 			"Tax document verification failed documentId={} attempt={} terminal={}",
 			document.id(),
 			document.attempts(),
 			terminal
 		);
+	}
+
+	private void removeFailedContent(TaxDocument document, Instant now) {
+		storage.delete(document.storageKey());
+		repository.purgeFailedContent(document.id(), now);
 	}
 }

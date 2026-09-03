@@ -41,6 +41,8 @@ public class TaxDocumentService {
 	private final TaxDocumentGateway gateway;
 	private final AgentSafetyIdentifier safetyIdentifier;
 	private final Clock clock = Clock.systemUTC();
+	private final TaxConversationService conversations;
+	private final com.kmarket.navigator.backend.tax.application.port.TaxConversationRepository conversationRepository;
 
 	public TaxDocumentService(
 		TaxDocumentRepository repository,
@@ -50,7 +52,9 @@ public class TaxDocumentService {
 		IdentityRepository identityRepository,
 		TaxDocumentProperties properties,
 		TaxDocumentGateway gateway,
-		AgentSafetyIdentifier safetyIdentifier
+		AgentSafetyIdentifier safetyIdentifier,
+		TaxConversationService conversations,
+		com.kmarket.navigator.backend.tax.application.port.TaxConversationRepository conversationRepository
 	) {
 		this.repository = repository;
 		this.storage = storage;
@@ -60,6 +64,8 @@ public class TaxDocumentService {
 		this.properties = properties;
 		this.gateway = gateway;
 		this.safetyIdentifier = safetyIdentifier;
+		this.conversations = conversations;
+		this.conversationRepository = conversationRepository;
 	}
 
 	@Transactional
@@ -73,6 +79,8 @@ public class TaxDocumentService {
 			throw new BusinessException(ErrorCode.INVALID_TAX_DOCUMENT);
 		}
 		rateLimiter.check(userId);
+		var room = conversations.ensureRoom(userId, "en");
+		var assessment = conversationRepository.state(room.id());
 		var account = identityRepository.findActiveById(userId)
 			.orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
 		String country = expectedResidencyCountry.toUpperCase(Locale.ROOT);
@@ -96,7 +104,7 @@ public class TaxDocumentService {
 			userId,
 			documentType,
 			country,
-			account.investorType(),
+			assessment.eligibility() == null ? account.investorType() : assessment.eligibility().investorType(),
 			validated.originalFileName(),
 			validated.mediaType(),
 			validated.content().length,
@@ -124,6 +132,7 @@ public class TaxDocumentService {
 		try {
 			repository.create(document);
 			repository.audit(documentId, userId, "UPLOADED", now);
+			conversationRepository.touch(userId);
 			return document;
 		}
 		catch (RuntimeException exception) {
@@ -141,7 +150,9 @@ public class TaxDocumentService {
 			.orElseThrow(() -> new BusinessException(ErrorCode.TAX_DOCUMENT_NOT_FOUND));
 	}
 
+	@Transactional
 	public TaxDocumentComparison compare(UUID userId, List<UUID> documentIds) {
+		var room = conversations.ensureRoom(userId, "en");
 		if (documentIds == null || documentIds.size() != 3
 			|| documentIds.stream().anyMatch(Objects::isNull)
 			|| documentIds.stream().distinct().count() != 3) {
@@ -159,7 +170,7 @@ public class TaxDocumentService {
 			TaxDocumentType.REDUCED_TAX_APPLICATION
 		);
 		if (!suppliedTypes.equals(requiredTypes)
-			|| documents.stream().anyMatch(document -> document.status() == TaxDocumentStatus.PROCESSING
+			|| documents.stream().anyMatch(document -> document.status() != TaxDocumentStatus.VERIFIED
 				|| document.status() == TaxDocumentStatus.FAILED
 				|| document.detectedDocumentType() == null
 				|| document.fields() == null
@@ -190,17 +201,23 @@ public class TaxDocumentService {
 				document.promptVersion()
 			))
 			.toList();
-		return gateway.compare(
+		var cached = conversationRepository.state(room.id()).comparison();
+		if (cached != null) return cached;
+		var result = gateway.compare(
 			reviewInputs,
 			first.expectedResidencyCountry(),
 			first.investorType(),
 			safetyIdentifier.from(userId)
 		);
+		conversationRepository.saveComparison(room.id(), result);
+		conversationRepository.touch(userId);
+		return result;
 	}
 
 	@Transactional
 	public TaxDocument retry(UUID userId, UUID documentId) {
 		TaxDocument document = get(userId, documentId);
+		if (document.storageKey().startsWith("purged/")) throw new BusinessException(ErrorCode.TAX_DOCUMENT_NOT_RETRYABLE);
 		assertRetryStep(userId, document);
 		Instant now = Instant.now(clock);
 		if (!repository.retry(userId, documentId, now)) {
@@ -212,7 +229,8 @@ public class TaxDocumentService {
 
 	@Transactional
 	public void delete(UUID userId, UUID documentId) {
-		get(userId, documentId);
+		conversationRepository.lockUser(userId);
+		TaxDocument document = get(userId, documentId);
 		Instant now = Instant.now(clock);
 		if (!repository.softDelete(
 			userId,
@@ -223,6 +241,9 @@ public class TaxDocumentService {
 			throw new BusinessException(ErrorCode.TAX_DOCUMENT_NOT_FOUND);
 		}
 		repository.audit(documentId, userId, "DELETION_SCHEDULED", now);
+		if (!document.storageKey().startsWith("purged/")) storage.delete(document.storageKey());
+		repository.markPurged(documentId, now);
+		conversationRepository.touch(userId);
 	}
 
 	private TaxDocumentFields emptyFields() {
@@ -231,6 +252,7 @@ public class TaxDocumentService {
 
 	public TaxDocumentContent original(UUID userId, UUID documentId) {
 		TaxDocument document = get(userId, documentId);
+		if (document.storageKey().startsWith("purged/")) throw new BusinessException(ErrorCode.TAX_DOCUMENT_NOT_FOUND);
 		return new TaxDocumentContent(
 			document.originalFileName(),
 			document.mediaType(),
@@ -280,8 +302,7 @@ public class TaxDocumentService {
 	}
 
 	private boolean allowsNextStep(TaxDocument document) {
-		return document.status() == TaxDocumentStatus.VERIFIED
-			|| document.status() == TaxDocumentStatus.REVIEW_REQUIRED;
+		return document.status() == TaxDocumentStatus.VERIFIED;
 	}
 
 	private List<TaxDocumentType> requiredDocumentTypes() {
