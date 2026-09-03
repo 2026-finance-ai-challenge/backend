@@ -73,6 +73,7 @@ public class IdentityService {
 		InvestorType investorType,
 		boolean termsAccepted,
 		boolean privacyAccepted,
+		Boolean fscDisclaimerAccepted,
 		ClientContext context
 	) {
 		if (!com.kmarket.navigator.backend.identity.domain.PasswordPolicy.isValid(password)
@@ -95,6 +96,10 @@ public class IdentityService {
 		);
 		identityRepository.insert(account, now, now);
 		auditRepository.record(account.id(), "ACCOUNT_CREATED", "USER", account.id().toString(), context, now);
+		// 구버전 가입 요청에는 동의 사실을 소급 생성하지 않는다.
+		if (Boolean.TRUE.equals(fscDisclaimerAccepted)) {
+			auditRepository.record(account.id(), "FSC_DISCLAIMER_ACCEPTED", "LEGAL_DOCUMENT", "fsc-disclaimer-v1", context, now);
+		}
 		return account;
 	}
 

@@ -743,10 +743,13 @@ class BackendApplicationTests {
 					  "nationality": "US",
 					  "investorType": "INDIVIDUAL",
 					  "termsAccepted": true,
-					  "privacyAccepted": true
+					  "privacyAccepted": true,
+					  "fscDisclaimerAccepted": true
 					}
 					""".formatted(loginId, password, password)))
 			.andExpect(status().isCreated());
+		assertThat(jdbcClient.sql("SELECT count(*) FROM security_audit_event a JOIN user_account u ON u.id=a.user_id WHERE u.login_id=:id AND a.event_type='FSC_DISCLAIMER_ACCEPTED'")
+			.param("id", loginId).query(Long.class).single()).isEqualTo(1);
 		assertThat(jdbcClient.sql("SELECT password_hash FROM user_account WHERE login_id = :loginId")
 			.param("loginId", loginId)
 			.query(String.class)

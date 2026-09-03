@@ -67,6 +67,7 @@ public class IdentityController {
 			body.investorType(),
 			body.termsAccepted(),
 			body.privacyAccepted(),
+			body.fscDisclaimerAccepted(),
 			contextResolver.resolve(request)
 		);
 		return ResponseEntity.status(HttpStatus.CREATED)
@@ -160,7 +161,8 @@ public class IdentityController {
 		@NotBlank @Pattern(regexp = "^[A-Za-z]{2}$") String nationality,
 		@NotNull InvestorType investorType,
 		@AssertTrue boolean termsAccepted,
-		@AssertTrue boolean privacyAccepted
+		@AssertTrue boolean privacyAccepted,
+		@AssertTrue Boolean fscDisclaimerAccepted
 	) {
 	}
 
