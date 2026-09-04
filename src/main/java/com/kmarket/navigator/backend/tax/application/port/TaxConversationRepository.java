@@ -12,6 +12,7 @@ public interface TaxConversationRepository {
 	TaxConversationState state(UUID roomId);
 	void initialize(UUID roomId, String locale);
 	void saveEligibility(UUID roomId, String locale, TaxEligibilityResult result);
+	void saveGuideProgress(UUID roomId, int guideDepth, boolean verificationStarted);
 	void saveComparison(UUID roomId, TaxDocumentComparison result);
 	void touch(UUID userId);
 	void deleteRoom(UUID userId, UUID roomId);

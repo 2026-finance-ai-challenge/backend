@@ -28,15 +28,20 @@ public class JdbcTaxConversationRepository implements TaxConversationRepository 
 	public TaxConversationState state(UUID roomId) {
 		return jdbc.sql("SELECT * FROM tax_conversation_state WHERE room_id = :id").param("id", roomId)
 			.query((rs, n) -> new TaxConversationState(roomId, rs.getString("locale"),
-				read(rs.getString("eligibility"), TaxEligibilityResult.class), read(rs.getString("comparison"), TaxDocumentComparison.class))).single();
+				read(rs.getString("eligibility"), TaxEligibilityResult.class), read(rs.getString("comparison"), TaxDocumentComparison.class),
+				rs.getInt("guide_depth"), rs.getBoolean("verification_started"))).single();
 	}
 	public void initialize(UUID roomId, String locale) {
 		jdbc.sql("INSERT INTO tax_conversation_state(room_id, locale) VALUES (:id, :locale) ON CONFLICT DO NOTHING")
 			.param("id", roomId).param("locale", locale).update();
 	}
 	public void saveEligibility(UUID roomId, String locale, TaxEligibilityResult result) {
-		jdbc.sql("UPDATE tax_conversation_state SET eligibility = CAST(:result AS jsonb), locale = :locale WHERE room_id = :id")
+		jdbc.sql("UPDATE tax_conversation_state SET eligibility = CAST(:result AS jsonb), locale = :locale, guide_depth = 0, verification_started = false WHERE room_id = :id")
 			.param("result", mapper.writeValueAsString(result)).param("locale", locale).param("id", roomId).update();
+	}
+	public void saveGuideProgress(UUID roomId, int guideDepth, boolean verificationStarted) {
+		jdbc.sql("UPDATE tax_conversation_state SET guide_depth = :depth, verification_started = :started WHERE room_id = :id")
+			.param("depth", guideDepth).param("started", verificationStarted).param("id", roomId).update();
 	}
 	public void saveComparison(UUID roomId, TaxDocumentComparison result) {
 		jdbc.sql("UPDATE tax_conversation_state SET comparison = CAST(:result AS jsonb) WHERE room_id = :id")

@@ -10,6 +10,7 @@ import com.kmarket.navigator.backend.identity.domain.AuthenticatedUser;
 import com.kmarket.navigator.backend.identity.domain.InvestorType;
 import com.kmarket.navigator.backend.tax.application.TaxConversationService;
 import com.kmarket.navigator.backend.tax.domain.TaxConversationState;
+import com.kmarket.navigator.backend.tax.domain.TaxGuideAction;
 
 @RestController
 @RequestMapping("/api/v1/me/tax-conversation")
@@ -28,8 +29,13 @@ public class TaxConversationController {
 	public TaxConversationState restart(@AuthenticationPrincipal AuthenticatedUser user, @Valid @RequestBody RestartRequest request) {
 		return service.restart(user.id(), request.roomId(), request.locale());
 	}
+	@PostMapping("/flow")
+	public TaxConversationState advance(@AuthenticationPrincipal AuthenticatedUser user, @Valid @RequestBody FlowRequest request) {
+		return service.advance(user.id(), request.action());
+	}
 	public record LocaleRequest(@NotNull @Pattern(regexp = "en|ko") String locale) { }
 	public record RestartRequest(@NotNull UUID roomId, @NotNull @Pattern(regexp = "en|ko") String locale) { }
 	public record AssessmentRequest(@NotNull @Pattern(regexp = "US") String residencyCountry,
 		@NotNull InvestorType investorType, @NotNull @Pattern(regexp = "en|ko") String locale) { }
+	public record FlowRequest(@NotNull TaxGuideAction action) { }
 }
