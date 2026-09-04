@@ -322,7 +322,7 @@ class BackendApplicationTests {
 
 	@Test
 	@Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
-	void concurrentLanguagesShareOneJobAndFailedRequestsDoNotRestartItImmediately() throws Exception {
+	void concurrentLanguagesShareOneJobAndExplicitFailedRequestsResumeOnce() throws Exception {
 		UUID articleId = insertReadyNews("Concurrent news " + UUID.randomUUID(), "삼성전자가 새로운 투자를 발표했다.", Instant.now(), "HIGH");
 		UUID clusterId = jdbcClient.sql("SELECT cluster_id FROM news_article WHERE id = :id")
 			.param("id", articleId).query(UUID.class).single();
@@ -343,19 +343,21 @@ class BackendApplicationTests {
 			assertThat(translationRepository.findMany(com.kmarket.navigator.backend.translation.domain.TranslationKind.NEWS_NARRATIVE,
 				List.of(sourceHash), "ko", com.kmarket.navigator.backend.translation.application.OnDemandTranslationService.NEWS_VERSION)).isEmpty();
 			var calls = new java.util.concurrent.atomic.AtomicInteger();
-			when(translationAiGateway.streamNews(any(), any(), any(), any(), any(), any())).thenAnswer(invocation -> {
+			when(translationAiGateway.streamNews(any(), any(), any(), any(), any(), any(), any())).thenAnswer(invocation -> {
 				calls.incrementAndGet();
 				throw new com.kmarket.navigator.backend.translation.application.TranslationProviderException(
 					com.kmarket.navigator.backend.translation.application.TranslationProviderException.Failure.INVALID_OUTPUT);
 			});
 			translationWorker.processNews();
 			assertThat(calls.get()).isEqualTo(1);
-			for (var result : executor.invokeAll(tasks)) {
-				assertThat(result.get().jobId()).isEqualTo(jobId);
-				assertThat(result.get().status()).isEqualTo(com.kmarket.navigator.backend.translation.domain.TranslationStatus.FAILED);
-			}
 			translationWorker.processNews();
 			assertThat(calls.get()).isEqualTo(1);
+			for (var result : executor.invokeAll(tasks)) {
+				assertThat(result.get().jobId()).isEqualTo(jobId);
+				assertThat(result.get().status()).isEqualTo(com.kmarket.navigator.backend.translation.domain.TranslationStatus.PENDING);
+			}
+			translationWorker.processNews();
+			assertThat(calls.get()).isEqualTo(2);
 			assertThat(jdbcClient.sql("SELECT attempts FROM translation_job WHERE translation_memory_id = :id")
 				.param("id", jobId).query(Integer.class).single()).isEqualTo(1);
 		} finally {
@@ -1644,7 +1646,7 @@ class BackendApplicationTests {
 			view.sourceHash(), "en", view.translationVersion(), result, "gpt-5-nano", "test-prompt"), now);
 		translationRepository.fail(view.jobId(), 1, "AI_GENERATION_INCOMPLETE", now, java.time.Duration.ZERO);
 		var resumed = translationRepository.request(kind, view.sourceHash(), "원문", context,
-			"en", view.translationVersion(), now.plusSeconds(901));
+			"en", view.translationVersion(), now.plusSeconds(1));
 		assertThat(resumed.status()).isEqualTo(com.kmarket.navigator.backend.translation.domain.TranslationStatus.PENDING);
 		assertThat(resumed.result()).isEqualTo(result);
 		assertThat(resumed.modelId()).isEqualTo("gpt-5-nano");
@@ -2691,7 +2693,7 @@ class BackendApplicationTests {
 			.andExpect(status().isAccepted());
 		mockMvc.perform(post("/api/v1/news/{articleId}/translation?locale=ko", articleId))
 			.andExpect(status().isAccepted());
-		when(translationAiGateway.streamNews(any(), any(), any(), any(), any(), any()))
+		when(translationAiGateway.streamNews(any(), any(), any(), any(), any(), any(), any()))
 			.thenAnswer(invocation -> {
 				String targetLocale = "en";
 				var result = objectMapper.createObjectNode();
