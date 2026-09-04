@@ -1636,7 +1636,8 @@ class BackendApplicationTests {
 		var kind = com.kmarket.navigator.backend.translation.domain.TranslationKind.NEWS_NARRATIVE;
 		var mapper = tools.jackson.databind.json.JsonMapper.builder().build();
 		var context = mapper.createObjectNode();
-		var view = translationRepository.request(kind, "c".repeat(64), "원문", context,
+		var source = "{\"paragraphs\":[\"원문\"],\"title\":\"제목\",\"content_availability\":\"FULL_ARTICLE\"}";
+		var view = translationRepository.request(kind, "c".repeat(64), source, context,
 			"en", "partial-cache-test", now);
 		translationRepository.claimForKind(kind, 2, "partial-test", now, now.minusSeconds(300));
 		var result = mapper.createObjectNode().put("what", "An investment was announced.")
@@ -1645,7 +1646,7 @@ class BackendApplicationTests {
 		translationRepository.progress(view.jobId(), new com.kmarket.navigator.backend.translation.domain.GeneratedTranslation(
 			view.sourceHash(), "en", view.translationVersion(), result, "gpt-5-nano", "test-prompt"), now);
 		translationRepository.fail(view.jobId(), 1, "AI_GENERATION_INCOMPLETE", now, java.time.Duration.ZERO);
-		var resumed = translationRepository.request(kind, view.sourceHash(), "원문", context,
+		var resumed = translationRepository.request(kind, view.sourceHash(), source, context,
 			"en", view.translationVersion(), now.plusSeconds(1));
 		assertThat(resumed.status()).isEqualTo(com.kmarket.navigator.backend.translation.domain.TranslationStatus.PENDING);
 		assertThat(resumed.result()).isEqualTo(result);
@@ -2745,6 +2746,44 @@ class BackendApplicationTests {
 			.andExpect(jsonPath("$.whatKo").value("회사가 신규 반도체 투자를 발표했다."))
 			.andExpect(jsonPath("$.whyKo").value("생산 능력 확대가 필요했다."))
 			.andExpect(jsonPath("$.impactKo").value("향후 생산 능력이 늘어날 수 있다."));
+	}
+
+	@Test
+	void storesCompletedNewsExpressionsWithoutLanguageRejectionOrRewriting() throws Exception {
+		UUID articleId = insertReadyNews("Samsung Electronics results", "Revenue rose.",
+			Instant.now().minusSeconds(60), "HIGH");
+		jdbcClient.sql("""
+			UPDATE news_article SET english_body = NULL, what_summary = NULL, why_summary = NULL,
+			impact_summary = NULL, what_summary_ko = NULL, why_summary_ko = NULL, impact_summary_ko = NULL
+			WHERE id = :articleId
+			""").param("articleId", articleId).update();
+		String expression = "Revenue is ₩700; the quoted label is 高.";
+		when(translationAiGateway.streamNews(any(), any(), any(), any(), any(), any(), any()))
+			.thenAnswer(invocation -> {
+				var result = objectMapper.createObjectNode().put("what", expression)
+					.put("why", "No reason stated.").put("impact", "No impact stated.")
+					.put("summaryReady", true).put("bodyReady", true);
+				result.putArray("translatedParagraphs").add(expression);
+				var summaries = result.putObject("summaries");
+				summaries.putObject("en").put("what", expression)
+					.put("why", "No reason stated.").put("impact", "No impact stated.");
+				summaries.putObject("ko").put("what", "매출은 700원이다.")
+					.put("why", "이유는 명시되지 않았다.").put("impact", "영향은 명시되지 않았다.");
+				return new GeneratedTranslation(invocation.getArgument(0), "en",
+					invocation.getArgument(4), result, "gpt-5-nano", "news-bilingual-stream-v7");
+			});
+		mockMvc.perform(post("/api/v1/news/{articleId}/translation", articleId))
+			.andExpect(status().isAccepted());
+		translationWorker.processNews();
+		mockMvc.perform(get("/api/v1/news/{articleId}/translation", articleId))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.status").value("READY"))
+			.andExpect(jsonPath("$.result.translatedParagraphs[0]").value(expression));
+		mockMvc.perform(get("/api/v1/news/{articleId}", articleId))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.englishBody").value(expression))
+			.andExpect(jsonPath("$.whatEn").value(expression))
+			.andExpect(jsonPath("$.whatKo").value("매출은 700원이다."));
 	}
 
 	@Test

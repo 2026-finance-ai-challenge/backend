@@ -323,8 +323,10 @@ class JdbcTranslationRepository implements TranslationRepository {
 			.optional()
 			.map(TranslationKind::valueOf)
 			.orElseThrow(() -> new IllegalStateException("Claimed translation no longer exists"));
-		if ("en".equals(generated.targetLocale())) {
-			validateGenerated(generated);
+		if (kind == TranslationKind.NEWS_NARRATIVE) {
+			validateNewsStructure(id, generated, true);
+		} else if ("en".equals(generated.targetLocale())) {
+			EnglishTextPolicy.requireAllTextValid(generated.result());
 		}
 		int updated = jdbcClient.sql("""
 			UPDATE translation_memory
@@ -382,7 +384,7 @@ class JdbcTranslationRepository implements TranslationRepository {
 	@Override
 	@Transactional
 	public void progress(UUID id, GeneratedTranslation generated, Instant now) {
-		validateGenerated(generated);
+		validateNewsStructure(id, generated, false);
 		int updated = jdbcClient.sql("""
 			UPDATE translation_memory SET result_payload = CAST(:payload AS jsonb),
 			    model_id = :model, prompt_version = :prompt, updated_at = :now
@@ -397,21 +399,16 @@ class JdbcTranslationRepository implements TranslationRepository {
 		if (updated != 1) throw new IllegalStateException("Translation progress lease expired");
 	}
 
-	private void validateGenerated(GeneratedTranslation generated) {
-		var result = generated.result();
-		if (result.has("summaries")) {
-			var english = ((tools.jackson.databind.node.ObjectNode) result).deepCopy();
-			english.remove("summaries");
-			EnglishTextPolicy.requireAllTextValid(english);
-			EnglishTextPolicy.requireAllTextValid(result.path("summaries").path("en"));
-			for (String key : List.of("what", "why", "impact")) {
-				requireKoreanSummary(result.path("summaries").path("ko").path(key).asString());
-			}
-		} else EnglishTextPolicy.requireAllTextValid(result);
+	private void validateNewsStructure(UUID id, GeneratedTranslation generated, boolean complete) {
+		String source = jdbcClient.sql("""
+			SELECT source_text FROM translation_memory WHERE id = :id AND content_kind = 'NEWS_NARRATIVE'
+			""").param("id", id).query(String.class).single();
+		int expectedParagraphs = objectMapper.readTree(source).path("paragraphs").size();
+		com.kmarket.navigator.backend.translation.domain.NewsNarrativeStructure.requireValid(
+			generated.result(), expectedParagraphs, complete);
 	}
 
 	private int copyEnglishNewsNarrative(UUID id, JsonNode result, List<String> paragraphs) {
-		paragraphs.replaceAll(EnglishTextPolicy::requireValid);
 		return jdbcClient.sql("""
 			UPDATE news_article article
 			SET english_body = :englishBody,
@@ -425,9 +422,9 @@ class JdbcTranslationRepository implements TranslationRepository {
 			""")
 			.param("id", id)
 			.param("englishBody", String.join("\n\n", paragraphs))
-			.param("whatSummary", EnglishTextPolicy.requireValid(result.path("what").stringValue()))
-			.param("whySummary", EnglishTextPolicy.requireValid(result.path("why").stringValue()))
-			.param("impactSummary", EnglishTextPolicy.requireValid(result.path("impact").stringValue()))
+			.param("whatSummary", result.path("what").stringValue())
+			.param("whySummary", result.path("why").stringValue())
+			.param("impactSummary", result.path("impact").stringValue())
 			.update();
 	}
 
@@ -444,17 +441,10 @@ class JdbcTranslationRepository implements TranslationRepository {
 			  AND article.id = CAST(memory.request_context ->> 'article_id' AS uuid)
 			""")
 			.param("id", id)
-			.param("whatSummary", requireKoreanSummary(result.path("what").stringValue()))
-			.param("whySummary", requireKoreanSummary(result.path("why").stringValue()))
-			.param("impactSummary", requireKoreanSummary(result.path("impact").stringValue()))
+			.param("whatSummary", result.path("what").stringValue())
+			.param("whySummary", result.path("why").stringValue())
+			.param("impactSummary", result.path("impact").stringValue())
 			.update();
-	}
-
-	private String requireKoreanSummary(String value) {
-		if (value == null || value.isBlank() || !value.matches(".*[가-힣].*")) {
-			throw new IllegalArgumentException("Korean summary must be non-blank and contain Hangul");
-		}
-		return value;
 	}
 
 	@Override
