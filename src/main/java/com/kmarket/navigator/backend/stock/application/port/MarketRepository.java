@@ -17,6 +17,8 @@ import com.kmarket.navigator.backend.stock.domain.StockMarketView;
 
 public interface MarketRepository {
 
+	default java.util.Map<String, List<String>> findStockAliases() { return java.util.Map.of(); }
+
 	List<StockIdentity> searchStocks(String query, UUID userId, int limit);
 
 	List<StockMarketView> findStocks(UUID userId);

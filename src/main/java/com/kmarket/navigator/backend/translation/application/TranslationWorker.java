@@ -203,8 +203,11 @@ public class TranslationWorker {
 		List<String> paragraphs = new ArrayList<>();
 		source.path("paragraphs").forEach(value -> paragraphs.add(value.asString()));
 		if ("news-bilingual-v1".equals(job.translationVersion())) {
+			var cachedSummaries = repository.find(job.kind(), job.sourceHash(), "en", job.translationVersion())
+				.map(view -> view.result()).filter(java.util.Objects::nonNull)
+				.map(result -> result.get("summaries")).orElse(null);
 			return aiGateway.streamNews(job.sourceHash(), source.path("title").asString(), paragraphs,
-				source.path("content_availability").asString(), job.translationVersion(),
+				source.path("content_availability").asString(), job.translationVersion(), cachedSummaries,
 				partial -> repository.progress(job.id(), partial, Instant.now(clock)));
 		}
 		return aiGateway.translateNews(

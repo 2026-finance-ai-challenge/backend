@@ -28,6 +28,7 @@ public class AgentEvidenceProvider {
 	private final NewsService newsService;
 	private final ObjectMapper objectMapper;
 	private final DisclosureQueryHandler disclosures;
+	private final com.kmarket.navigator.backend.disclosure.application.port.DisclosureRagGateway disclosureRag;
 	private final com.kmarket.navigator.backend.translation.application.NewsSelectionValidator newsSelections;
 
 	public AgentEvidenceProvider(
@@ -35,13 +36,15 @@ public class AgentEvidenceProvider {
 		NewsService newsService,
 		ObjectMapper objectMapper,
 		DisclosureQueryHandler disclosures,
-		com.kmarket.navigator.backend.translation.application.NewsSelectionValidator newsSelections
+		com.kmarket.navigator.backend.translation.application.NewsSelectionValidator newsSelections,
+		com.kmarket.navigator.backend.disclosure.application.port.DisclosureRagGateway disclosureRag
 	) {
 		this.marketService = marketService;
 		this.newsService = newsService;
 		this.objectMapper = objectMapper;
 		this.disclosures = disclosures;
 		this.newsSelections = newsSelections;
+		this.disclosureRag = disclosureRag;
 	}
 
 	public List<AgentEvidence> evidence(ChatContext context, String question) {
@@ -67,7 +70,7 @@ public class AgentEvidenceProvider {
 	}
 
 	private List<AgentEvidence> questionEvidence(ChatContext context, String question) {
-		var scope = AgentRetrievalScope.parse(question, marketService.searchStocks("", null, 100));
+		var scope = AgentRetrievalScope.parse(question, marketService.searchStocks("", null, 100), marketService.stockAliases());
 		List<String> codes = context.type() == com.kmarket.navigator.backend.chat.domain.ChatContextType.STOCK
 			? List.of(context.referenceId()) : scope.stocks().stream().map(stock -> stock.stockCode()).toList();
 		List<AgentEvidence> result = new ArrayList<>();
@@ -82,14 +85,34 @@ public class AgentEvidenceProvider {
 		List<String> targets = codes.isEmpty() ? java.util.Collections.singletonList(null) : codes;
 		Map<String, AgentEvidence> found = new LinkedHashMap<>();
 		for (String code : targets) {
-			if (scope.includeLatest()) addFeedEvidence(found, code, null, null, scope.news(), scope.filings(), scope.financials());
-			if (scope.from() != null) addFeedEvidence(found, code, scope.from(), scope.to(), scope.news(), scope.filings(), scope.financials());
+			if (scope.includeLatest()) addFeedEvidence(found, code, null, null, scope.news(), scope.filings());
+			if (scope.from() != null) addFeedEvidence(found, code, scope.from(), scope.to(), scope.news(), scope.filings());
+		}
+		if (!codes.isEmpty() && (scope.filings() || scope.financials())) {
+			if (scope.includeLatest()) addRagEvidence(found, codes, question, null, null, scope.financials());
+			if (scope.from() != null) addRagEvidence(found, codes, question, scope.from(), scope.to(), scope.financials());
 		}
 		return found.values().stream().limit(12).toList();
 	}
 
+	private void addRagEvidence(Map<String, AgentEvidence> found, List<String> codes, String question,
+		LocalDate from, LocalDate to, boolean financials) {
+		for (var filing : disclosureRag.retrieve(codes, question, from, to, financials)) {
+			if (!codes.contains(filing.stockCode()) || !filing.receiptNumber().matches("[0-9]{14}")) continue;
+			Map<String, Object> packet = new LinkedHashMap<>();
+			packet.put("kind", "FILING_SOURCE_EXCERPT"); packet.put("stockCode", filing.stockCode());
+			packet.put("title", filing.title()); packet.put("filedDate", filing.filedDate());
+			packet.put("receiptNumber", filing.receiptNumber()); packet.put("sectionIds", filing.sectionIds());
+			packet.put("retrievalMethod", filing.retrievalMethod());
+			packet.put("sourceText", excerpt(filing.content(), 7200));
+			String key = "F" + filing.receiptNumber();
+			found.put(key, new AgentEvidence(key, filing.title(), newsJson(packet), "OpenDART", filing.detectedAt(),
+				filing.receiptNumber(), "/disclosures/" + filing.receiptNumber()));
+		}
+	}
+
 	private void addFeedEvidence(Map<String, AgentEvidence> found, String stockCode, LocalDate from,
-		LocalDate to, boolean includeNews, boolean includeFilings, boolean includeFinancials) {
+		LocalDate to, boolean includeNews, boolean includeFilings) {
 		var zone = ZoneId.of("Asia/Seoul");
 		if (includeNews) {
 			var page = newsService.findAll(new NewsQuery(null, stockCode, null, null, null, null, false, null,
@@ -122,49 +145,6 @@ public class AgentEvidenceProvider {
 					"OpenDART", filing.detectedAt(), filing.receiptNumber(), "/disclosures/" + filing.receiptNumber()));
 			}
 		}
-		if (includeFinancials && stockCode != null) {
-			var page = disclosures.findAll(new DisclosureListQuery(stockCode, from, to, java.util.Set.of(), null, 12));
-			for (var filing : page.items()) {
-				var detail = disclosures.findPublished(filing.receiptNumber());
-				String content = financialExcerpt(detail);
-				if (content.isBlank()) continue;
-				Map<String, Object> packet = new LinkedHashMap<>();
-				packet.put("kind", "FILING_FINANCIAL_EXCERPT");
-				packet.put("stockCode", filing.stockCode());
-				packet.put("issuer", filing.issuerNameEn());
-				packet.put("title", filing.titleEn());
-				packet.put("originalTitle", filing.titleKo());
-				packet.put("filedDate", filing.filedDate());
-				packet.put("receiptNumber", filing.receiptNumber());
-				packet.put("sourceExcerpt", content);
-				String key = "F" + filing.receiptNumber();
-				found.putIfAbsent(key, new AgentEvidence(key, filing.titleEn(), objectMapper.writeValueAsString(packet),
-					"OpenDART", filing.detectedAt(), filing.receiptNumber(), "/disclosures/" + filing.receiptNumber()));
-				if (found.size() >= 6) return;
-			}
-		}
-	}
-
-	private String financialExcerpt(com.kmarket.navigator.backend.disclosure.domain.DisclosureDetail detail) {
-		StringBuilder excerpt = new StringBuilder();
-		for (var document : detail.documents()) {
-			for (var section : document.sections()) {
-				String value = String.join("\n", java.util.stream.Stream.of(section.heading(), section.text(), section.tableData())
-					.filter(java.util.Objects::nonNull).toList());
-				if (!isFinancialSection(value)) continue;
-				if (!excerpt.isEmpty()) excerpt.append("\n\n");
-				excerpt.append(value);
-				if (excerpt.length() >= 4_000) return excerpt.substring(0, 4_000);
-			}
-		}
-		return excerpt.toString();
-	}
-
-	private boolean isFinancialSection(String value) {
-		String normalized = value.toLowerCase(java.util.Locale.ROOT);
-		return normalized.contains("매출") || normalized.contains("영업이익") || normalized.contains("순이익")
-			|| normalized.contains("revenue") || normalized.contains("sales") || normalized.contains("operating profit")
-			|| normalized.contains("net income");
 	}
 
 	private static String excerpt(String value, int limit) {

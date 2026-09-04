@@ -18,6 +18,22 @@ class AgentRetrievalScopeTests {
 	private final StockIdentity samsung = stock("005930", "삼성전자", "Samsung Electronics Co., Ltd.");
 
 	@Test
+	void recognizesSingularEarningAndBoundedTypo() {
+		var scope = AgentRetrievalScope.parse("can you tell me about recent samsung electonic's earning?", List.of(samsung));
+		assertThat(scope.stocks()).containsExactly(samsung);
+		assertThat(scope.financials()).isTrue();
+	}
+
+	@Test
+	void usesRegisteredShortAliasWithoutOverridingExactAffiliate() {
+		var sdi = stock("006400", "삼성SDI", "Samsung SDI Co., Ltd.");
+		var aliases = java.util.Map.of("005930", List.of("Samsung"));
+		assertThat(AgentRetrievalScope.parse("samsung's recent filing", List.of(samsung, sdi), aliases).stocks()).containsExactly(samsung);
+		assertThat(AgentRetrievalScope.parse("Samsung SDI recent filing", List.of(samsung, sdi), aliases).stocks()).containsExactly(sdi);
+		assertThat(AgentRetrievalScope.parse("삼성전자 이익", List.of(samsung)).financials()).isTrue();
+	}
+
+	@Test
 	void resolvesIssuerAndLatestNewsWithoutExtraModelRequest() {
 		var scope = AgentRetrievalScope.parse("Latest news about Samsung Electronics (005930)", List.of(samsung));
 		assertThat(scope.stocks()).containsExactly(samsung);

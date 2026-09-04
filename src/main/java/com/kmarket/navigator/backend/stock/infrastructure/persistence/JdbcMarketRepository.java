@@ -52,6 +52,18 @@ class JdbcMarketRepository implements MarketRepository {
 	}
 
 	@Override
+	public java.util.Map<String, List<String>> findStockAliases() {
+		var rows = jdbcClient.sql("""
+			SELECT s.stock_code, a.alias FROM stock_alias a
+			JOIN security s ON s.id = a.security_id
+			JOIN service_stock_universe u ON u.stock_code = s.stock_code
+			WHERE s.active AND s.common_stock
+			""").query((rs, row) -> java.util.Map.entry(rs.getString(1), rs.getString(2))).list();
+		return rows.stream().collect(java.util.stream.Collectors.groupingBy(java.util.Map.Entry::getKey,
+			java.util.stream.Collectors.mapping(java.util.Map.Entry::getValue, java.util.stream.Collectors.toList())));
+	}
+
+	@Override
 	public List<StockIdentity> searchStocks(String query, UUID userId, int limit) {
 		String normalized = query.trim().toLowerCase(Locale.ROOT);
 		JdbcClient.StatementSpec statement = jdbcClient.sql("""

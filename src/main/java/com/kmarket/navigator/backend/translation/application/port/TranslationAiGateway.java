@@ -11,6 +11,13 @@ public interface TranslationAiGateway {
 
 	default GeneratedTranslation streamNews(
 		String sourceHash, String title, List<String> paragraphs, String contentAvailability,
+		String version, tools.jackson.databind.JsonNode cachedSummaries, Consumer<GeneratedTranslation> progress
+	) {
+		return streamNews(sourceHash, title, paragraphs, contentAvailability, version, progress);
+	}
+
+	default GeneratedTranslation streamNews(
+		String sourceHash, String title, List<String> paragraphs, String contentAvailability,
 		String version, Consumer<GeneratedTranslation> progress
 	) {
 		return translateNews(sourceHash, title, paragraphs, contentAvailability, "en", version);
