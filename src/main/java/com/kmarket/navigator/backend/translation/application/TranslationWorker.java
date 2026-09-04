@@ -132,7 +132,7 @@ public class TranslationWorker {
 		}
 		catch (RuntimeException exception) {
 			Duration cooldown = cooldown(exception);
-			deferProvider(now.plus(cooldown));
+			deferProvider(Instant.now(clock).plus(cooldown));
 			String errorCode = errorCode(exception);
 			for (TitleTranslationJob job : jobs) {
 				repository.fail(job.id(), job.attempts(), errorCode,
