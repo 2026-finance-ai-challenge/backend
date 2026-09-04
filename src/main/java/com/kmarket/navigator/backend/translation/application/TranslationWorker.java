@@ -121,7 +121,8 @@ public class TranslationWorker {
 		if (jobs.isEmpty()) {
 			return;
 		}
-		processTitleSubset(jobs, now);
+		// 생성 실패도 제목별로 격리해 정상 제목까지 함께 버리지 않는다.
+		BoundedTasks.forEach(jobs, TITLE_BATCH_SIZE, job -> processTitleSubset(List.of(job), now));
 	}
 
 	private void processTitleSubset(List<TitleTranslationJob> jobs, Instant now) {

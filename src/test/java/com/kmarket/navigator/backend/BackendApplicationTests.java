@@ -203,6 +203,36 @@ class BackendApplicationTests {
 	}
 
 	@Test
+	void titleTransportFailuresHaveBoundedBackoffButInvalidOutputsDoNotRetry() {
+		for (String code : List.of("AI_PROVIDER_TIMEOUT", "AI_PROVIDER_UNAVAILABLE",
+			"AI_PROVIDER_RATE_LIMITED", "AI_INVALID_OUTPUT", "AI_GENERATION_INCOMPLETE")) {
+			UUID id = UUID.randomUUID();
+			Instant now = Instant.now();
+			jdbcClient.sql("""
+				INSERT INTO translation_memory (id,content_kind,source_locale,target_locale,translation_version,
+				 source_hash,source_text,normalized_source_text,status,created_at,updated_at)
+				VALUES (:id,'NEWS_TITLE','ko','en','news-title-v3',:hash,'테스트','테스트','PROCESSING',now(),now())
+				""").param("id", id).param("hash", id.toString().replace("-", "").repeat(2)).update();
+			jdbcClient.sql("""
+				INSERT INTO translation_job (translation_memory_id,status,attempts,available_at,created_at,updated_at)
+				VALUES (:id,'PROCESSING',1,now(),now(),now())
+				""").param("id", id).update();
+			translationRepository.fail(id, 1, code, now, Duration.ofSeconds(15));
+			String expected = code.startsWith("AI_PROVIDER_") ? "PENDING" : "FAILED";
+			for (String query : List.of("SELECT status FROM translation_job WHERE translation_memory_id=:id",
+				"SELECT status FROM translation_memory WHERE id=:id")) {
+				assertThat(jdbcClient.sql(query).param("id", id).query(String.class).single()).isEqualTo(expected);
+			}
+			jdbcClient.sql("UPDATE translation_job SET status='PROCESSING',attempts=3 WHERE translation_memory_id=:id")
+				.param("id", id).update();
+			jdbcClient.sql("UPDATE translation_memory SET status='PROCESSING' WHERE id=:id").param("id", id).update();
+			translationRepository.fail(id, 3, code, now, Duration.ofSeconds(15));
+			assertThat(jdbcClient.sql("SELECT status FROM translation_job WHERE translation_memory_id=:id")
+				.param("id", id).query(String.class).single()).isEqualTo("FAILED");
+		}
+	}
+
+	@Test
 	void staleFailureCannotReopenCompletedTranslationJob() {
 		UUID id = UUID.randomUUID();
 		jdbcClient.sql("""
