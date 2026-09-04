@@ -119,8 +119,7 @@ public class ChatGenerationWorker {
 			.filter(java.util.Objects::nonNull)
 			.map(item -> new ChatCitation(
 				item.id(),
-				item.url() != null && item.url().matches("/disclosures/[0-9]{14}")
-					? "FILING" : task.context().type().name(),
+				citationSourceType(item, task.context().type()),
 				item.referenceId(),
 				item.title(),
 				excerpt(item.content()),
@@ -149,6 +148,12 @@ public class ChatGenerationWorker {
 			title(generated.suggestedRoomName(), task.question()),
 			task.generationId().toString()
 		);
+	}
+
+	private String citationSourceType(AgentEvidence item, ChatContextType contextType) {
+		if (item.referenceId() != null && item.referenceId().matches("[0-9]{14}")) return "FILING";
+		if (item.referenceId() != null && item.referenceId().matches("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")) return "NEWS";
+		return contextType.name();
 	}
 
 	private CompletedChatAnswer filingAnswer(ChatGenerationTask task) {
