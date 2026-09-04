@@ -98,6 +98,7 @@ public class OpenApiConfig {
 		entry("TaxReviewPackageController#get", operation("검증 완료 문서 패키지 조회", "Tax", Access.AUTHENTICATED)),
 		entry("TaxReviewPackageController#correction", operation("예상 작성 경정청구서 조회", "Tax", Access.AUTHENTICATED)),
 		entry("TaxConversationController#assess", operation("세무 채팅 세율 확인 결과 저장", "Tax", Access.AUTHENTICATED)),
+		entry("TaxConversationController#advance", operation("세무 채팅 가이드 및 검증 시작 단계 저장", "Tax", Access.AUTHENTICATED)),
 		entry("TaxConversationController#restart", operation("세무 채팅 및 서류 삭제 후 재시작", "Tax", Access.AUTHENTICATED)),
 		entry("TaxDocumentController#upload", operation("세무 문서 업로드", "Tax", Access.AUTHENTICATED, "202")),
 		entry("TaxDocumentController#list", operation("내 세무 문서 목록 조회", "Tax", Access.AUTHENTICATED)),

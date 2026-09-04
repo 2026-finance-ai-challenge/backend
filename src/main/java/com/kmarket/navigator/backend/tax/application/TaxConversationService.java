@@ -15,6 +15,7 @@ import com.kmarket.navigator.backend.tax.application.port.TaxConversationReposit
 import com.kmarket.navigator.backend.tax.application.port.TaxDocumentRepository;
 import com.kmarket.navigator.backend.tax.application.port.TaxDocumentStorage;
 import com.kmarket.navigator.backend.tax.domain.TaxConversationState;
+import com.kmarket.navigator.backend.tax.domain.TaxGuideAction;
 
 @Service
 public class TaxConversationService {
@@ -57,6 +58,25 @@ public class TaxConversationService {
 		ChatRoom room = ensureRoom(userId, locale);
 		if (!documents.findAll(userId).isEmpty()) throw new BusinessException(ErrorCode.TAX_DOCUMENT_STEP_BLOCKED);
 		repository.saveEligibility(room.id(), locale, eligibility.check(country, investor));
+		repository.touch(userId);
+		return repository.state(room.id());
+	}
+	@Transactional
+	public TaxConversationState advance(UUID userId, TaxGuideAction action) {
+		ChatRoom room = ensureRoom(userId, "en");
+		TaxConversationState state = repository.state(room.id());
+		if (state.eligibility() == null) throw new BusinessException(ErrorCode.TAX_DOCUMENT_STEP_BLOCKED);
+		int guideDepth = state.guideDepth();
+		boolean verificationStarted = state.verificationStarted();
+		switch (action) {
+			case SHOW_GUIDE -> guideDepth = Math.max(guideDepth, 1);
+			case SHOW_MORE_DETAIL -> {
+				if (guideDepth < 1) throw new BusinessException(ErrorCode.TAX_DOCUMENT_STEP_BLOCKED);
+				guideDepth = 2;
+			}
+			case START_VERIFICATION -> verificationStarted = true;
+		}
+		repository.saveGuideProgress(room.id(), guideDepth, verificationStarted);
 		repository.touch(userId);
 		return repository.state(room.id());
 	}
