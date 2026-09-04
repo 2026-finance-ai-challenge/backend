@@ -748,25 +748,63 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			       d.disclosure_type, d.title_ko,
 			       CASE WHEN translation.status = 'READY' THEN translation.translated_text END AS title_en,
 			       d.event_type, d.sentiment, d.importance, d.market_impact,
-			       d.filed_date, COUNT(*) OVER (PARTITION BY d.filed_date) AS filed_date_total,
+			       d.filed_date,
+			       (
+			           SELECT COUNT(*)
+			           FROM disclosure day_disclosure
+			           JOIN security day_security ON day_security.id = day_disclosure.security_id
+			           JOIN service_stock_universe day_universe
+			             ON day_universe.stock_code = day_security.stock_code
+			           JOIN translation_memory day_translation
+			             ON day_translation.content_kind = 'DISCLOSURE_TITLE'
+			            AND day_translation.source_hash = day_disclosure.title_source_hash
+			            AND day_translation.target_locale = 'en'
+			            AND day_translation.translation_version = :translationVersion
+			            AND day_translation.status = 'READY'
+			            AND NULLIF(BTRIM(day_translation.translated_text), '') IS NOT NULL
+			           WHERE day_disclosure.filed_date = d.filed_date
+			             AND day_security.active AND day_security.common_stock
+			             AND day_disclosure.document_status = 'READY'
+			             AND day_disclosure.event_type IS NOT NULL
+			             AND day_disclosure.sentiment IS NOT NULL
+			             AND day_disclosure.importance IS NOT NULL
+			             AND day_disclosure.market_impact IS NOT NULL
+			       ) AS filed_date_total,
 			       d.detected_at, d.correction, d.document_status, d.index_status, d.official_url
-			FROM disclosure d
+			FROM
+			""");
+		// 전체 목록은 최신순 인덱스를 먼저 읽고, 종목 목록은 종목별 인덱스를 직접 사용한다.
+		if (query.stockCode() == null) {
+			sql.append("""
+				(
+				    SELECT disclosure.*
+				    FROM disclosure
+				    WHERE disclosure.document_status = 'READY'
+				      AND disclosure.event_type IS NOT NULL
+				      AND disclosure.sentiment IS NOT NULL
+				      AND disclosure.importance IS NOT NULL
+				      AND disclosure.market_impact IS NOT NULL
+				    ORDER BY disclosure.filed_date DESC,
+				             disclosure.detected_at DESC,
+				             disclosure.receipt_number DESC
+				    OFFSET 0
+				) d
+				""");
+		} else {
+			sql.append(" disclosure d\n");
+		}
+		sql.append("""
 			JOIN issuer i ON i.id = d.issuer_id
 			JOIN security s ON s.id = d.security_id
 			JOIN service_stock_universe universe ON universe.stock_code = s.stock_code
-			LEFT JOIN translation_memory translation
+			JOIN translation_memory translation
 			  ON translation.content_kind = 'DISCLOSURE_TITLE'
 			 AND translation.source_hash = d.title_source_hash
 			 AND translation.target_locale = 'en'
 			 AND translation.translation_version = :translationVersion
+			 AND translation.status = 'READY'
+			 AND NULLIF(BTRIM(translation.translated_text), '') IS NOT NULL
 			WHERE s.active AND s.common_stock
-			  AND translation.status = 'READY'
-			  AND NULLIF(BTRIM(translation.translated_text), '') IS NOT NULL
-			  AND d.document_status = 'READY'
-			  AND d.event_type IS NOT NULL
-			  AND d.sentiment IS NOT NULL
-			  AND d.importance IS NOT NULL
-			  AND d.market_impact IS NOT NULL
 			""");
 		Map<String, Object> parameters = new LinkedHashMap<>();
 		parameters.put("translationVersion", DisclosureTitlePolicy.TRANSLATION_VERSION);

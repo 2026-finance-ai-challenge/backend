@@ -26,7 +26,7 @@
 | `POST` | `/api/v1/disclosures/{receiptNumber}/translation` | 공시 전체 섹션 번역을 한 번에 요청하고 기존 캐시·작업 재사용 |
 | `POST` | `/api/v1/disclosures/{receiptNumber}/sections/{sectionId}/translation` | 영어 섹션 번역 온디맨드 생성 요청 또는 캐시 재사용 |
 
-목록 항목의 `filedDateTotal`은 현재 페이지 크기가 아닌 해당 `filedDate` 전체 공시 건수다.
+목록 항목의 `filedDateTotal`은 현재 페이지 크기가 아닌 해당 `filedDate` 전체 공개 공시 건수다. 목록은 최신 정렬 인덱스에서 필요한 행만 먼저 읽고 날짜 총계만 해당 날짜 범위에서 계산하므로 전체 공시를 매 요청마다 정렬하지 않는다.
 
 ## 정정 버전
 
