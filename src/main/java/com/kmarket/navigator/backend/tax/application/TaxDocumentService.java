@@ -81,6 +81,9 @@ public class TaxDocumentService {
 		rateLimiter.check(userId);
 		var room = conversations.ensureRoom(userId, "en");
 		var assessment = conversationRepository.state(room.id());
+		if (assessment.eligibility() == null || !assessment.verificationStarted()) {
+			throw new BusinessException(ErrorCode.TAX_DOCUMENT_STEP_BLOCKED);
+		}
 		var account = identityRepository.findActiveById(userId)
 			.orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
 		String country = expectedResidencyCountry.toUpperCase(Locale.ROOT);

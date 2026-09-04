@@ -432,7 +432,21 @@ class BackendApplicationTests {
 			.header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON)
 			.content("{\"locale\":\"ko\",\"residencyCountry\":\"US\",\"investorType\":\"INDIVIDUAL\"}"))
 			.andExpect(status().isOk()).andExpect(jsonPath("$.roomId").value(roomId))
-			.andExpect(jsonPath("$.eligibility.treatyDividendRate").value(15.0));
+			.andExpect(jsonPath("$.eligibility.treatyDividendRate").value(15.0))
+			.andExpect(jsonPath("$.guideDepth").value(0))
+			.andExpect(jsonPath("$.verificationStarted").value(false));
+		mockMvc.perform(post("/api/v1/me/tax-conversation/flow")
+			.header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"action\":\"SHOW_MORE_DETAIL\"}"))
+			.andExpect(status().isConflict());
+		mockMvc.perform(post("/api/v1/me/tax-conversation/flow")
+			.header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"action\":\"SHOW_GUIDE\"}"))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.guideDepth").value(1));
+		mockMvc.perform(post("/api/v1/me/tax-conversation/flow")
+			.header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"action\":\"SHOW_MORE_DETAIL\"}"))
+			.andExpect(status().isOk()).andExpect(jsonPath("$.guideDepth").value(2));
 		mockMvc.perform(post("/api/v1/me/tax-conversation")
 			.header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON)
 			.content("{\"locale\":\"en\"}"))
@@ -458,6 +472,7 @@ class BackendApplicationTests {
 		var owner = signupAndLogin("tax_package_owner");
 		var other = signupAndLogin("tax_package_other");
 		String auth = "Bearer " + owner.accessToken();
+		startTaxVerification(owner);
 		when(taxDocumentGateway.verify(any(), any(), any(), any(), any(), any(), any())).thenAnswer(call -> new TaxDocumentVerification(
 			call.getArgument(0), TaxDocumentStatus.VERIFIED,
 			new TaxDocumentFields("Jane Investor", "US", "2026-01-10", null, "IRS", "TEST-100", "US", "US", "INDIVIDUAL"),
@@ -548,6 +563,7 @@ class BackendApplicationTests {
 			));
 		AuthFixture owner = signupAndLogin("tax_owner");
 		AuthFixture other = signupAndLogin("tax_other");
+		startTaxVerification(owner);
 		byte[] pdf = "%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
 		MockMultipartFile file = new MockMultipartFile(
 			"file",
@@ -634,6 +650,7 @@ class BackendApplicationTests {
 	@Test
 	void rejectsTaxDocumentsWithMismatchedOrActiveContentSignatures() throws Exception {
 		AuthFixture owner = signupAndLogin("tax_invalid");
+		startTaxVerification(owner);
 		MockMultipartFile activePdf = new MockMultipartFile(
 			"file",
 			"attack.pdf",
@@ -2934,6 +2951,19 @@ class BackendApplicationTests {
 			login.get("accessToken").stringValue(),
 			UUID.fromString(login.get("user").get("id").stringValue())
 		);
+	}
+
+	private void startTaxVerification(AuthFixture fixture) throws Exception {
+		String authorization = "Bearer " + fixture.accessToken();
+		mockMvc.perform(post("/api/v1/me/tax-conversation/eligibility")
+			.header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"locale\":\"en\",\"residencyCountry\":\"US\",\"investorType\":\"INDIVIDUAL\"}"))
+			.andExpect(status().isOk());
+		mockMvc.perform(post("/api/v1/me/tax-conversation/flow")
+			.header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON)
+			.content("{\"action\":\"START_VERIFICATION\"}"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.verificationStarted").value(true));
 	}
 
 	private record AuthFixture(String accessToken, UUID userId) {
