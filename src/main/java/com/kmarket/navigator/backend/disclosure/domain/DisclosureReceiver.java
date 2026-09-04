@@ -17,7 +17,9 @@ public record DisclosureReceiver(String ko, String en) {
 			String text = Jsoup.parse(document.originalHtml()).text().replaceAll("\\s+", "");
 			String header = text.substring(0, Math.min(text.length(), 1500));
 			// 본문에 등장하는 기관명이 아니라 수신처 표기만 사용한다.
-			var matcher = Pattern.compile("((?:(?:금융위원회|한국거래소|금융감독원)[/·,및]*)+)귀중").matcher(header);
+			var matcher = Pattern.compile(
+				"((?:(?:금융위원회|한국거래소|금융감독원)(?:위원장|장)?[/·,및]*)+)(?:귀중|귀하)"
+			).matcher(header);
 			while (matcher.find()) {
 				for (String name : names.keySet()) if (matcher.group(1).contains(name)) recipients.add(name);
 			}
