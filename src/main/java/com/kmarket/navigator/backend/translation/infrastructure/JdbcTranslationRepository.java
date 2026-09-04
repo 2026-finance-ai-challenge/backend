@@ -30,6 +30,7 @@ import tools.jackson.databind.ObjectMapper;
 class JdbcTranslationRepository implements TranslationRepository {
 
 	private static final int MAX_ATTEMPTS = 1;
+	private static final int TITLE_MAX_ATTEMPTS = 3;
 	private static final String NEWS_TITLE_VERSION = "news-title-v3";
 	private final JdbcClient jdbcClient;
 	private final ObjectMapper objectMapper;
@@ -299,7 +300,7 @@ class JdbcTranslationRepository implements TranslationRepository {
 			.param("now", atUtc(now))
 			.param("workerId", workerId)
 			.param("limit", limit)
-			.param("maxAttempts", MAX_ATTEMPTS)
+			.param("maxAttempts", TITLE_MAX_ATTEMPTS)
 			.param("translationVersion", NEWS_TITLE_VERSION)
 			.query((resultSet, rowNumber) -> new TitleTranslationJob(
 				resultSet.getObject("id", UUID.class),
@@ -494,23 +495,30 @@ class JdbcTranslationRepository implements TranslationRepository {
 	@Override
 	@Transactional
 	public void fail(UUID id, int attempts, String errorCode, Instant now, Duration delay) {
-		String status = attempts >= MAX_ATTEMPTS ? "FAILED" : "PENDING";
+		// 외부 일시 장애만 지연 재시도한다. 잘못된 생성물은 반복 과금하지 않는다.
+		boolean retryable = java.util.Set.of("AI_PROVIDER_TIMEOUT", "AI_PROVIDER_UNAVAILABLE",
+			"AI_PROVIDER_RATE_LIMITED").contains(errorCode);
 		jdbcClient.sql("""
 			WITH failed AS (
-			    UPDATE translation_job
-			    SET status = :status, available_at = :availableAt,
+			    UPDATE translation_job job
+			    SET status = CASE WHEN memory.content_kind = 'NEWS_TITLE' AND :retryable
+			                      AND job.attempts < :maxAttempts THEN 'PENDING' ELSE 'FAILED' END,
+			        available_at = :availableAt,
 			        locked_at = NULL, locked_by = NULL, last_error_code = :errorCode,
 			        updated_at = :now
-			    WHERE translation_memory_id = :id AND status = 'PROCESSING' AND attempts = :attempts
-			    RETURNING translation_memory_id
+			    FROM translation_memory memory
+			    WHERE job.translation_memory_id = :id AND job.status = 'PROCESSING'
+			      AND job.attempts = :attempts AND memory.id = job.translation_memory_id
+			    RETURNING job.translation_memory_id, job.status
 			)
-			UPDATE translation_memory memory SET status = :status, updated_at = :now
+			UPDATE translation_memory memory SET status = failed.status, updated_at = :now
 			FROM failed WHERE memory.id = failed.translation_memory_id AND memory.status = 'PROCESSING'
 			""")
 			.param("id", id)
 			.param("attempts", attempts)
-			.param("status", status)
-			.param("availableAt", atUtc(now.plus(delay)))
+			.param("retryable", retryable)
+			.param("maxAttempts", TITLE_MAX_ATTEMPTS)
+			.param("availableAt", atUtc(now.plus(delay.multipliedBy(Math.max(1, attempts)))))
 			.param("errorCode", abbreviate(errorCode))
 			.param("now", atUtc(now))
 			.update();
@@ -551,7 +559,7 @@ class JdbcTranslationRepository implements TranslationRepository {
 			SET status = recovered.status, updated_at = :now
 			FROM recovered WHERE memory.id = recovered.id
 			""")
-			.param("maxAttempts", MAX_ATTEMPTS)
+			.param("maxAttempts", "NEWS_TITLE".equals(kind) ? TITLE_MAX_ATTEMPTS : MAX_ATTEMPTS)
 			.param("kind", kind)
 			.param("now", atUtc(now))
 			.param("staleBefore", atUtc(staleBefore))
@@ -577,7 +585,7 @@ class JdbcTranslationRepository implements TranslationRepository {
 			FROM exhausted WHERE memory.id = exhausted.id
 			""")
 			.param("kind", kind)
-			.param("maxAttempts", MAX_ATTEMPTS)
+			.param("maxAttempts", "NEWS_TITLE".equals(kind) ? TITLE_MAX_ATTEMPTS : MAX_ATTEMPTS)
 			.param("now", atUtc(now))
 			.update();
 	}

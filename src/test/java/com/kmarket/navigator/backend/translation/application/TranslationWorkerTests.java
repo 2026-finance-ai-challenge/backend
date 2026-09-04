@@ -58,7 +58,9 @@ class TranslationWorkerTests {
 		)).toList();
 		when(repository.claimNewsTitles(eq(5), anyString(), eq(NOW), eq(NOW.minusSeconds(300))))
 			.thenReturn(jobs);
-		when(gateway.translateTitles(jobs)).thenReturn(generated);
+		for (int index = 0; index < jobs.size(); index++) {
+			when(gateway.translateTitles(List.of(jobs.get(index)))).thenReturn(List.of(generated.get(index)));
+		}
 		doThrow(new org.springframework.dao.DataIntegrityViolationException("constraint"))
 			.when(repository).completeNewsTitle(generated.get(1), NOW);
 
@@ -71,7 +73,7 @@ class TranslationWorkerTests {
 			verify(repository, never()).fail(eq(jobs.get(index).id()), eq(1), anyString(), eq(NOW),
 				org.mockito.ArgumentMatchers.any(Duration.class));
 		}
-		verify(gateway, times(1)).translateTitles(jobs);
+		for (var job : jobs) verify(gateway, times(1)).translateTitles(List.of(job));
 	}
 
 	@Test
@@ -173,7 +175,7 @@ class TranslationWorkerTests {
 	}
 
 	@Test
-	void rejectsInvalidTitleBatchWithoutAdditionalProviderCalls() {
+	void isolatesInvalidTitleWithoutDiscardingOrRegeneratingOtherTitles() {
 		TranslationRepository repository = Mockito.mock(TranslationRepository.class);
 		TranslationAiGateway gateway = Mockito.mock(TranslationAiGateway.class);
 		TranslationGenerationGuard guard = Mockito.mock(TranslationGenerationGuard.class);
@@ -193,7 +195,8 @@ class TranslationWorkerTests {
 		);
 		when(repository.claimNewsTitles(eq(5), anyString(), eq(NOW), eq(NOW.minusSeconds(300))))
 			.thenReturn(List.of(valid, invalid));
-		when(gateway.translateTitles(List.of(valid, invalid)))
+		when(gateway.translateTitles(List.of(valid))).thenReturn(List.of(generated));
+		when(gateway.translateTitles(List.of(invalid)))
 			.thenThrow(new TranslationProviderException(
 				TranslationProviderException.Failure.INVALID_OUTPUT
 			));
@@ -202,10 +205,11 @@ class TranslationWorkerTests {
 			Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(15)
 		).processTitleBatch();
 
-		verify(gateway, times(1)).translateTitles(List.of(valid, invalid));
-		verify(repository).fail(
-			eq(valid.id()), eq(1), eq("AI_INVALID_OUTPUT"), eq(NOW), eq(Duration.ZERO)
-		);
+		verify(gateway, times(1)).translateTitles(List.of(valid));
+		verify(gateway, times(1)).translateTitles(List.of(invalid));
+		verify(repository).completeNewsTitle(generated, NOW);
+		verify(repository, never()).fail(eq(valid.id()), eq(1), anyString(), eq(NOW),
+			org.mockito.ArgumentMatchers.any(Duration.class));
 		verify(repository).fail(
 			eq(invalid.id()), eq(1), eq("AI_INVALID_OUTPUT"), eq(NOW), eq(Duration.ZERO)
 		);
