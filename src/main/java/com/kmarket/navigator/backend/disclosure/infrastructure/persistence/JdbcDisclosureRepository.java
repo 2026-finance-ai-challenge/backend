@@ -742,6 +742,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 
 	@Override
 	public List<DisclosureSummary> findAll(DisclosureListQuery query, int fetchSize) {
+		boolean useRecentCandidateScan = supportsRecentCandidateScan(query);
 		StringBuilder sql = new StringBuilder("""
 			SELECT d.receipt_number, i.dart_corp_code, i.name_ko, i.name_en,
 			       s.stock_code, COALESCE(s.market, 'UNKNOWN') AS market,
@@ -773,8 +774,8 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			       d.detected_at, d.correction, d.document_status, d.index_status, d.official_url
 			FROM
 			""");
-		// 전체 목록은 최신순 인덱스를 먼저 읽고, 종목 목록은 종목별 인덱스를 직접 사용한다.
-		if (query.stockCode() == null) {
+		// 무필터·커서 목록은 최근 후보만 읽고, 나머지는 각 필터에 맞는 인덱스를 직접 사용한다.
+		if (useRecentCandidateScan) {
 			sql.append("""
 				(
 				    SELECT disclosure.*
@@ -784,9 +785,29 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 				      AND disclosure.sentiment IS NOT NULL
 				      AND disclosure.importance IS NOT NULL
 				      AND disclosure.market_impact IS NOT NULL
+				""");
+			if (query.cursor() != null) {
+				sql.append("""
+					  AND (
+					      disclosure.filed_date < :cursorDate
+					      OR (
+					          disclosure.filed_date = :cursorDate
+					          AND (
+					              disclosure.detected_at < :cursorDetectedAt
+					              OR (
+					                  disclosure.detected_at = :cursorDetectedAt
+					                  AND disclosure.receipt_number < :cursorReceiptNumber
+					              )
+					          )
+					      )
+					  )
+					""");
+			}
+			sql.append("""
 				    ORDER BY disclosure.filed_date DESC,
 				             disclosure.detected_at DESC,
 				             disclosure.receipt_number DESC
+				    LIMIT :candidateScanSize
 				    OFFSET 0
 				) d
 				""");
@@ -808,6 +829,9 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			""");
 		Map<String, Object> parameters = new LinkedHashMap<>();
 		parameters.put("translationVersion", DisclosureTitlePolicy.TRANSLATION_VERSION);
+		if (useRecentCandidateScan) {
+			parameters.put("candidateScanSize", Math.max(fetchSize * 8, 128));
+		}
 		appendFilters(sql, parameters, query);
 		sql.append(" ORDER BY d.filed_date DESC, d.detected_at DESC, d.receipt_number DESC LIMIT :fetchSize");
 		parameters.put("fetchSize", fetchSize);
@@ -817,6 +841,15 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			statement = statement.param(parameter.getKey(), parameter.getValue());
 		}
 		return statement.query(this::mapSummary).list();
+	}
+
+	private boolean supportsRecentCandidateScan(DisclosureListQuery query) {
+		return query.query() == null
+			&& query.stockCode() == null
+			&& query.from() == null
+			&& query.to() == null
+			&& (query.types() == null || query.types().isEmpty())
+			&& query.correction() == null;
 	}
 
 	@Override
