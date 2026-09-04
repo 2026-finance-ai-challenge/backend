@@ -62,6 +62,31 @@ class AiDisclosureClient implements DisclosureRagGateway {
 		}
 	}
 
+	@Override
+	public List<com.kmarket.navigator.backend.disclosure.domain.FilingEvidence> retrieve(
+		List<String> stockCodes, String question, java.time.LocalDate from, java.time.LocalDate to, boolean financials) {
+		if (properties.serviceToken() == null || properties.serviceToken().isBlank()) throw new BusinessException(ErrorCode.AI_SERVICE_UNAVAILABLE);
+		try {
+			var response = restClient.post().uri("/internal/v1/disclosures/evidence")
+				.header(HttpHeaders.AUTHORIZATION, "Bearer " + properties.serviceToken())
+				.body(new EvidenceRequest(stockCodes, question, from, to, financials)).retrieve().body(EvidenceResponse[].class);
+			if (response == null) throw new BusinessException(ErrorCode.AI_SERVICE_UNAVAILABLE);
+			return java.util.Arrays.stream(response).map(r -> new com.kmarket.navigator.backend.disclosure.domain.FilingEvidence(
+				r.receiptNumber(), r.stockCode(), r.title(), r.filedDate(), r.detectedAt(), r.content(), r.sectionIds(), r.retrievalMethod())).toList();
+		} catch (RestClientException exception) {
+			log.warn("Filing evidence retrieval failed type={}", exception.getClass().getSimpleName());
+			throw new BusinessException(ErrorCode.AI_SERVICE_UNAVAILABLE);
+		}
+	}
+
+	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+	private record EvidenceRequest(List<String> stockCodes, String question, java.time.LocalDate fromDate,
+		java.time.LocalDate toDate, boolean financials) { }
+
+	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+	private record EvidenceResponse(String receiptNumber, String stockCode, String title, java.time.LocalDate filedDate,
+		java.time.Instant detectedAt, String content, List<UUID> sectionIds, String retrievalMethod) { }
+
 	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 	private record Request(String question, SelectedContext selectedContext, String answerLocale) {
 		private static Request from(DisclosureQuestion question) {

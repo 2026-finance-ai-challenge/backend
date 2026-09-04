@@ -41,6 +41,8 @@ import com.kmarket.navigator.backend.stock.domain.OwnershipForecastWindow;
 @Service
 public class MarketService {
 
+	public Map<String, List<String>> stockAliases() { return repository.findStockAliases(); }
+
 	private static final Duration LIVE_QUOTE_MAX_AGE = Duration.ofMinutes(2);
 	private static final Duration FOREIGN_FLOW_MAX_AGE = Duration.ofMinutes(3);
 	private static final ZoneId KOREA_ZONE = ZoneId.of("Asia/Seoul");
