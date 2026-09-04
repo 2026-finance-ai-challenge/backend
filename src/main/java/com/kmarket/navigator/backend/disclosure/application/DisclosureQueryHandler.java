@@ -32,7 +32,7 @@ public class DisclosureQueryHandler {
 		String nextCursor = null;
 		if (hasNext && !items.isEmpty()) {
 			DisclosureSummary last = items.getLast();
-			nextCursor = new DisclosureCursor(last.filedDate(), last.receiptNumber()).encode();
+			nextCursor = new DisclosureCursor(last.filedDate(), last.detectedAt(), last.receiptNumber()).encode();
 		}
 		return new DisclosurePage(items, nextCursor);
 	}

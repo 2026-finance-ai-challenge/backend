@@ -22,6 +22,7 @@ import java.nio.file.Files;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -67,6 +68,7 @@ import com.kmarket.navigator.backend.disclosure.domain.DisclosureCursor;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureAnswer;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureListQuery;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureInsightGeneration;
+import com.kmarket.navigator.backend.disclosure.domain.DisclosureSummary;
 import com.kmarket.navigator.backend.disclosure.domain.DisclosureType;
 import com.kmarket.navigator.backend.disclosure.domain.ListedCommonStock;
 import com.kmarket.navigator.backend.disclosure.domain.Market;
@@ -2517,6 +2519,45 @@ class BackendApplicationTests {
 			.extracting(item -> item.receiptNumber())
 			.containsExactly("20260818800670");
 		assertThat(second.nextCursor()).isNull();
+	}
+
+	@Test
+	void ordersSameDayDisclosuresByDisplayedDetectionTimeBeforeReceiptNumber() {
+		OpenDartFiling earlier = filing("20260904800020");
+		OpenDartFiling later = filing("20260904000054");
+		disclosureRepository.saveFiling(earlier);
+		disclosureRepository.saveFiling(later);
+		activateCommonStocks("005930");
+		publishDisclosureFixture(earlier.receiptNumber());
+		publishDisclosureFixture(later.receiptNumber());
+		jdbcClient.sql("""
+			UPDATE disclosure
+			SET detected_at = :detectedAt
+			WHERE receipt_number = :receiptNumber
+			""")
+			.param("detectedAt", OffsetDateTime.parse("2026-08-18T08:05:00+09:00"))
+			.param("receiptNumber", earlier.receiptNumber())
+			.update();
+		jdbcClient.sql("""
+			UPDATE disclosure
+			SET detected_at = :detectedAt
+			WHERE receipt_number = :receiptNumber
+			""")
+			.param("detectedAt", OffsetDateTime.parse("2026-08-18T10:30:00+09:00"))
+			.param("receiptNumber", later.receiptNumber())
+			.update();
+
+		var page = disclosureQueryHandler.findAll(
+			new DisclosureListQuery("005930", LocalDate.of(2026, 8, 18), LocalDate.of(2026, 8, 18),
+				Set.of(DisclosureType.MATERIAL_EVENT), null, 1)
+		);
+		assertThat(page.items()).extracting(DisclosureSummary::receiptNumber).containsExactly(later.receiptNumber());
+
+		var nextPage = disclosureQueryHandler.findAll(
+			new DisclosureListQuery("005930", LocalDate.of(2026, 8, 18), LocalDate.of(2026, 8, 18),
+				Set.of(DisclosureType.MATERIAL_EVENT), DisclosureCursor.decode(page.nextCursor()), 1)
+		);
+		assertThat(nextPage.items()).extracting(DisclosureSummary::receiptNumber).containsExactly(earlier.receiptNumber());
 	}
 
 	@Test

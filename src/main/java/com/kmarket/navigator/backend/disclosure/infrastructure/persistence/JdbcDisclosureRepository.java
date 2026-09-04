@@ -771,7 +771,7 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 		Map<String, Object> parameters = new LinkedHashMap<>();
 		parameters.put("translationVersion", DisclosureTitlePolicy.TRANSLATION_VERSION);
 		appendFilters(sql, parameters, query);
-		sql.append(" ORDER BY d.filed_date DESC, d.receipt_number DESC LIMIT :fetchSize");
+		sql.append(" ORDER BY d.filed_date DESC, d.detected_at DESC, d.receipt_number DESC LIMIT :fetchSize");
 		parameters.put("fetchSize", fetchSize);
 
 		JdbcClient.StatementSpec statement = jdbcClient.sql(sql.toString());
@@ -1329,10 +1329,17 @@ class JdbcDisclosureRepository implements DisclosureRepository {
 			sql.append("""
 				 AND (
 				     d.filed_date < :cursorDate
-				     OR (d.filed_date = :cursorDate AND d.receipt_number < :cursorReceiptNumber)
+				     OR (
+				         d.filed_date = :cursorDate
+				         AND (
+				             d.detected_at < :cursorDetectedAt
+				             OR (d.detected_at = :cursorDetectedAt AND d.receipt_number < :cursorReceiptNumber)
+				         )
+				     )
 				 )
 				""");
 			parameters.put("cursorDate", query.cursor().filedDate());
+			parameters.put("cursorDetectedAt", query.cursor().detectedAt().atOffset(ZoneOffset.UTC));
 			parameters.put("cursorReceiptNumber", query.cursor().receiptNumber());
 		}
 	}
