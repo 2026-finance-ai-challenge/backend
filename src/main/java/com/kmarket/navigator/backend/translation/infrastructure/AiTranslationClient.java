@@ -29,6 +29,7 @@ import com.kmarket.navigator.backend.translation.domain.GeneratedTitle;
 import com.kmarket.navigator.backend.translation.domain.TitleTranslationJob;
 
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.annotation.JsonNaming;
 import tools.jackson.databind.PropertyNamingStrategies;
 import tools.jackson.databind.node.ObjectNode;
@@ -112,12 +113,20 @@ class AiTranslationClient implements TranslationAiGateway {
 		String sourceHash, String title, List<String> paragraphs, String contentAvailability,
 		String version, Consumer<GeneratedTranslation> progress
 	) {
+		return streamNews(sourceHash, title, paragraphs, contentAvailability, version, null, progress);
+	}
+
+	@Override
+	public GeneratedTranslation streamNews(
+		String sourceHash, String title, List<String> paragraphs, String contentAvailability,
+		String version, JsonNode cachedSummaries, Consumer<GeneratedTranslation> progress
+	) {
 		if (properties.serviceToken() == null || properties.serviceToken().isBlank()) {
 			throw new BusinessException(ErrorCode.AI_SERVICE_UNAVAILABLE);
 		}
 		return restClient.post().uri("/internal/v1/news/narratives/stream")
 			.header(HttpHeaders.AUTHORIZATION, "Bearer " + properties.serviceToken())
-			.body(new NewsRequest(sourceHash, title, paragraphs, contentAvailability, "en", version))
+			.body(new NewsStreamRequest(sourceHash, title, paragraphs, contentAvailability, "en", version, cachedSummaries))
 			.exchange((request, response) -> {
 				if (!response.getStatusCode().is2xxSuccessful()) throw new TranslationProviderException(Failure.UNAVAILABLE);
 				try (var reader = new BufferedReader(new InputStreamReader(response.getBody(), StandardCharsets.UTF_8))) {
@@ -334,6 +343,10 @@ class AiTranslationClient implements TranslationAiGateway {
 		String targetLocale, String translationVersion
 	) {
 	}
+
+	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+	private record NewsStreamRequest(String sourceHash, String title, List<String> paragraphs,
+		String contentAvailability, String targetLocale, String translationVersion, JsonNode cachedSummaries) { }
 
 	@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 	private record NewsResponse(

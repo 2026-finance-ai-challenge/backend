@@ -131,8 +131,8 @@ class JdbcTranslationRepository implements TranslationRepository {
 		if (current.status() == TranslationStatus.FAILED) {
 			boolean coolingDown = jdbcClient.sql("""
 				SELECT EXISTS (SELECT 1 FROM translation_job WHERE translation_memory_id = :id
-				  AND (updated_at > :before OR available_at > :now))
-				""").param("id", current.jobId()).param("before", atUtc(now.minus(Duration.ofMinutes(15))))
+				  AND available_at > :now)
+				""").param("id", current.jobId())
 				.param("now", atUtc(now)).query(Boolean.class).single();
 			if (coolingDown) return current;
 			jdbcClient.sql("""

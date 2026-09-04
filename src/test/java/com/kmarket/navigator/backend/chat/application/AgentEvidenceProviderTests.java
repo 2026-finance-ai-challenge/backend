@@ -36,12 +36,26 @@ class AgentEvidenceProviderTests {
 	private final NewsService news = mock(NewsService.class);
 	private final DisclosureQueryHandler filings = mock(DisclosureQueryHandler.class);
 	private final com.kmarket.navigator.backend.translation.application.NewsSelectionValidator selections = mock(com.kmarket.navigator.backend.translation.application.NewsSelectionValidator.class);
-	private final AgentEvidenceProvider provider = new AgentEvidenceProvider(market, news, new JsonMapper(), filings, selections);
+	private final com.kmarket.navigator.backend.disclosure.application.port.DisclosureRagGateway rag = mock(com.kmarket.navigator.backend.disclosure.application.port.DisclosureRagGateway.class);
+	private final AgentEvidenceProvider provider = new AgentEvidenceProvider(market, news, new JsonMapper(), filings, selections, rag);
 	private final ChatContext context = new ChatContext(ChatContextType.GENERAL, null, null, "Market assistant");
 
 	AgentEvidenceProviderTests() {
 		when(market.searchStocks("", null, 100)).thenReturn(List.of(new StockIdentity(
 			UUID.randomUUID(), "005930", "삼성전자", "Samsung Electronics Co., Ltd.", "KOSPI", "", false)));
+	}
+
+	@Test
+	void retrievesFinancialSourceForMisspelledEnglishQuestion() {
+		String question = "can you tell me about recent samsung electonic's earning?";
+		when(rag.retrieve(List.of("005930"), question, null, null, true)).thenReturn(List.of(
+			new com.kmarket.navigator.backend.disclosure.domain.FilingEvidence("20260814000001", "005930", "반기보고서",
+				LocalDate.of(2026, 8, 14), Instant.parse("2026-08-14T01:00:00Z"), "연결 매출액 100, 영업이익 20 (단위: 백만원)", List.of(), "CURRENT_VECTOR_CHUNKS")));
+		var evidence = provider.evidence(context, question);
+		assertThat(evidence).hasSize(1);
+		assertThat(evidence.getFirst().content()).contains("영업이익", "CURRENT_VECTOR_CHUNKS");
+		assertThat(evidence.getFirst().url()).isEqualTo("/disclosures/20260814000001");
+		verifyNoInteractions(news, filings);
 	}
 
 	@Test
