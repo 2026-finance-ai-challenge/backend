@@ -157,6 +157,7 @@ public class TranslationWorker {
 	}
 
 	private Duration cooldown(RuntimeException exception) {
+		if (exception instanceof IllegalArgumentException) return Duration.ZERO;
 		if (exception instanceof TranslationProviderException providerException) {
 			return switch (providerException.failure()) {
 				case INVALID_OUTPUT, INCOMPLETE -> Duration.ZERO;
@@ -202,7 +203,7 @@ public class TranslationWorker {
 		JsonNode source = objectMapper.readTree(job.canonicalSource());
 		List<String> paragraphs = new ArrayList<>();
 		source.path("paragraphs").forEach(value -> paragraphs.add(value.asString()));
-		if ("news-bilingual-v1".equals(job.translationVersion())) {
+		if (OnDemandTranslationService.NEWS_VERSION.equals(job.translationVersion())) {
 			var cachedSummaries = repository.find(job.kind(), job.sourceHash(), "en", job.translationVersion())
 				.map(view -> view.result()).filter(java.util.Objects::nonNull)
 				.map(result -> result.get("summaries")).orElse(null);
@@ -233,6 +234,7 @@ public class TranslationWorker {
 	}
 
 	private static String errorCode(RuntimeException exception) {
+		if (exception instanceof IllegalArgumentException) return "AI_INVALID_OUTPUT";
 		if (exception instanceof TranslationProviderException providerException) {
 			return providerException.failure().code();
 		}
