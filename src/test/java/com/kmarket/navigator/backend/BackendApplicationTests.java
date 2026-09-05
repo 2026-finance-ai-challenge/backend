@@ -2640,7 +2640,7 @@ class BackendApplicationTests {
 			FROM translation_memory memory
 			JOIN translation_job job ON job.translation_memory_id = memory.id
 			WHERE memory.content_kind = 'NEWS_NARRATIVE'
-			  AND memory.translation_version = 'news-bilingual-v1'
+			  AND memory.translation_version = 'news-bilingual-v2'
 			  AND memory.request_context ->> 'article_id' = :articleId
 			""")
 			.param("articleId", articleId.toString())
@@ -2766,7 +2766,7 @@ class BackendApplicationTests {
 	}
 
 	@Test
-	void storesCompletedNewsExpressionsWithoutLanguageRejectionOrRewriting() throws Exception {
+	void storesCompletedEnglishNewsWithoutRewritingValidPunctuation() throws Exception {
 		UUID articleId = insertReadyNews("Samsung Electronics results", "Revenue rose.",
 			Instant.now().minusSeconds(60), "HIGH");
 		jdbcClient.sql("""
@@ -2774,7 +2774,7 @@ class BackendApplicationTests {
 			impact_summary = NULL, what_summary_ko = NULL, why_summary_ko = NULL, impact_summary_ko = NULL
 			WHERE id = :articleId
 			""").param("articleId", articleId).update();
-		String expression = "Revenue is ₩700; the quoted label is 高.";
+		String expression = "Revenue is KRW 700; the quoted label is Q4.";
 		when(translationAiGateway.streamNews(any(), any(), any(), any(), any(), any(), any()))
 			.thenAnswer(invocation -> {
 				var result = objectMapper.createObjectNode().put("what", expression)
