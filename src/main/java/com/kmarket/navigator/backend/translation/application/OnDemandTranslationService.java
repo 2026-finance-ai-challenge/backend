@@ -19,6 +19,7 @@ import com.kmarket.navigator.backend.news.application.port.NewsRepository;
 import com.kmarket.navigator.backend.news.domain.NewsContentAvailability;
 import com.kmarket.navigator.backend.translation.application.port.TranslationRepository;
 import com.kmarket.navigator.backend.translation.domain.TranslationKind;
+import com.kmarket.navigator.backend.translation.domain.NewsNarrativeStructure;
 import com.kmarket.navigator.backend.translation.domain.TranslationStatus;
 import com.kmarket.navigator.backend.translation.domain.TranslationView;
 
@@ -28,7 +29,7 @@ import tools.jackson.databind.node.ObjectNode;
 @Service
 public class OnDemandTranslationService {
 
-	public static final String NEWS_VERSION = "news-bilingual-v1";
+	public static final String NEWS_VERSION = "news-bilingual-v2";
 	public static final String DISCLOSURE_SECTION_VERSION = "disclosure-section-v4";
 	private final NewsRepository newsRepository;
 	private final DisclosureQueryHandler disclosureQueryHandler;
@@ -77,7 +78,7 @@ public class OnDemandTranslationService {
 		return translationRepository.find(TranslationKind.NEWS_NARRATIVE,
 			source.source().hash(), "en", NEWS_VERSION)
 			.map(view -> newsView(view, locale))
-			.or(() -> legacyNewsCache(source.source().hash(), locale))
+			.or(() -> legacyNewsCache(source.source(), locale))
 			.orElseGet(() -> TranslationView.notRequested(source.source().hash(), locale, NEWS_VERSION));
 	}
 
@@ -95,7 +96,7 @@ public class OnDemandTranslationService {
 		NewsSource source = newsSource(articleId);
 		var existing = translationRepository.find(TranslationKind.NEWS_NARRATIVE, source.source().hash(), "en", NEWS_VERSION);
 		if (existing.isEmpty()) {
-			var legacy = legacyNewsCache(source.source().hash(), locale);
+			var legacy = legacyNewsCache(source.source(), locale);
 			if (legacy.isPresent()) return legacy.get();
 		}
 		ObjectNode context = objectMapper.createObjectNode();
@@ -112,13 +113,32 @@ public class OnDemandTranslationService {
 		return newsView(shared, locale);
 	}
 
-	private java.util.Optional<TranslationView> legacyNewsCache(String hash, String locale) {
-		var english = translationRepository.find(TranslationKind.NEWS_NARRATIVE, hash, "en", "news-narrative-v12");
-		var korean = translationRepository.find(TranslationKind.NEWS_NARRATIVE, hash, "ko", "news-narrative-v12");
+	private java.util.Optional<TranslationView> legacyNewsCache(TranslationCanonicalizer.Source source, String locale) {
+		int paragraphCount = objectMapper.readTree(source.canonical()).path("paragraphs").size();
+		var bilingual = translationRepository.find(
+			TranslationKind.NEWS_NARRATIVE, source.hash(), "en", "news-bilingual-v1"
+		).filter(view -> validEnglishNews(view, paragraphCount));
+		// 언어 무결성이 확인된 기존 양언어 캐시는 재생성하지 않는다.
+		if (bilingual.isPresent()) return bilingual.map(view -> newsView(view, locale));
+		var english = translationRepository.find(TranslationKind.NEWS_NARRATIVE, source.hash(), "en", "news-narrative-v12")
+			.filter(view -> validEnglishNews(view, paragraphCount));
+		var korean = translationRepository.find(TranslationKind.NEWS_NARRATIVE, source.hash(), "ko", "news-narrative-v12");
 		// 같은 원문으로 양언어 생성이 이미 끝났다면 정책 전환만으로 재과금하지 않는다.
-		if (english.isEmpty() || korean.isEmpty() || english.get().status() != TranslationStatus.READY
-			|| korean.get().status() != TranslationStatus.READY) return java.util.Optional.empty();
+		if (english.isEmpty() || korean.isEmpty() || korean.get().status() != TranslationStatus.READY) {
+			return java.util.Optional.empty();
+		}
 		return "ko".equals(locale) ? korean : english;
+	}
+
+	private static boolean validEnglishNews(TranslationView view, int paragraphCount) {
+		if (view.status() != TranslationStatus.READY || view.result() == null) return false;
+		try {
+			NewsNarrativeStructure.requireValid(view.result(), paragraphCount, true);
+			return true;
+		}
+		catch (IllegalArgumentException exception) {
+			return false;
+		}
 	}
 
 	private TranslationView newsView(TranslationView view, String locale) {
