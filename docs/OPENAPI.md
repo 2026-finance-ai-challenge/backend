@@ -9,7 +9,7 @@ Backend의 실행 가능한 API 계약은 Spring MVC 컨트롤러와 DTO에서 O
 - OpenAPI JSON: `https://api.kartkr.cloud/v3/api-docs`
 - OpenAPI YAML: `https://api.kartkr.cloud/v3/api-docs.yaml`
 
-로컬 Frontend는 `http://localhost:5173`에서 운영 Backend를 호출하고, 운영 Frontend는 `https://kartkr.cloud`에서 호출한다. 두 Origin만 운영 CORS 허용 목록에 명시하며, 운영에서는 Frontend 컨테이너를 실행하지 않는다. Swagger의 Server URL은 `/` 상대 경로이므로 현재 접속한 환경으로 요청하며 내부 컨테이너 주소를 노출하지 않는다.
+로컬 Frontend는 `http://127.0.0.1:5173` 또는 `http://localhost:5173`에서 개발 프록시를 사용하고, 운영 Frontend는 `https://kartkr.cloud`와 `https://www.kartkr.cloud`를 사용한다. 이 명시적 Origin만 credential CORS 허용 목록에 등록하며 운영에서는 Frontend 컨테이너를 실행하지 않는다. Swagger의 Server URL은 `/` 상대 경로이므로 현재 접속한 환경으로 요청하며 내부 컨테이너 주소를 노출하지 않는다.
 
 ## 인증
 
