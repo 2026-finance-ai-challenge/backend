@@ -1,6 +1,6 @@
 # 수집 데이터 백업
 
-2026년 8월 24일 기준 지원 종목 공시 원문과 PostgreSQL RAG 데이터의 복원용 백업이다.
+2026년 8월 24일에 생성한 지원 종목 공시 원문과 PostgreSQL RAG 데이터의 복원용 불변 백업이다. 아래 수치는 백업 무결성을 설명하는 생성 시점 스냅샷이며 현재 운영 상태가 아니다.
 
 - `opendart-archives.tar.part-*`: 종목별 OpenDART API ZIP 및 DART 뷰어 대체 ZIP
 - `kmarket.pg_dump.part-*`: PostgreSQL 사용자 정의 형식 백업
